@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	github.com/mdlayher/arp v0.0.0-20220512170110-6706a2966875
-	github.com/otfabric/modbus v0.2.0
+	github.com/otfabric/modbus v0.2.1
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 )

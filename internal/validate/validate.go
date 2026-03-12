@@ -400,9 +400,7 @@ func checkSunSpecBaseConfig(cfg *config.SunSpecBaseConfig) error {
 	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
 		return err
 	}
-	if cfg.Unit < 1 || cfg.Unit > 247 {
-		return fmt.Errorf("unit must be 1-247, got %d", cfg.Unit)
-	}
+	// Unit ID: allow full Modbus range 0-255 (e.g. SunSpec over gateway)
 	rt := strings.ToLower(strings.TrimSpace(cfg.Regtype))
 	if rt != "" && rt != "holding" && rt != "input" {
 		return fmt.Errorf("regtype must be holding or input, got %q", cfg.Regtype)

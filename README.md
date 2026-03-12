@@ -516,7 +516,7 @@ sudo modbusctl discover --subnets 192.168.1.0/24,192.168.2.0/24 --resolve-mac --
 
 #### SunSpec (client sunspec)
 
-Transport-level SunSpec discovery: detect the SunSpec "SunS" marker, enumerate model headers, print the address map, or run a combined probe. Use `--url` (e.g. `tcp://192.168.1.10:502`) or `--ip`/`--port`; `--unit` (1–247); `--regtype` **holding** or **input** (tab-completed). No semantic decoding of points—only marker and model ID/length.
+Transport-level SunSpec discovery: detect the SunSpec "SunS" marker, enumerate model headers, print the address map, or run a combined probe. Use `--url` (e.g. `tcp://192.168.1.10:502`) or `--ip`/`--port`; `--unit` (0–255, full Modbus range); `--regtype` **holding** or **input** (tab-completed). No semantic decoding of points—only marker and model ID/length.
 
 | Command | Description |
 |--------|-------------|

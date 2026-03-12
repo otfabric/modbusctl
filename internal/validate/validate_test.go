@@ -322,15 +322,16 @@ func TestCheckSunSpecDetectConfig(t *testing.T) {
 	bothCfg.URL = "tcp://10.0.0.1:502"
 	assert.Error(t, CheckSunSpecDetectConfig(bothCfg))
 
-	// Invalid unit
-	invalidCfg := validCfg
-	invalidCfg.Unit = 0
-	assert.Error(t, CheckSunSpecDetectConfig(invalidCfg))
-	invalidCfg.Unit = 248
-	assert.Error(t, CheckSunSpecDetectConfig(invalidCfg))
+	// Unit 0 and 255 allowed (full Modbus range 0-255, e.g. SunSpec over gateway)
+	unit0Cfg := validCfg
+	unit0Cfg.Unit = 0
+	assert.NoError(t, CheckSunSpecDetectConfig(unit0Cfg))
+	unit255Cfg := validCfg
+	unit255Cfg.Unit = 255
+	assert.NoError(t, CheckSunSpecDetectConfig(unit255Cfg))
 
 	// Invalid regtype
-	invalidCfg = validCfg
+	invalidCfg := validCfg
 	invalidCfg.Regtype = "foo"
 	assert.Error(t, CheckSunSpecDetectConfig(invalidCfg))
 

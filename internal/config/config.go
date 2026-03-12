@@ -377,7 +377,7 @@ type SunSpecBaseConfig struct {
 	URL     string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); overrides --ip/--port when set" flag:"url"`
 	IP      string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port    uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
-	Unit    uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID (1-247)" flag:"unit"`
+	Unit    uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID (0-255, full Modbus range)" flag:"unit"`
 	Regtype string `env:"MODBUSCTL_REGTYPE" desc:"Register type: holding (FC03) or input (FC04)" flag:"regtype"`
 	Verbose bool   `env:"MODBUSCTL_VERBOSE" desc:"Show probe attempts or extra detail" flag:"verbose"`
 	JSON    bool   `env:"MODBUSCTL_JSON" desc:"Output JSON instead of human-readable table" flag:"json"`
