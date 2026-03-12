@@ -88,4 +88,3 @@ func TestClassifyOutcome(t *testing.T) {
 		t.Errorf("classifyOutcome(unknown err) = %q, want unknown", ot)
 	}
 }
-

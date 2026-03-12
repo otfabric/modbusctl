@@ -112,15 +112,17 @@ func LoadFromEnv(cfg interface{}) {
 }
 
 type DeviceConfig struct {
-	IP   string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP address" flag:"ip"`
-	Port uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port" flag:"port"`
+	URL  string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	IP   string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
+	Port uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	Unit uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID of the Modbus device" flag:"unit"`
 }
 
 // UnitClientConfig is used by commands that support a single unit ID or "all" (1–255).
 type UnitClientConfig struct {
-	IP       string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP address" flag:"ip"`
-	Port     uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port" flag:"port"`
+	URL      string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	IP       string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
+	Port     uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	UnitID   string `env:"MODBUSCTL_UNIT" desc:"Unit ID: single (1), range (1-10), list (1,5,25), mixed (1-10,255), or 'all' (1-255)" flag:"unit"`
 	Timeout  uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds for the request" flag:"timeout"`
 	Parallel uint16 `env:"MODBUSCTL_PARALLEL" desc:"When --unit all, number of concurrent probes (1-64, ignored otherwise)" flag:"parallel"`
@@ -228,8 +230,9 @@ type DiscoverConfig struct {
 
 // FingerprintConfig is used by the fingerprint command (probe supported read FCs per unit via HasUnitReadFunction).
 type FingerprintConfig struct {
-	IP       string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP address" flag:"ip"`
-	Port     uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port" flag:"port"`
+	URL      string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	IP       string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
+	Port     uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	UnitID   string `env:"MODBUSCTL_UNIT" desc:"Unit ID: single, range (1-10), list (1,5,25), mixed (1-10,255), or 'all'" flag:"unit"`
 	Timeout  uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds per probe" flag:"timeout"`
 	Interval uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between probes" flag:"interval"`
@@ -237,8 +240,9 @@ type FingerprintConfig struct {
 
 // DiagnosticConfig is used by the diagnostic command (FC08 Diagnostics).
 type DiagnosticConfig struct {
-	IP          string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP address" flag:"ip"`
-	Port        uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port" flag:"port"`
+	URL         string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	IP          string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
+	Port        uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	UnitID      uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID of the Modbus device" flag:"unit"`
 	Timeout     uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds for the request" flag:"timeout"`
 	SubFunction string `env:"MODBUSCTL_SUB_FUNCTION" desc:"FC08 sub-function name (e.g. returnquerydata, clearcountersanddiagnosticreg)" flag:"sub-function"`
@@ -356,4 +360,130 @@ func RegisterDiagnosticSubFunctionCompletion(cmd *cobra.Command) {
 	_ = cmd.RegisterFlagCompletionFunc("sub-function", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return DiagnosticSubFunctionNames, cobra.ShellCompDirectiveNoFileComp
 	})
+}
+
+// SunSpecRegtypeValues is the list of valid --regtype values for sunspec commands.
+var SunSpecRegtypeValues = []string{"holding", "input"}
+
+// RegisterRegtypeCompletion registers shell completion for the --regtype flag (sunspec commands).
+func RegisterRegtypeCompletion(cmd *cobra.Command) {
+	_ = cmd.RegisterFlagCompletionFunc("regtype", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return SunSpecRegtypeValues, cobra.ShellCompDirectiveNoFileComp
+	})
+}
+
+// SunSpecBaseConfig is shared by all client sunspec commands (URL or IP/Port, unit, regtype, output).
+type SunSpecBaseConfig struct {
+	URL     string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); overrides --ip/--port when set" flag:"url"`
+	IP      string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
+	Port    uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
+	Unit    uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID (1-247)" flag:"unit"`
+	Regtype string `env:"MODBUSCTL_REGTYPE" desc:"Register type: holding (FC03) or input (FC04)" flag:"regtype"`
+	Verbose bool   `env:"MODBUSCTL_VERBOSE" desc:"Show probe attempts or extra detail" flag:"verbose"`
+	JSON    bool   `env:"MODBUSCTL_JSON" desc:"Output JSON instead of human-readable table" flag:"json"`
+}
+
+// SunSpecDetectConfig is used by client sunspec detect.
+type SunSpecDetectConfig struct {
+	SunSpecBaseConfig
+	Bases string `env:"MODBUSCTL_SUNSPEC_BASES" desc:"Comma-separated base addresses to probe (e.g. 0,40000,50000)" flag:"bases"`
+}
+
+// SunSpecModelsConfig is used by client sunspec models.
+type SunSpecModelsConfig struct {
+	SunSpecBaseConfig
+	Base           uint16 `env:"MODBUSCTL_SUNSPEC_BASE" desc:"Known SunSpec base address; skip detection when set" flag:"base"`
+	MaxModels      int    `env:"MODBUSCTL_SUNSPEC_MAX_MODELS" desc:"Maximum model headers to read (0 = 256)" flag:"max-models"`
+	MaxAddressSpan uint16 `env:"MODBUSCTL_SUNSPEC_MAX_SPAN" desc:"Maximum address span from base (0 = no limit)" flag:"max-address-span"`
+}
+
+// SunSpecMapConfig is used by client sunspec map.
+type SunSpecMapConfig struct {
+	SunSpecBaseConfig
+	Base           uint16 `env:"MODBUSCTL_SUNSPEC_BASE" desc:"Known SunSpec base address; skip detection when set" flag:"base"`
+	ShowHeaderRegs bool   `env:"MODBUSCTL_SUNSPEC_SHOW_HEADER" desc:"Show header register ranges" flag:"show-header-regs"`
+	ShowNext       bool   `env:"MODBUSCTL_SUNSPEC_SHOW_NEXT" desc:"Show next-address column" flag:"show-next"`
+	Compact        bool   `env:"MODBUSCTL_SUNSPEC_COMPACT" desc:"Compact one-line per model" flag:"compact"`
+}
+
+// SunSpecProbeConfig is used by client sunspec probe.
+type SunSpecProbeConfig struct {
+	SunSpecBaseConfig
+}
+
+// ModbusURL returns the Modbus URL from either URL or IP:Port. If url is non-empty it is trimmed and returned; otherwise tcp://ip:port is built (port defaults to 502 if 0). Returns empty string when both url and ip are empty.
+func ModbusURL(url, ip string, port uint16) string {
+	if strings.TrimSpace(url) != "" {
+		return strings.TrimSpace(url)
+	}
+	if strings.TrimSpace(ip) == "" {
+		return ""
+	}
+	if port == 0 {
+		port = 502
+	}
+	return fmt.Sprintf("tcp://%s:%d", strings.TrimSpace(ip), port)
+}
+
+// ParseModbusURLHostPort parses a Modbus URL (e.g. tcp://192.168.1.10:502) and returns host and port. Returns empty host and 0 port if parsing fails.
+func ParseModbusURLHostPort(modbusURL string) (host string, port uint16) {
+	s := strings.TrimSpace(modbusURL)
+	if s == "" {
+		return "", 0
+	}
+	// Accept tcp://host:port, tcp+tls://host:port, rtuovertcp://host:port
+	for _, prefix := range []string{"tcp://", "tcp+tls://", "rtuovertcp://"} {
+		if strings.HasPrefix(s, prefix) {
+			rest := s[len(prefix):]
+			if idx := strings.LastIndex(rest, ":"); idx >= 0 && idx < len(rest)-1 {
+				if p, err := strconv.ParseUint(rest[idx+1:], 10, 16); err == nil {
+					return rest[:idx], uint16(p)
+				}
+			}
+			return rest, 502
+		}
+	}
+	return "", 0
+}
+
+// ValidateModbusAddress ensures exactly one of url or ip is set (mutually exclusive). When ip is set it must be non-empty; when url is set it must use a supported scheme (tcp://, tcp+tls://, rtuovertcp://).
+func ValidateModbusAddress(url, ip string) error {
+	urlSet := strings.TrimSpace(url) != ""
+	ipSet := strings.TrimSpace(ip) != ""
+	if urlSet && ipSet {
+		return fmt.Errorf("--url and --ip are mutually exclusive; specify only one")
+	}
+	if !urlSet && !ipSet {
+		return fmt.Errorf("either --url or --ip must be set")
+	}
+	if urlSet {
+		u := strings.TrimSpace(url)
+		if !strings.HasPrefix(u, "tcp://") && !strings.HasPrefix(u, "tcp+tls://") && !strings.HasPrefix(u, "rtuovertcp://") {
+			return fmt.Errorf("URL must use a supported scheme (tcp://, tcp+tls://, rtuovertcp://)")
+		}
+	}
+	return nil
+}
+
+// SunSpecModbusURL returns the Modbus URL for the given base config (uses ModbusURL).
+func SunSpecModbusURL(cfg *SunSpecBaseConfig) string {
+	return ModbusURL(cfg.URL, cfg.IP, cfg.Port)
+}
+
+// ParseSunSpecBases parses a comma-separated list of base addresses (e.g. "0,40000,50000") into []uint16.
+// Returns an error if any token is not a valid uint16.
+func ParseSunSpecBases(bases string) ([]uint16, error) {
+	var out []uint16
+	for _, s := range strings.Split(bases, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		v, err := strconv.ParseUint(s, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("invalid base address %q: %w", s, err)
+		}
+		out = append(out, uint16(v))
+	}
+	return out, nil
 }

@@ -280,3 +280,123 @@ func TestCheckDeviceProfileDecodeConfig(t *testing.T) {
 	invalidCfg.DeviceProfile = ""
 	assert.Error(t, CheckDeviceProfileDecodeConfig(invalidCfg))
 }
+
+func TestValidateModbusAddress(t *testing.T) {
+	// Exactly one of url or ip must be set
+	assert.NoError(t, config.ValidateModbusAddress("tcp://10.0.0.1:502", ""))
+	assert.NoError(t, config.ValidateModbusAddress("", "10.0.0.1"))
+	assert.Error(t, config.ValidateModbusAddress("tcp://10.0.0.1:502", "10.0.0.1")) // both set
+	assert.Error(t, config.ValidateModbusAddress("", ""))                           // neither set
+	// Unsupported scheme
+	assert.Error(t, config.ValidateModbusAddress("http://10.0.0.1:502", ""))
+	// Supported schemes
+	assert.NoError(t, config.ValidateModbusAddress("tcp+tls://10.0.0.1:502", ""))
+	assert.NoError(t, config.ValidateModbusAddress("rtuovertcp://10.0.0.1:502", ""))
+}
+
+func TestModbusURL(t *testing.T) {
+	assert.Equal(t, "tcp://10.0.0.1:502", config.ModbusURL("tcp://10.0.0.1:502", "", 0))
+	assert.Equal(t, "tcp://10.0.0.1:502", config.ModbusURL("", "10.0.0.1", 502))
+	assert.Equal(t, "tcp://10.0.0.1:502", config.ModbusURL("", "10.0.0.1", 0)) // defaults to 502
+	assert.Equal(t, "", config.ModbusURL("", "", 0))
+}
+
+func TestCheckSunSpecDetectConfig(t *testing.T) {
+	validCfg := config.SunSpecDetectConfig{
+		SunSpecBaseConfig: config.SunSpecBaseConfig{
+			IP: "192.168.1.10", Port: 502, Unit: 1, Regtype: "holding",
+		},
+	}
+	assert.NoError(t, CheckSunSpecDetectConfig(validCfg))
+
+	// URL instead of IP
+	urlCfg := config.SunSpecDetectConfig{
+		SunSpecBaseConfig: config.SunSpecBaseConfig{
+			URL: "tcp://192.168.1.10:502", Unit: 1, Regtype: "holding",
+		},
+	}
+	assert.NoError(t, CheckSunSpecDetectConfig(urlCfg))
+
+	// Both URL and IP: error
+	bothCfg := validCfg
+	bothCfg.URL = "tcp://10.0.0.1:502"
+	assert.Error(t, CheckSunSpecDetectConfig(bothCfg))
+
+	// Invalid unit
+	invalidCfg := validCfg
+	invalidCfg.Unit = 0
+	assert.Error(t, CheckSunSpecDetectConfig(invalidCfg))
+	invalidCfg.Unit = 248
+	assert.Error(t, CheckSunSpecDetectConfig(invalidCfg))
+
+	// Invalid regtype
+	invalidCfg = validCfg
+	invalidCfg.Regtype = "foo"
+	assert.Error(t, CheckSunSpecDetectConfig(invalidCfg))
+
+	// Invalid bases
+	invalidCfg = validCfg
+	invalidCfg.Bases = "abc"
+	assert.Error(t, CheckSunSpecDetectConfig(invalidCfg))
+}
+
+func TestCheckSunSpecModelsConfig(t *testing.T) {
+	validCfg := config.SunSpecModelsConfig{
+		SunSpecBaseConfig: config.SunSpecBaseConfig{
+			IP: "192.168.1.10", Port: 502, Unit: 1, Regtype: "holding",
+		},
+	}
+	assert.NoError(t, CheckSunSpecModelsConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.MaxModels = -1
+	assert.Error(t, CheckSunSpecModelsConfig(invalidCfg))
+}
+
+func TestCheckSunSpecMapConfig(t *testing.T) {
+	validCfg := config.SunSpecMapConfig{
+		SunSpecBaseConfig: config.SunSpecBaseConfig{
+			IP: "192.168.1.10", Port: 502, Unit: 1, Regtype: "holding",
+		},
+	}
+	assert.NoError(t, CheckSunSpecMapConfig(validCfg))
+}
+
+func TestCheckSunSpecProbeConfig(t *testing.T) {
+	validCfg := config.SunSpecProbeConfig{
+		SunSpecBaseConfig: config.SunSpecBaseConfig{
+			IP: "192.168.1.10", Port: 502, Unit: 1, Regtype: "input",
+		},
+	}
+	assert.NoError(t, CheckSunSpecProbeConfig(validCfg))
+}
+
+func TestCheckDiagnosticConfig(t *testing.T) {
+	validCfg := config.DiagnosticConfig{
+		IP: "192.168.1.10", Port: 502, UnitID: 1, Timeout: 2000,
+		SubFunction: "returnquerydata",
+	}
+	assert.NoError(t, CheckDiagnosticConfig(validCfg))
+
+	// URL variant
+	urlCfg := config.DiagnosticConfig{
+		URL: "tcp://192.168.1.10:502", UnitID: 1, Timeout: 2000,
+		SubFunction: "returnbusmessagecount",
+	}
+	assert.NoError(t, CheckDiagnosticConfig(urlCfg))
+
+	// Invalid sub-function
+	invalidCfg := validCfg
+	invalidCfg.SubFunction = "bogus"
+	assert.Error(t, CheckDiagnosticConfig(invalidCfg))
+
+	// Invalid hex data
+	invalidCfg = validCfg
+	invalidCfg.Data = "ZZZ"
+	assert.Error(t, CheckDiagnosticConfig(invalidCfg))
+
+	// Timeout 0
+	invalidCfg = validCfg
+	invalidCfg.Timeout = 0
+	assert.Error(t, CheckDiagnosticConfig(invalidCfg))
+}

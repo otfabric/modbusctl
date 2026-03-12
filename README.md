@@ -1,5 +1,11 @@
 # modbusctl
 
+[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
+[![Go Report Card](https://goreportcard.com/badge/github.com/otfabric/modbusctl)](https://goreportcard.com/report/github.com/otfabric/modbusctl)
+[![CI](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/badge/release-v2.1.0-blue.svg)](https://github.com/otfabric/modbusctl/releases)
+
 Modbusctl is a versatile command-line utility designed for efficient communication, scanning, recording, replaying, decoding, and analysis of Modbus TCP devices. It simplifies working with Modbus data through convenient CLI commands, environment variable integration, and flexible output formats (MCAP, JSON, CSV).
 
 ## 📖 Table of Contents
@@ -42,6 +48,8 @@ The following features are available:
 | Strings          | Extract all printable string data from MCAP files for inspection, debugging, or searching for embedded text.              |
 | Frequencies      | Extract potential frequency readings around 50Hz from MCAP files to help finding the correct data ranges                  |
 | Discovery        | Discover Modbus devices within specified subnets.                                                                         |
+| SunSpec          | Transport-level SunSpec discovery: detect marker/base, enumerate model headers, print address map, or combined probe (no semantic decoding). |
+| Completion       | Generate shell completion scripts for bash, zsh, fish, or PowerShell.                                                    |
 
 The following tree view gives the overiew of available commands.
 
@@ -54,7 +62,12 @@ modbusctl
 │   ├── reportserverid   FC17 Report Server ID
 │   ├── read             Read registers (FC01/FC02/FC03/FC04)
 │   ├── scan             Scan for valid register blocks (algo safe|smart|deep|stepped|linear|boundary)
-│   └── record           Record registers over time to MCAP
+│   ├── record           Record registers over time to MCAP
+│   └── sunspec           SunSpec marker detection and model header discovery
+│       ├── detect       Detect SunSpec marker and base address
+│       ├── models       Enumerate SunSpec model headers
+│       ├── map          Print SunSpec address map summary
+│       └── probe        Combined fingerprint + SunSpec detection summary
 ├── server
 │   ├── static           Serve scanned MCAP data (static)
 │   └── replay           Replay recorded MCAP data (dynamic)
@@ -66,6 +79,7 @@ modbusctl
 │   ├── strings          Extract printable strings from MCAP
 │   └── frequencies      Detect ~50 Hz frequency data in MCAP
 ├── discover             Discover Modbus devices on subnets
+├── completion           Generate shell completion script (bash|zsh|fish|powershell)
 └── version              Print version
 ```
 
@@ -129,7 +143,7 @@ More examples and test files can be found in the [results](./results) folder for
 Build from source (requires Go):
 
 ```console
-git clone git@github.com:boeboe/modbusctl.git
+git clone git@github.com:otfabric/modbusctl.git
 cd modbusctl
 make build build-all
 ```
@@ -138,13 +152,15 @@ The binary will be generated as `modbusctl`.
 
 ## 📦 GitHub Releases
 
-Pre-built binaries for various platforms are available for download on the [GitHub Releases page](https://github.com/boeboe/modbusctl/releases). You can download the latest stable version without building from source.
+Pre-built binaries for various platforms are available for download on the [GitHub Releases page](https://github.com/otfabric/modbusctl/releases). You can download the latest stable version without building from source.
 
 ## 🖥️ Usage
 
 ### General CLI Usage
 
 **Global flag:** `--debug` — print debug information (available for all commands; per-command debug behavior is documented where applicable).
+
+**Client address:** All client commands accept either `--url` (e.g. `tcp://192.168.1.10:502`) or `--ip` and optionally `--port`; the two styles are **mutually exclusive** (you must set one and cannot set both).
 
 ```console
 modbusctl [command] [flags]
@@ -156,6 +172,10 @@ modbusctl client reportserverid
 modbusctl client read
 modbusctl client scan
 modbusctl client record
+modbusctl client sunspec detect
+modbusctl client sunspec models
+modbusctl client sunspec map
+modbusctl client sunspec probe
 
 modbusctl server static
 modbusctl server replay
@@ -494,6 +514,50 @@ modbusctl discover --subnets 192.168.1.0/24 --output discovered.json
 sudo modbusctl discover --subnets 192.168.1.0/24,192.168.2.0/24 --resolve-mac --interface eth1 --output discovered.json
 ```
 
+#### SunSpec (client sunspec)
+
+Transport-level SunSpec discovery: detect the SunSpec "SunS" marker, enumerate model headers, print the address map, or run a combined probe. Use `--url` (e.g. `tcp://192.168.1.10:502`) or `--ip`/`--port`; `--unit` (1–247); `--regtype` **holding** or **input** (tab-completed). No semantic decoding of points—only marker and model ID/length.
+
+| Command | Description |
+|--------|-------------|
+| **detect** | Is the unit SunSpec? Shows base address; use `--bases 0,40000,50000` to probe specific bases, `--verbose` for attempt log, `--json` for JSON. |
+| **models** | Enumerate the SunSpec model chain (start/end address, model ID, length, end model). Use `--base` to skip detection when base is known; `--max-models`, `--max-address-span` to limit reads; `--json` for JSON. |
+| **map** | Human-friendly address map (marker regs + model ranges). Options: `--show-header-regs`, `--show-next`, `--compact`, `--json`. |
+| **probe** | One-shot summary: Modbus FC03/FC04/FC43 support plus SunSpec detection (base, model count, end model). Complements `fingerprint` and `identify`. |
+
+```console
+# Detect SunSpec and show base address
+modbusctl client sunspec detect --url tcp://192.168.1.10:502 --unit 1
+modbusctl client sunspec detect --ip 192.168.1.10 --unit 1 --regtype holding --bases 0,40000,50000 --verbose --json
+
+# List model headers (most-used)
+modbusctl client sunspec models --url tcp://192.168.1.10:502 --unit 1
+modbusctl client sunspec models --ip 192.168.1.10 --unit 1 --base 40000 --max-models 64 --json
+
+# Address map view
+modbusctl client sunspec map --url tcp://192.168.1.10:502 --unit 1
+modbusctl client sunspec map --ip 192.168.1.10 --unit 1 --show-header-regs --compact
+
+# Combined fingerprint + SunSpec summary
+modbusctl client sunspec probe --url tcp://192.168.1.10:502 --unit 1
+modbusctl client sunspec probe --ip 192.168.1.10 --unit 1 --json
+```
+
+#### Shell completion (install)
+
+Generate and source the completion script for your shell so subcommands and flags (including enum values like `--regtype`, `--algo`, `--function`) are completed:
+
+```console
+# Bash
+source <(modbusctl completion bash)
+
+# Zsh
+source <(modbusctl completion zsh)
+
+# Fish
+modbusctl completion fish | source
+```
+
 ## 🌍 Environment Variable Configuration
 
 Modbusctl supports environment variables for easy automation. The global flag `--debug` (print debug information) is available on all commands and has no environment variable; use it to enable per-command debug output (e.g. scan: read ranges; read/record: retry wait messages). The environment variables supported (depending on the command) are:
@@ -528,6 +592,14 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_SUBNETS**     | string   | Subnets to scan for Modbus devices (comma-separated)     | `--subnets`     |            |
 | **MODBUSCTL_TIMEOUT**     | uint16   | Timeout in milliseconds for the request(s)               | `--timeout`     | 2000       |
 | **MODBUSCTL_UNIT**        | string   | Unit ID (1-255); for multi-unit commands: single, range (1-10), list (1,5,25), mixed (1-10,255), or `all` | `--unit` | 1       |
+| **MODBUSCTL_URL**         | string   | Modbus URL for client commands (e.g. tcp://192.168.1.10:502); overrides --ip/--port when set (e.g. sunspec) | `--url`  |         |
+| **MODBUSCTL_REGTYPE**     | string   | Register type for sunspec: holding or input | `--regtype` | holding |
+| **MODBUSCTL_SUNSPEC_BASES** | string | Comma-separated base addresses to probe (sunspec detect) | `--bases` | 0,40000,50000,… |
+| **MODBUSCTL_SUNSPEC_BASE** | uint16  | Known SunSpec base address; skip detection when set (sunspec models/map) | `--base` | 0 |
+| **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Maximum model headers to read; 0 = 256 (sunspec models) | `--max-models` | 0 |
+| **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Maximum address span from base; 0 = no limit (sunspec models) | `--max-address-span` | 0 |
+| **MODBUSCTL_VERBOSE**     | bool     | Show probe attempts or extra detail (e.g. sunspec detect) | `--verbose` | false |
+| **MODBUSCTL_JSON**        | bool     | Output JSON instead of human-readable (e.g. sunspec commands) | `--json` | false |
 
 Example usage:
 
@@ -541,7 +613,7 @@ MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ALGO=smart MODBUSCTL_START=0 MODBUSCTL_END=1
 ```console
 modbusctl/
 ├── cmd/
-│   ├── client (Identify, Fingerprint, Diagnostic, ReportServerID, Read, Record, Scan commands)
+│   ├── client (Identify, Fingerprint, Diagnostic, ReportServerID, Read, Record, Scan, SunSpec commands)
 │   ├── discover (Device discovery)
 │   ├── mcap (MCAP file operations: convert, decode, extract, frequencies, info, strings)
 │   └── server (Modbus TCP data replay server)

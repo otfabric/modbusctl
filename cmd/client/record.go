@@ -20,6 +20,9 @@ var recordCmd = &cobra.Command{
   # Record holding registers from a Modbus device at 192.168.1.100 every 5 seconds for 1 minute
   modbusctl client record --ip 192.168.1.100 --input registers.yaml --output data.mcap --interval 5 --duration 60
 
+  # Connect via URL (mutually exclusive with --ip/--port)
+  modbusctl client record --url tcp://192.168.1.100:502 --input registers.yaml --output data.mcap --interval 5 --duration 60
+
   # Record input registers with function code 4, polling every 10 seconds for 2 minutes
   modbusctl client record --ip 192.168.1.100 --function 4 --input register-ranges.json --output data.mcap --interval 10 --duration 120
 
@@ -58,11 +61,6 @@ func init() {
 	config.LoadFromEnv(&recordCfg)
 	config.RegisterFlags(recordCmd, &recordCfg)
 	config.RegisterFunctionCompletion(recordCmd)
-	if recordCfg.IP == "" {
-		if err := recordCmd.MarkFlagRequired("ip"); err != nil {
-			panic(err)
-		}
-	}
 	if recordCfg.InputFile == "" {
 		if err := recordCmd.MarkFlagRequired("input"); err != nil {
 			panic(err)

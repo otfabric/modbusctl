@@ -19,6 +19,9 @@ var fingerprintCmd = &cobra.Command{
   # Fingerprint unit 1 (default)
   modbusctl client fingerprint --ip 192.168.1.10
 
+  # Connect via URL (mutually exclusive with --ip/--port)
+  modbusctl client fingerprint --url tcp://192.168.1.10:502
+
   # Fingerprint with delay between probes
   modbusctl client fingerprint --ip 192.168.1.10 --unit 1 --interval 100
 
@@ -50,9 +53,4 @@ func init() {
 	}
 	config.LoadFromEnv(&fingerprintCfg)
 	config.RegisterFlags(fingerprintCmd, &fingerprintCfg)
-	if fingerprintCfg.IP == "" {
-		if err := fingerprintCmd.MarkFlagRequired("ip"); err != nil {
-			panic(err)
-		}
-	}
 }

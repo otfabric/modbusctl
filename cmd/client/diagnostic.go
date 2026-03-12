@@ -19,6 +19,9 @@ var diagnosticCmd = &cobra.Command{
   # Loopback test (returnquerydata, default)
   modbusctl client diagnostic --ip 192.168.1.10
 
+  # Connect via URL (mutually exclusive with --ip/--port)
+  modbusctl client diagnostic --url tcp://192.168.1.10:502
+
   # Loopback test with custom data
   modbusctl client diagnostic --ip 192.168.1.10 --data A537
 
@@ -60,9 +63,4 @@ func init() {
 	config.LoadFromEnv(&diagnosticCfg)
 	config.RegisterFlags(diagnosticCmd, &diagnosticCfg)
 	config.RegisterDiagnosticSubFunctionCompletion(diagnosticCmd)
-	if diagnosticCfg.IP == "" {
-		if err := diagnosticCmd.MarkFlagRequired("ip"); err != nil {
-			panic(err)
-		}
-	}
 }

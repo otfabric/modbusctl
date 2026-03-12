@@ -19,6 +19,9 @@ var identifyCmd = &cobra.Command{
   # Identify a device (all categories: basic + regular + extended)
   modbusctl client identify --ip 192.168.1.10
 
+  # Connect via URL (mutually exclusive with --ip/--port)
+  modbusctl client identify --url tcp://192.168.1.10:502
+
   # Also retrieve FC17 Report Server ID information
   modbusctl client identify --ip 192.168.1.10 --server-id
 
@@ -60,9 +63,4 @@ func init() {
 	}
 	config.LoadFromEnv(&identifyCfg)
 	config.RegisterFlags(identifyCmd, &identifyCfg)
-	if identifyCfg.IP == "" {
-		if err := identifyCmd.MarkFlagRequired("ip"); err != nil {
-			panic(err)
-		}
-	}
 }

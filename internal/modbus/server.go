@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/otfabric/modbus"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/types"
-	"github.com/otfabric/modbus"
 )
 
 type RegisterStore interface {

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"sort"
 	"strconv"
@@ -16,10 +15,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/otfabric/modbus"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/types"
-	"github.com/otfabric/modbus"
 )
 
 const MaxBlockSize = 125
@@ -33,9 +32,9 @@ var (
 	ErrFC43NotSupported = errors.New("FC43 not supported or invalid response")
 )
 
-func connect(ip string, port uint16, _ uint8) (*modbus.ModbusClient, func(), error) {
+func connect(modbusURL string) (*modbus.ModbusClient, func(), error) {
 	conf := &modbus.ClientConfiguration{
-		URL:     fmt.Sprintf("tcp://%s:%d", ip, port),
+		URL:     modbusURL,
 		Timeout: 10 * time.Second,
 	}
 	client, err := modbus.NewClient(conf)
@@ -52,7 +51,8 @@ func connect(ip string, port uint16, _ uint8) (*modbus.ModbusClient, func(), err
 }
 
 // classifyOutcome returns outcome type and Modbus exception code (0 when not an exception).
-func classifyOutcome(err error, reqTS, resTS int64) (ScanOutcomeType, uint8) {
+// reqTS and resTS are passed through from callers for ScanResult; they are not used for classification.
+func classifyOutcome(err error, _, _ int64) (ScanOutcomeType, uint8) {
 	if err == nil {
 		return ScanOutcomeSuccess, 0
 	}
@@ -124,7 +124,7 @@ func packCoilsToBytes(bools []bool) []byte {
 	return out
 }
 
-func readRegisters(clientPtr **modbus.ModbusClient, fc uint8, start, count uint16, retries uint8, ip string, port uint16, unit uint8, cleanup *func(), delay uint16, debug bool) (data []byte, requestTS int64, responseTS int64, err error) {
+func readRegisters(clientPtr **modbus.ModbusClient, fc uint8, start, count uint16, retries uint8, modbusURL string, unit uint8, cleanup *func(), delay uint16, debug bool) (data []byte, requestTS int64, responseTS int64, err error) {
 	for attempt := 1; attempt <= int(retries); attempt++ {
 		if delay > 0 {
 			if debug {
@@ -155,7 +155,7 @@ func readRegisters(clientPtr **modbus.ModbusClient, fc uint8, start, count uint1
 			}
 			var newClient *modbus.ModbusClient
 			var newCleanup func()
-			newClient, newCleanup, err = connect(ip, port, unit)
+			newClient, newCleanup, err = connect(modbusURL)
 			if err != nil {
 				return nil, 0, 0, fmt.Errorf("reconnect failed: %w", err)
 			}
@@ -170,8 +170,8 @@ func readRegisters(clientPtr **modbus.ModbusClient, fc uint8, start, count uint1
 }
 
 // executeReadTask runs a single read and returns a ScanResult.
-func executeReadTask(clientPtr **modbus.ModbusClient, cfg config.ScanConfig, task ScanTask, cleanup *func()) ScanResult {
-	data, reqTS, resTS, err := readRegisters(clientPtr, cfg.Function, task.Start, task.Count, 1, cfg.IP, cfg.Port, cfg.Unit, cleanup, cfg.Delay, cfg.Debug)
+func executeReadTask(clientPtr **modbus.ModbusClient, cfg config.ScanConfig, task ScanTask, cleanup *func(), modbusURL string) ScanResult {
+	data, reqTS, resTS, err := readRegisters(clientPtr, cfg.Function, task.Start, task.Count, 1, modbusURL, cfg.Unit, cleanup, cfg.Delay, cfg.Debug)
 	outcome, excCode := classifyOutcome(err, reqTS, resTS)
 	rtt := int64(0)
 	if resTS > reqTS {
@@ -192,7 +192,8 @@ func executeReadTask(clientPtr **modbus.ModbusClient, cfg config.ScanConfig, tas
 }
 
 func ReadAndWriteMCAP(cfg config.ReadConfig) error {
-	client, cleanup, err := connect(cfg.IP, cfg.Port, cfg.Unit)
+	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
+	client, cleanup, err := connect(modbusURL)
 	if err != nil {
 		return fmt.Errorf("connection error: %w", err)
 	}
@@ -215,7 +216,7 @@ func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 	defer func() { _ = f.Close() }()
 
 	fmt.Printf("Reading %d registers starting from address %d using function code %d\n", cfg.RegisterCount, cfg.StartAddress, cfg.Function)
-	rawData, requestTimestamp, responseTimestamp, err := readRegisters(&client, cfg.Function, cfg.StartAddress, cfg.RegisterCount, 1, cfg.IP, cfg.Port, cfg.Unit, &cleanup, 0, cfg.Debug)
+	rawData, requestTimestamp, responseTimestamp, err := readRegisters(&client, cfg.Function, cfg.StartAddress, cfg.RegisterCount, 1, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug)
 	if err != nil {
 		return fmt.Errorf("read error: %w", err)
 	}
@@ -244,9 +245,13 @@ func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 		fmt.Printf("ASCII: %s\n", builder.String())
 	}
 
+	headerIP, headerPort := cfg.IP, cfg.Port
+	if strings.TrimSpace(cfg.URL) != "" {
+		headerIP, headerPort = config.ParseModbusURLHostPort(modbusURL)
+	}
 	header := types.CaptureHeader{
-		IP:        cfg.IP,
-		Port:      cfg.Port,
+		IP:        headerIP,
+		Port:      headerPort,
 		Unit:      cfg.Unit,
 		Function:  cfg.Function,
 		StartTime: time.Now().UnixNano(),
@@ -272,7 +277,8 @@ func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 }
 
 func ScanAndWriteMCAP(cfg config.ScanConfig) error {
-	client, cleanup, err := connect(cfg.IP, cfg.Port, cfg.Unit)
+	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
+	client, cleanup, err := connect(modbusURL)
 	if err != nil {
 		return fmt.Errorf("connection error: %w", err)
 	}
@@ -294,9 +300,13 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 	}
 	defer func() { _ = f.Close() }()
 
+	headerIP, headerPort := cfg.IP, cfg.Port
+	if strings.TrimSpace(cfg.URL) != "" {
+		headerIP, headerPort = config.ParseModbusURLHostPort(modbusURL)
+	}
 	header := types.CaptureHeader{
-		IP:        cfg.IP,
-		Port:      cfg.Port,
+		IP:        headerIP,
+		Port:      headerPort,
 		Unit:      cfg.Unit,
 		Function:  cfg.Function,
 		StartTime: time.Now().UnixNano(),
@@ -331,13 +341,13 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 			end := task.Start + task.Count - 1
 			fmt.Printf("DEBUG [exec] next task: start=%d count=%d end=%d\n", task.Start, task.Count, end)
 		}
-		result := executeReadTask(&client, cfg, task, &cleanup)
+		result := executeReadTask(&client, cfg, task, &cleanup, modbusURL)
 		// Milestone B: retry once on timeout/transport if configured
 		if !result.Success && cfg.RetryOnTimeoutTransport > 0 &&
 			(result.OutcomeType == ScanOutcomeTimeout || result.OutcomeType == ScanOutcomeTransport) {
 			stats.TotalRequests++
 			time.Sleep(time.Duration(cfg.Delay) * time.Millisecond)
-			result = executeReadTask(&client, cfg, task, &cleanup)
+			result = executeReadTask(&client, cfg, task, &cleanup, modbusURL)
 		}
 		if cfg.Debug {
 			outcome := "success"
@@ -420,7 +430,8 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 		return fmt.Errorf("failed to decode input blocks: %w", err)
 	}
 
-	client, cleanup, err := connect(cfg.IP, cfg.Port, cfg.Unit)
+	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
+	client, cleanup, err := connect(modbusURL)
 	if err != nil {
 		return fmt.Errorf("connection error: %w", err)
 	}
@@ -442,9 +453,13 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 	}
 	defer func() { _ = f.Close() }()
 
+	headerIP, headerPort := cfg.IP, cfg.Port
+	if strings.TrimSpace(cfg.URL) != "" {
+		headerIP, headerPort = config.ParseModbusURLHostPort(modbusURL)
+	}
 	header := types.CaptureHeader{
-		IP:        cfg.IP,
-		Port:      cfg.Port,
+		IP:        headerIP,
+		Port:      headerPort,
 		Unit:      cfg.Unit,
 		Function:  cfg.Function,
 		StartTime: time.Now().UnixNano(),
@@ -463,7 +478,7 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 		}
 		fmt.Printf("📟 Recording %d started...\n", i)
 		for _, b := range blocks {
-			data, requestTimestamp, responseTimestamp, err := readRegisters(&client, cfg.Function, b.StartAddress, b.RegisterCount, 5, cfg.IP, cfg.Port, cfg.Unit, &cleanup, 0, cfg.Debug)
+			data, requestTimestamp, responseTimestamp, err := readRegisters(&client, cfg.Function, b.StartAddress, b.RegisterCount, 5, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "⚠️ Failed to read block (start: %d, count: %d): %v\n", b.StartAddress, b.RegisterCount, err)
 				continue
@@ -602,11 +617,11 @@ func DeviceIdentification(cfg config.IdentifyConfig) error {
 	if err != nil {
 		return err
 	}
-	address := net.JoinHostPort(cfg.IP, fmt.Sprintf("%d", cfg.Port))
-	fmt.Printf("🔍 Connecting to %s...\n", address)
+	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
+	fmt.Printf("🔍 Connecting to %s...\n", modbusURL)
 
 	conf := &modbus.ClientConfiguration{
-		URL:     "tcp://" + address,
+		URL:     modbusURL,
 		Timeout: time.Duration(cfg.Timeout) * time.Millisecond,
 	}
 
@@ -835,11 +850,11 @@ func FingerprintDeviceProbe(cfg config.FingerprintConfig) error {
 	if err != nil {
 		return err
 	}
-	address := net.JoinHostPort(cfg.IP, fmt.Sprintf("%d", cfg.Port))
-	fmt.Printf("🔍 Fingerprinting device at %s (supported read functions per unit)...\n", address)
+	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
+	fmt.Printf("🔍 Fingerprinting device at %s (supported read functions per unit)...\n", modbusURL)
 
 	conf := &modbus.ClientConfiguration{
-		URL:     "tcp://" + address,
+		URL:     modbusURL,
 		Timeout: time.Duration(cfg.Timeout) * time.Millisecond,
 	}
 	mc, err := modbus.NewClient(conf)
@@ -896,11 +911,11 @@ func RunDiagnostics(cfg config.DiagnosticConfig) error {
 	if err != nil {
 		return err
 	}
-	address := net.JoinHostPort(cfg.IP, fmt.Sprintf("%d", cfg.Port))
-	fmt.Printf("🔍 Sending FC08 Diagnostics to %s (unit %d, sub-function %s / 0x%04X)...\n", address, cfg.UnitID, cfg.SubFunction, subFuncCode)
+	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
+	fmt.Printf("🔍 Sending FC08 Diagnostics to %s (unit %d, sub-function %s / 0x%04X)...\n", modbusURL, cfg.UnitID, cfg.SubFunction, subFuncCode)
 
 	conf := &modbus.ClientConfiguration{
-		URL:     "tcp://" + address,
+		URL:     modbusURL,
 		Timeout: time.Duration(cfg.Timeout) * time.Millisecond,
 	}
 
@@ -944,11 +959,11 @@ func RunReportServerId(cfg config.ReportServerIdConfig) error {
 	if err != nil {
 		return err
 	}
-	address := net.JoinHostPort(cfg.IP, fmt.Sprintf("%d", cfg.Port))
-	fmt.Printf("🔍 Sending FC17 Report Server ID to %s...\n", address)
+	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
+	fmt.Printf("🔍 Sending FC17 Report Server ID to %s...\n", modbusURL)
 
 	conf := &modbus.ClientConfiguration{
-		URL:     "tcp://" + address,
+		URL:     modbusURL,
 		Timeout: time.Duration(cfg.Timeout) * time.Millisecond,
 	}
 

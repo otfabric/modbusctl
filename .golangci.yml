@@ -1,0 +1,10 @@
+# Enable linters that catch unused code and parameters so "make check" is effective.
+# Without this file, golangci-lint uses defaults that do not include unparam.
+version: "2"
+
+linters:
+  enable:
+    - unparam   # report unused function parameters
+  settings:
+    unparam:
+      check-exported: false  # only report unused params in unexported functions (less noisy)

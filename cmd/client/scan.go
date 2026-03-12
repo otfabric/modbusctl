@@ -22,6 +22,9 @@ var scanClientCmd = &cobra.Command{
   # Scan holding registers 0-10 (default algo: safe)
   modbusctl client scan --ip 192.168.1.100 --start 0 --end 10 --output scan.mcap
 
+  # Connect via URL (mutually exclusive with --ip/--port)
+  modbusctl client scan --url tcp://192.168.1.100:502 --start 0 --end 10 --output scan.mcap
+
   # Scan with smart algorithm (interval splitting)
   modbusctl client scan --ip 192.168.1.100 --function 3 --algo smart --start 0 --end 1000 --output scan.mcap
 
@@ -53,15 +56,15 @@ func init() {
 			Port: 502,
 			Unit: 1,
 		},
-		Function:     3,
-		Delay:        0,
-		StartAddress: 1,
-		EndAddress:   65535,
-		OutputFile:   "",
-		Algo:            "safe",
-		Step:            1000,
-		StepHalfOffset:  false,
-		SeedStart:       0,
+		Function:                3,
+		Delay:                   0,
+		StartAddress:            1,
+		EndAddress:              65535,
+		OutputFile:              "",
+		Algo:                    "safe",
+		Step:                    1000,
+		StepHalfOffset:          false,
+		SeedStart:               0,
 		SeedCount:               0,
 		RetryOnTimeoutTransport: 0,
 		Debug:                   false,
@@ -70,9 +73,4 @@ func init() {
 	config.RegisterFlags(scanClientCmd, &scanCfg)
 	config.RegisterScanAlgoCompletion(scanClientCmd)
 	config.RegisterFunctionCompletion(scanClientCmd)
-	if scanCfg.IP == "" {
-		if err := scanClientCmd.MarkFlagRequired("ip"); err != nil {
-			panic(err)
-		}
-	}
 }

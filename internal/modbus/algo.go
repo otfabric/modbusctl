@@ -1320,7 +1320,6 @@ func (s *boundaryStrategy) Done() bool {
 	return s.phase == boundaryDone
 }
 
-
 func printScanWorstCaseHint(cfg config.ScanConfig, algo string) {
 	start := uint32(cfg.StartAddress)
 	end := uint32(cfg.EndAddress)

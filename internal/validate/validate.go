@@ -31,13 +31,18 @@ func CheckIdentifyConfig(cfg config.IdentifyConfig) error {
 	return nil
 }
 
-// validateUnitClientConfig validates IP, Port, and UnitID ("all" or 1-255).
+// validateUnitClientConfig validates URL-or-IP (mutually exclusive), and when IP is set also Port and UnitID ("all" or 1-255).
 func validateUnitClientConfig(cfg config.UnitClientConfig) error {
-	if !isValidIPv4(cfg.IP) {
-		return fmt.Errorf("invalid IP address: %s", cfg.IP)
+	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+		return err
 	}
-	if cfg.Port == 0 {
-		return fmt.Errorf("invalid port: %d", cfg.Port)
+	if strings.TrimSpace(cfg.IP) != "" {
+		if !isValidIPv4(cfg.IP) {
+			return fmt.Errorf("invalid IP address: %s", cfg.IP)
+		}
+		if cfg.Port == 0 {
+			return fmt.Errorf("invalid port: %d", cfg.Port)
+		}
 	}
 	if cfg.UnitID == "" {
 		return fmt.Errorf("unit ID must be 1-255 or \"all\"")
@@ -182,11 +187,16 @@ func CheckInfoConfig(cfg config.InfoConfig) error {
 }
 
 func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
-	if !isValidIPv4(cfg.IP) {
-		return fmt.Errorf("invalid IP address: %s", cfg.IP)
+	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+		return err
 	}
-	if cfg.Port == 0 {
-		return fmt.Errorf("invalid port: %d", cfg.Port)
+	if strings.TrimSpace(cfg.IP) != "" {
+		if !isValidIPv4(cfg.IP) {
+			return fmt.Errorf("invalid IP address: %s", cfg.IP)
+		}
+		if cfg.Port == 0 {
+			return fmt.Errorf("invalid port: %d", cfg.Port)
+		}
 	}
 	if cfg.Timeout == 0 {
 		return fmt.Errorf("timeout must be greater than 0")
@@ -198,11 +208,16 @@ func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
 }
 
 func CheckDiagnosticConfig(cfg config.DiagnosticConfig) error {
-	if !isValidIPv4(cfg.IP) {
-		return fmt.Errorf("invalid IP address: %s", cfg.IP)
+	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+		return err
 	}
-	if cfg.Port == 0 {
-		return fmt.Errorf("invalid port: %d", cfg.Port)
+	if strings.TrimSpace(cfg.IP) != "" {
+		if !isValidIPv4(cfg.IP) {
+			return fmt.Errorf("invalid IP address: %s", cfg.IP)
+		}
+		if cfg.Port == 0 {
+			return fmt.Errorf("invalid port: %d", cfg.Port)
+		}
 	}
 	if cfg.Timeout == 0 {
 		return fmt.Errorf("timeout must be greater than 0")
@@ -295,11 +310,16 @@ func isValidIPv4(ip string) bool {
 }
 
 func validateDeviceConfig(cfg config.DeviceConfig) error {
-	if !isValidIPv4(cfg.IP) {
-		return fmt.Errorf("invalid IP address: %s", cfg.IP)
+	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+		return err
 	}
-	if cfg.Port == 0 {
-		return fmt.Errorf("invalid port: %d", cfg.Port)
+	if strings.TrimSpace(cfg.IP) != "" {
+		if !isValidIPv4(cfg.IP) {
+			return fmt.Errorf("invalid IP address: %s", cfg.IP)
+		}
+		if cfg.Port == 0 {
+			return fmt.Errorf("invalid port: %d", cfg.Port)
+		}
 	}
 	if cfg.Unit > maxModbusUnitID {
 		return fmt.Errorf("invalid Modbus unit ID: %d (must be between 0 and %d)", cfg.Unit, maxModbusUnitID)
@@ -336,6 +356,58 @@ func validateFormatType(format string) error {
 	default:
 		return fmt.Errorf("unsupported format: %s (expected csv or json)", format)
 	}
+}
+
+// CheckSunSpecDetectConfig validates SunSpec detect config (address, unit, regtype, bases).
+func CheckSunSpecDetectConfig(cfg config.SunSpecDetectConfig) error {
+	if err := checkSunSpecBaseConfig(&cfg.SunSpecBaseConfig); err != nil {
+		return err
+	}
+	if cfg.Bases != "" {
+		parsed, err := config.ParseSunSpecBases(cfg.Bases)
+		if err != nil {
+			return err
+		}
+		if len(parsed) == 0 {
+			return fmt.Errorf("at least one base address required when --bases is set")
+		}
+	}
+	return nil
+}
+
+// CheckSunSpecModelsConfig validates SunSpec models config.
+func CheckSunSpecModelsConfig(cfg config.SunSpecModelsConfig) error {
+	if err := checkSunSpecBaseConfig(&cfg.SunSpecBaseConfig); err != nil {
+		return err
+	}
+	if cfg.MaxModels < 0 {
+		return fmt.Errorf("max-models must be >= 0")
+	}
+	return nil
+}
+
+// CheckSunSpecMapConfig validates SunSpec map config.
+func CheckSunSpecMapConfig(cfg config.SunSpecMapConfig) error {
+	return checkSunSpecBaseConfig(&cfg.SunSpecBaseConfig)
+}
+
+// CheckSunSpecProbeConfig validates SunSpec probe config.
+func CheckSunSpecProbeConfig(cfg config.SunSpecProbeConfig) error {
+	return checkSunSpecBaseConfig(&cfg.SunSpecBaseConfig)
+}
+
+func checkSunSpecBaseConfig(cfg *config.SunSpecBaseConfig) error {
+	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+		return err
+	}
+	if cfg.Unit < 1 || cfg.Unit > 247 {
+		return fmt.Errorf("unit must be 1-247, got %d", cfg.Unit)
+	}
+	rt := strings.ToLower(strings.TrimSpace(cfg.Regtype))
+	if rt != "" && rt != "holding" && rt != "input" {
+		return fmt.Errorf("regtype must be holding or input, got %q", cfg.Regtype)
+	}
+	return nil
 }
 
 func validateAddressBlockFile(path string) error {
@@ -440,4 +512,3 @@ func validateFile(path string, mustExist bool) error {
 	}
 	return nil
 }
-

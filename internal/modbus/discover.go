@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/otfabric/modbusctl/internal/config"
-	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/mdlayher/arp"
 	mb "github.com/otfabric/modbus"
+	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/types"
 )
 
 func PerformDiscoveryScan(cfg config.DiscoverConfig) error {
@@ -53,7 +53,8 @@ func PerformDiscoveryScan(cfg config.DiscoverConfig) error {
 			addr := net.JoinHostPort(ip, fmt.Sprintf("%d", cfg.Port))
 			conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
 			if err == nil {
-				client, cleanup, err := connect(ip, cfg.Port, 1)
+				modbusURL := config.ModbusURL("", ip, cfg.Port)
+				client, cleanup, err := connect(modbusURL)
 				if err != nil {
 					_ = conn.Close()
 					return

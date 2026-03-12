@@ -26,6 +26,9 @@ var readCmd = &cobra.Command{
   # Read 10 input registers with function code 4
   modbusctl client read --ip 192.168.1.10 --function 4 --start 40001 --count 10
 
+  # Connect via URL (mutually exclusive with --ip/--port)
+  modbusctl client read --url tcp://192.168.1.10:502 --start 40001
+
   # Use environment variables instead of CLI arguments
   MODBUSCTL_IP=192.168.1.10 MODBUSCTL_START=40001 MODBUSCTL_COUNT=5 modbusctl client read
 `,
@@ -62,9 +65,4 @@ func init() {
 	config.LoadFromEnv(&readCfg)
 	config.RegisterFlags(readCmd, &readCfg)
 	config.RegisterFunctionCompletion(readCmd)
-	if readCfg.IP == "" {
-		if err := readCmd.MarkFlagRequired("ip"); err != nil {
-			panic(err)
-		}
-	}
 }

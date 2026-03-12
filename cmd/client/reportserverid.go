@@ -19,6 +19,9 @@ var reportServerIdCmd = &cobra.Command{
   # Query server ID from unit 1 (default)
   modbusctl client reportserverid --ip 192.168.1.10
 
+  # Connect via URL (mutually exclusive with --ip/--port)
+  modbusctl client reportserverid --url tcp://192.168.1.10:502
+
   # Query a specific unit
   modbusctl client reportserverid --ip 192.168.1.10 --unit 5
 
@@ -54,9 +57,4 @@ func init() {
 	}
 	config.LoadFromEnv(&reportServerIdCfg)
 	config.RegisterFlags(reportServerIdCmd, &reportServerIdCfg)
-	if reportServerIdCfg.IP == "" {
-		if err := reportServerIdCmd.MarkFlagRequired("ip"); err != nil {
-			panic(err)
-		}
-	}
 }

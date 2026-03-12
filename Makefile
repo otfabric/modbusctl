@@ -1,4 +1,4 @@
-.PHONY: help all run lint vet test check build build-all release-all install clean
+.PHONY: help all run test coverage cover lint lint-ci fmt vet build build-all release-all install clean
 
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -6,10 +6,10 @@ help: ## This help
 .DEFAULT_GOAL := help
 
 APP_NAME       = modbusctl
-APP_SRC        = main.go
-ARCHS          = linux/amd64 linux/arm64 linux/arm/v7 darwin/amd64 darwin/arm64
+APP_SRC	= main.go
+ARCHS	  = linux/amd64 linux/arm64 linux/arm/v7 darwin/amd64 darwin/arm64
 VERSION       := $(shell head -1 version.txt)
-LDFLAGS       := -ldflags "-X 'github.com/boeboe/modbusctl/cmd.version=$(VERSION)'"
+LDFLAGS       := -ldflags "-X 'github.com/otfabric/modbusctl/cmd.version=$(VERSION)'"
 RELEASE_DIR   := release
 
 all: test build build-all ## Test and build the application
@@ -18,27 +18,35 @@ run: ## Run the application
 	@echo "Running $(APP_NAME)"
 	@go run $(APP_SRC)
 
-lint: ## Run linter (golangci-lint preferred, fallback golint)
-	@echo "Running linter"
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
-	elif command -v golint >/dev/null 2>&1; then \
-		golint ./...; \
-	else \
-		echo "No Go linter found. Install golangci-lint or golint."; \
-		exit 1; \
-	fi
+check: fmt lint lint-ci vet test ## Run all checks (format, lint, vet, test)
+
+test: ## Run unit tests with race detector
+	@echo "Running unit tests (race detector)"
+	@go test -count=1 -race ./...
+
+coverage: ## Run tests with coverage (writes coverage.out)
+	@echo "Running tests with coverage"
+	@go test -count=1 -race -coverprofile=coverage.out -covermode=atomic ./...
+
+cover: coverage ## Open coverage report in browser (run coverage first)
+	@echo "Opening coverage report in browser"
+	@go tool cover -html=coverage.out
+
+lint: ## Run staticcheck
+	@echo "Running staticcheck"
+	@staticcheck ./...
+
+lint-ci: ## Run golangci-lint; uses .golangci.yml (enables unparam for unused-param checks)
+	@echo "Running golangci-lint"
+	@golangci-lint run ./...
+
+fmt: ## Format Go code with gofmt
+	@echo "Running gofmt"
+	@gofmt -w .
 
 vet: ## Run go vet on project packages
 	@echo "Running go vet"
 	@go vet ./...
-
-test: ## Run all tests on project packages
-	@echo "Running tests"
-	@go clean -testcache
-	@go test ./...
-
-check: lint vet test ## Run lint + vet + test
 
 build: check ## Build the application
 	@echo "Building $(APP_NAME)"
