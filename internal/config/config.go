@@ -173,12 +173,16 @@ type ScanConfig struct {
 	StartAddress            uint16 `env:"MODBUSCTL_START" desc:"Start register address" flag:"start"`
 	EndAddress              uint16 `env:"MODBUSCTL_END" desc:"End register address" flag:"end"`
 	OutputFile              string `env:"MODBUSCTL_OUTPUT" desc:"Output file" flag:"output"`
-	Algo                    string `env:"MODBUSCTL_ALGO" desc:"Scan algorithm: safe, smart, deep, stepped, linear, or boundary" flag:"algo"`
+	Algo                    string `env:"MODBUSCTL_ALGO" desc:"Scan algorithm: safe, smart, deep, stepped, linear, boundary, or sunspec" flag:"algo"`
 	Step                    uint16 `env:"MODBUSCTL_STEP" desc:"Stepped algo: step size (e.g. 100, 1000, 2000)" flag:"step"`
 	StepHalfOffset          bool   `env:"MODBUSCTL_STEP_HALF_OFFSET" desc:"Stepped algo: also probe at step/2 offset" flag:"step-half-offset"`
 	SeedStart               uint16 `env:"MODBUSCTL_SEED_START" desc:"Boundary algo: seed start address (known good read)" flag:"seed-start"`
 	SeedCount               uint16 `env:"MODBUSCTL_SEED_COUNT" desc:"Boundary algo: seed register count (1-125)" flag:"seed-count"`
 	RetryOnTimeoutTransport uint8  `env:"MODBUSCTL_RETRY_TIMEOUT" desc:"Retry once on timeout or transport error (0=no, 1=yes)" flag:"retry-timeout"`
+	SunSpecBase             uint16 `env:"MODBUSCTL_SUNSPEC_BASE" desc:"Sunspec algo: known base address (skip detection)" flag:"sunspec-base"`
+	SunSpecBases            string `env:"MODBUSCTL_SUNSPEC_BASES" desc:"Sunspec algo: comma-separated candidate base addresses" flag:"sunspec-bases"`
+	SunSpecMaxModels        int    `env:"MODBUSCTL_SUNSPEC_MAX_MODELS" desc:"Sunspec algo: max model headers to read (0=256)" flag:"sunspec-max-models"`
+	SunSpecMaxSpan          uint16 `env:"MODBUSCTL_SUNSPEC_MAX_SPAN" desc:"Sunspec algo: max address span from base (0=no limit)" flag:"sunspec-max-span"`
 	Debug                   bool   // set from global --debug (root persistent flag)
 }
 
@@ -312,7 +316,7 @@ type DeviceProfileDecodeConfig struct {
 // Enum values for shell completion (single source of truth; validation should use these too).
 
 // ScanAlgoValues is the list of valid --algo values for the scan command.
-var ScanAlgoValues = []string{"safe", "smart", "deep", "stepped", "linear", "boundary"}
+var ScanAlgoValues = []string{"safe", "smart", "deep", "stepped", "linear", "boundary", "sunspec"}
 
 // ConvertFormatValues is the list of valid --format values for mcap convert.
 var ConvertFormatValues = []string{"csv", "json"}

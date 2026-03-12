@@ -486,7 +486,70 @@ Only **successful** reads are written to the capture file. The strategy decides 
 
 ---
 
-## 8. Summary table
+## 8. Algorithm: sunspec
+
+SunSpec protocol-aware scan. Detects the SunSpec base address, then walks the model chain reading each header (2 registers) followed by the full model body (in chunks of up to 125 registers). Does not use `--start`/`--end`.
+
+### 8.1 Phases
+
+| Phase | Description |
+|-------|-------------|
+| **detectBase** | Probe candidate base addresses for the SunS marker (`0x5375`, `0x6E53`). |
+| **walkModels** | Starting at base+2, read 2 registers for the model header (ID + length), then read the full model body (`length` registers in chunks ≤ 125); advance by 2+length to the next header. |
+| **done** | Terminal: all bases failed, end model reached, read failure, or limit exceeded. |
+
+### 8.2 Init
+
+1. Parse `SunSpecBases` (comma-separated → `[]uint16`). If empty, use the library default: `[0, 40000, 50000, 1, 39999, 40001, 49999, 50001]`.
+2. If `SunSpecBase > 0` (known base): skip detection, set `phase = walkModels`, `currentAddr = base + 2`.
+3. Otherwise: `phase = detectBase`, `baseIndex = 0`.
+4. `maxModels` = `SunSpecMaxModels` (default 256 when 0). `maxSpan` from config (0 = unlimited).
+
+### 8.3 Next
+
+- **detectBase:** if `baseIndex ≥ len(bases)` → done. Else return `{bases[baseIndex], 2}`.
+- **walkModels:** if `readingBody` → return `{bodyAddr, min(125, bodyRemaining)}`. Otherwise: if `modelCount ≥ maxModels` → done. If `maxSpan > 0 && currentAddr − baseAddr > maxSpan` → done. Else return `{currentAddr, 2}` (header read).
+- **done:** return `(_, false)`.
+
+### 8.4 OnResult
+
+- **detectBase:**
+  - If success and data ≥ 4 bytes: decode `r0, r1` as big-endian uint16. If `r0 == 0x5375 && r1 == 0x6E53` → `baseAddr = task.Start`, `currentAddr = base + 2`, `phase = walkModels`. Return.
+  - Otherwise: `baseIndex++`. If `baseIndex ≥ len(bases)` → done.
+- **walkModels (body sub-phase):**
+  - If failure → done.
+  - `bodyAddr += task.Count`, `bodyRemaining -= task.Count`. If `bodyRemaining == 0` → `readingBody = false` (next `Next()` emits the next header read).
+- **walkModels (header):**
+  - If failure or data < 4 bytes → done.
+  - Decode `id, length`. If `id == 0xFFFF && length == 0` → end model, done.
+  - If `length == 0` (non-end) → malformed, done.
+  - If `currentAddr + 2 + length > 65535` → overflow, done.
+  - Otherwise: set `readingBody = true`, `bodyAddr = currentAddr + 2`, `bodyRemaining = length`, `currentAddr += 2 + length`, `modelCount++`.
+
+### 8.5 Done
+
+- Return `phase == done`.
+
+### 8.6 Executor compatibility
+
+The executor works unchanged. Header tasks are `{Start, Count: 2}` (4 bytes); body tasks are `{Start, Count: min(125, remaining)}`. On success the executor records each payload in MCAP — the result is a complete capture of the SunS marker, all model headers, and all model register data. The `--delay` and `--retry-timeout` flags apply between tasks as usual. The scan banner prints `SunSpec discovery with function code N (algo: sunspec)` instead of the generic address range message.
+
+### 8.7 Worst-case
+
+- **B** base probes + **M** × (1 header + ceil(length/125) body chunks), where B = len(bases) and M ≤ maxModels (default 256). For typical SunSpec devices the total is well under 100 reads.
+
+### 8.8 CLI flags
+
+| Flag | Default | Env var | Description |
+|------|---------|---------|-------------|
+| `--sunspec-base` | 0 | `MODBUSCTL_SUNSPEC_BASE` | Known SunSpec base address; skip detection when set. |
+| `--sunspec-bases` | "" | `MODBUSCTL_SUNSPEC_BASES` | Comma-separated candidate base addresses to probe. |
+| `--sunspec-max-models` | 0 (→256) | `MODBUSCTL_SUNSPEC_MAX_MODELS` | Maximum model headers to read. |
+| `--sunspec-max-span` | 0 | `MODBUSCTL_SUNSPEC_MAX_SPAN` | Maximum address span from base (0 = no limit). |
+
+---
+
+## 9. Summary table
 
 | Algo     | Goal                                | Worst-case reads (no hits)    |
 |----------|-------------------------------------|-------------------------------|
@@ -496,12 +559,13 @@ Only **successful** reads are written to the capture file. The strategy decides 
 | stepped  | Step positions × 6 probes           | 6 × len(stepPositions)        |
 | linear   | 125-blocks + binary tail/back       | ceil(rangeLen/125)            |
 | boundary | Expand from seed + binary boundaries| 1 seed + O(expand + log range)|
+| sunspec  | SunSpec marker + model chain (header + body) | B probes + M×(1+ceil(len/125)) |
 
-With `rangeLen = EndAddress − StartAddress + 1`, `initialChunks = ceil(rangeLen/125)`. For **stepped**, worst-case = **6 × len(stepPositions)** (Step ≥ 1; when StepHalfOffset is false, len(stepPositions) = ceil(rangeLen/Step)).
+With `rangeLen = EndAddress − StartAddress + 1`, `initialChunks = ceil(rangeLen/125)`. For **stepped**, worst-case = **6 × len(stepPositions)** (Step ≥ 1; when StepHalfOffset is false, len(stepPositions) = ceil(rangeLen/Step)). For **sunspec**, B = number of candidate base addresses (default 8), M ≤ maxModels (default 256).
 
 ---
 
-## 9. Algorithm selection guidance
+## 10. Algorithm selection guidance
 
 - **safe** — Device is fragile; you need predictable behavior; range is small. Conservative fallback.
 - **smart** — Best default. Unknown device; medium/large range; best balance of completeness and efficiency.
@@ -509,10 +573,11 @@ With `rangeLen = EndAddress − StartAddress + 1`, `initialChunks = ceil(rangeLe
 - **stepped** — Range is huge; cheap first pass; triage many devices. Not a final mapper.
 - **linear** — Suspect long contiguous maps; PLC-style devices; speed over fragmentation tolerance.
 - **boundary** — You have one known-good (start, count); you want the maximal readable interval around it. Use `--seed-start` and `--seed-count`.
+- **sunspec** — SunSpec-compliant device (inverters, meters, energy). Protocol-aware detection + model-chain walk; captures headers to MCAP. No `--start`/`--end` needed.
 
 ---
 
-## 10. Re-implementation checklist
+## 11. Re-implementation checklist
 
 - Implement the **executor** loop and **strategy** interface (Init, Next, OnResult, Done). If StartAddress > EndAddress, strategy is done immediately.
 - **ScanTask**: 1 ≤ Count ≤ 125. **ScanResult**: Success == true iff OutcomeType == success.
@@ -522,5 +587,6 @@ With `rangeLen = EndAddress − StartAddress + 1`, `initialChunks = ceil(rangeLe
 - For **stepped**: if Step == 0, strategy done immediately (no tasks). Step positions (with **StepHalfOffset**: add start+Step/2+k×Step, dedupe, sort); 6 probes per step (pos±1, pos × count 1,2); use **hasHit** (not hitAddr==0); expansion **strictly clamped** to [StartAddress, EndAddress]; only micro-probes may extend ±1 at edges.
 - For **linear**: four-phase state machine (Probe → Backward if late hit, else Forward → Tail → Probe), binary search for backward extent and tail count; **hasGapProbe** + **gapProbeAddr** (not address-as-sentinel); **lastTaskWasGapProbe**: OnResult(Probe) does not update state when true; gap probe is observation-only.
 - For **boundary**: seed validation — full seed inside [StartAddress, EndAddress] (else phase=Done). At left/right expand, **clamp when possible**; if clamping would yield Count 0, emit no task and transition to next phase (set leftLow/leftHigh or rightLow/rightHigh as in 7.2/7.5, then LeftBinary or RightBinary). When entering a binary phase with no search space (leftLow ≥ leftHigh or rightLow > rightHigh), emit no task and transition immediately (RightExpand or Done). Left/right binary invariants and termination as specified.
+- For **sunspec**: two-phase state machine (detectBase → walkModels → done). Parse candidate bases from config or use library defaults. If known base set, skip detection. Detection: emit `{base, 2}`; check marker bytes. Walk: emit `{currentAddr, 2}` for header; parse (id, length); then read body in chunks of min(125, remaining) (`readingBody` sub-phase); advance by 2+length; stop on end model (`0xFFFF`, 0), length 0, overflow, maxModels, maxSpan, read failure, or body read failure. Uses exported library constants (`SunSpecMarkerReg0/1`, `SunSpecEndModelID/Length`, `SunSpecDefaultBaseAddresses`).
 
 All addresses and counts are 16-bit unsigned; clamp to [0, 65535] and to the configured start/end where specified.

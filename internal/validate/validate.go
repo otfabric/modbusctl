@@ -83,9 +83,6 @@ func CheckScanConfig(cfg config.ScanConfig) error {
 	if err := validateFunctionCode(cfg.Function); err != nil {
 		return err
 	}
-	if err := validateAddressRange(cfg.StartAddress, cfg.EndAddress); err != nil {
-		return err
-	}
 	if cfg.Delay > 60000 {
 		return fmt.Errorf("delay must be between 0 and 60000 milliseconds (1 minute)")
 	}
@@ -93,6 +90,16 @@ func CheckScanConfig(cfg config.ScanConfig) error {
 		return fmt.Errorf("algo must be one of %v, got %q", config.ScanAlgoValues, cfg.Algo)
 	}
 	algo := strings.ToLower(strings.TrimSpace(cfg.Algo))
+	if algo == "sunspec" {
+		// SunSpec algo does not use start/end range — skip address validation.
+		if cfg.SunSpecBase > 0 && uint32(cfg.SunSpecBase)+2 > 65535 {
+			return fmt.Errorf("sunspec base %d + 2 would overflow", cfg.SunSpecBase)
+		}
+		return validateFile(cfg.OutputFile, false)
+	}
+	if err := validateAddressRange(cfg.StartAddress, cfg.EndAddress); err != nil {
+		return err
+	}
 	if algo == "stepped" && cfg.Step < 1 {
 		return fmt.Errorf("step must be between 1 and 65535 when using algo stepped, got %d", cfg.Step)
 	}

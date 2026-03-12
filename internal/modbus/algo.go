@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/otfabric/modbus"
 	"github.com/otfabric/modbusctl/internal/config"
 )
 
@@ -91,6 +92,8 @@ func newScanStrategy(cfg config.ScanConfig) (ScanStrategy, error) {
 		return newLinearStrategy(cfg), nil
 	case "boundary":
 		return newBoundaryStrategy(cfg), nil
+	case "sunspec":
+		return newSunSpecStrategy(cfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported algo %q", cfg.Algo)
 	}
@@ -1367,5 +1370,21 @@ func printScanWorstCaseHint(cfg config.ScanConfig, algo string) {
 	case "boundary":
 		// 1 seed + left expand (up to 8) + left binary (log2 range) + right expand (8) + right binary (log2 range)
 		fmt.Printf("Boundary algo: 1 seed + left/right expansion + binary search (depends on range)\n")
+	case "sunspec":
+		bases := len(modbus.SunSpecDefaultBaseAddresses)
+		if cfg.SunSpecBases != "" {
+			parsed, err := config.ParseSunSpecBases(cfg.SunSpecBases)
+			if err == nil {
+				bases = len(parsed)
+			}
+		}
+		if cfg.SunSpecBase > 0 {
+			bases = 0
+		}
+		maxM := cfg.SunSpecMaxModels
+		if maxM <= 0 {
+			maxM = 256
+		}
+		fmt.Printf("SunSpec algo: worst case = %d base probes + up to %d models (header + body reads)\n", bases, maxM)
 	}
 }

@@ -1,4 +1,4 @@
-.PHONY: help all run test coverage cover lint lint-ci fmt vet build build-all release-all install clean
+.PHONY: help all run test coverage cover lint lint-ci fmt vet build build-nocheck build-all release-all install clean
 
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -49,6 +49,10 @@ vet: ## Run go vet on project packages
 	@go vet ./...
 
 build: check ## Build the application
+	@echo "Building $(APP_NAME)"
+	@go build $(LDFLAGS) -o $(APP_NAME) $(APP_SRC)
+
+build-nocheck: fmt lint lint-ci vet ## Build without running tests (e.g. Docker where -race needs CGO)
 	@echo "Building $(APP_NAME)"
 	@go build $(LDFLAGS) -o $(APP_NAME) $(APP_SRC)
 

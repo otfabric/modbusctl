@@ -32,7 +32,7 @@ The following features are available:
 
 | **Feature**      | **Description**                                                                                                           |
 |------------------|---------------------------------------------------------------------------------------------------------------------------|
-| Scan             | Identify available Modbus register blocks with pluggable algorithms: **safe**, **smart**, **deep**, **stepped**, **linear**, **boundary**. See [Scan algorithms](#scan-algorithms-detailed) and [ALGOS.md](ALGOS.md) for details. |
+| Scan             | Identify available Modbus register blocks with pluggable algorithms: **safe**, **smart**, **deep**, **stepped**, **linear**, **boundary**, **sunspec**. See [Scan algorithms](#scan-algorithms-detailed) and [ALGOS.md](ALGOS.md) for details. |
 | Identify         | Read Device Identification (FC43) from a Modbus device.                                                                   |
 | Fingerprint      | Probe supported read functions (FC08/FC43/FC03/FC04/FC01/FC02/FC11/FC18/FC20) per unit via HasUnitReadFunction.          |
 | Diagnostic       | Send FC08 Diagnostics requests (loopback, restart communications, diagnostic counters, etc.).                             |
@@ -61,7 +61,7 @@ modbusctl
 │   ├── diagnostic       FC08 Diagnostics (loopback, counters, restart, …)
 │   ├── reportserverid   FC17 Report Server ID
 │   ├── read             Read registers (FC01/FC02/FC03/FC04)
-│   ├── scan             Scan for valid register blocks (algo safe|smart|deep|stepped|linear|boundary)
+│   ├── scan             Scan for valid register blocks (algo safe|smart|deep|stepped|linear|boundary|sunspec)
 │   ├── record           Record registers over time to MCAP
 │   └── sunspec           SunSpec marker detection and model header discovery
 │       ├── detect       Detect SunSpec marker and base address
@@ -370,8 +370,9 @@ Scan discovers which register ranges are readable and writes successful reads to
 | **stepped** | Quick check at step positions (e.g. 0, 1000, 2000). At each step probes 6 reads (pos−1, pos, pos+1 × count 1 or 2); on any hit expands with 125,64,32,16,8,4 **strictly within** `--start`/`--end`. Use `--step` (default 1000) and optional `--step-half-offset` for step/2 positions. | Fast discovery of hotspots; full range with few reads when no hits. |
 | **linear**  | 125-aligned blocks: probe 125 at a time; on success extend forward, then binary-search for max tail. When a 125 succeeds after a previous 125 failed, binary-search backwards for the real start. Emits a single gap probe between blocks to detect small islands. | Longest continuous blocks with minimal probes; good when registers are mostly contiguous. |
 | **boundary** | Given a known-good read (`--seed-start`, `--seed-count`), expands left/right with exponential then binary search; **clamps** to `--start`/`--end` (no skip). Invalid or out-of-range seed → no tasks. | One known-good range; find maximal readable interval around it. |
+| **sunspec** | SunSpec protocol-aware: probes candidate base addresses for the SunS marker, then walks the model chain — reads each header (2 regs) followed by the full model body (in chunks of ≤125 regs). No `--start`/`--end` needed. Use `--sunspec-base` to skip detection; `--sunspec-bases` for custom candidates; `--sunspec-max-models` / `--sunspec-max-span` for limits. | SunSpec-compliant devices; full model capture to MCAP. |
 
-**Flags:** `--ip` (required), `--start`, `--end`, `--function` (3=holding, 4=input), `--delay` (ms between requests), `--algo` (safe | smart | deep | stepped | linear | boundary), `--step` (stepped algo only, default 1000), `--step-half-offset` (stepped: also probe at step/2), `--retry-timeout` (0 or 1: retry once on timeout/transport error), `--seed-start` and `--seed-count` (boundary algo: known-good read), `--output` (MCAP file). Use global `--debug` to print each read range (start, count, end) before attempting. Default algo is **safe**.
+**Flags:** `--ip` (required), `--start`, `--end`, `--function` (3=holding, 4=input), `--delay` (ms between requests), `--algo` (safe | smart | deep | stepped | linear | boundary | sunspec), `--step` (stepped algo only, default 1000), `--step-half-offset` (stepped: also probe at step/2), `--retry-timeout` (0 or 1: retry once on timeout/transport error), `--seed-start` and `--seed-count` (boundary algo: known-good read), `--sunspec-base` (sunspec: known base, skip detection), `--sunspec-bases` (sunspec: custom candidate bases), `--sunspec-max-models` (sunspec: max headers, 0=256), `--sunspec-max-span` (sunspec: max address span, 0=unlimited), `--output` (MCAP file). Use global `--debug` to print each read range (start, count, end) before attempting. Default algo is **safe**.
 
 ```console
 # Safe (default): conservative, low device load
@@ -401,6 +402,15 @@ modbusctl client scan --ip 192.168.1.10 --algo boundary --seed-start 100 --seed-
 
 # With global --debug: print each read range, result outcome, and strategy internals (phase, state, decisions) for all algos
 modbusctl client scan --ip 192.168.1.10 --algo safe --delay 10 --output scan.mcap --debug
+
+# SunSpec: auto-detect base address and walk model chain
+modbusctl client scan --ip 192.168.1.10 --algo sunspec --output sunspec.mcap
+
+# SunSpec: known base address (skip detection)
+modbusctl client scan --ip 192.168.1.10 --algo sunspec --sunspec-base 40000 --output sunspec.mcap
+
+# SunSpec: custom candidate bases
+modbusctl client scan --ip 192.168.1.10 --algo sunspec --sunspec-bases "0,40000,50000" --output sunspec.mcap
 ```
 
 For every algorithm, a one-line **worst-case hint** is printed at the start (how many reads if there were no hits at all), using your `--start` and `--end` range. At the end of a scan, summary statistics are printed: algorithm, total requests, success/failed counts, **exception/timeout/transport error breakdown** (when non-zero), blocks and registers captured, average response time, duration, and output path. Example:
@@ -433,6 +443,7 @@ When non-zero, the summary also reports **Exception**, **Timeout**, and **Transp
 | **stepped** | Huge range; cheap triage; quick reconnaissance (not a final mapper). |
 | **linear** | Long contiguous maps; PLC-style devices; fast when fragmentation is low. |
 | **boundary** | You have one known-good (start, count); find maximal readable interval around it. |
+| **sunspec** | SunSpec device; protocol-aware base detection + model chain walk to MCAP. |
 
 Failures are classified (success, Modbus exception, timeout, transport error) so strategies can avoid retrying on strong exception evidence (e.g. Illegal Data Address). For a full specification of each algorithm (state, transitions, worst-case counts, and examples suitable for re-implementation), see **[ALGOS.md](ALGOS.md)**. For the optional improvement roadmap (priority queue, stepped offsets, coalesce-smart, etc.), see **[REFACTOR.md](REFACTOR.md)**.
 
@@ -447,6 +458,8 @@ Failures are classified (success, Modbus exception, timeout, transport error) so
 - **linear** — Finds maximum continuous blocks using 125-register reads. It probes 125-aligned blocks; on success extends forward then binary-searches for the maximum tail; when a 125 succeeds after a previous 125 failed it binary-searches backwards for the real start. When there is a gap between the end of one block and the next 125-block, it emits one **(blockEnd, 1) gap probe** to detect small readable islands (result is recorded but does not change probe/forward/backward state). Worst case with no hits: one read per 125-block in range.
 
 - **boundary** — Starts from a known-good read (`--seed-start`, `--seed-count`). Expands left and right with exponential sizes (1, 2, 4, 8, 16, 32, 64, 125), then binary-searches for exact boundaries. **Clamps** to `--start`/`--end` (never skips a size). If the seed does not overlap the configured range or is invalid, the strategy is done immediately and emits no tasks. Use when you have one known-good address and want the maximal readable interval around it.
+
+- **sunspec** — SunSpec protocol-aware scan. **Phase 1** probes candidate base addresses (default: 0, 40000, 50000, …) for the SunS marker (`0x5375`, `0x6E53`). **Phase 2** walks the model chain: reads each header (2 regs for model ID + length), then reads the full model body in chunks of ≤125 registers, until the end model (`0xFFFF`, 0), a read failure, or a configured limit (`--sunspec-max-models`, `--sunspec-max-span`). When `--sunspec-base` is set, detection is skipped. Does not require `--start`/`--end`. Worst case: B base probes + M × (1 + ⌈length/125⌉) reads. Use for SunSpec-compliant inverters, meters, and energy devices.
 
 #### Record registers over time (interval, duration based)
 
@@ -589,6 +602,10 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_RETRY_TIMEOUT**    | uint8  | Retry once on timeout/transport (0=no, 1=yes)           | `--retry-timeout`   | 0    |
 | **MODBUSCTL_SEED_START**  | uint16   | Boundary algo: seed start address (known-good read)       | `--seed-start`  | 0          |
 | **MODBUSCTL_SEED_COUNT**  | uint16   | Boundary algo: seed register count (1–125)                | `--seed-count`  | 0          |
+| **MODBUSCTL_SUNSPEC_BASE** | uint16  | Sunspec algo: known base address (skip detection)         | `--sunspec-base` | 0         |
+| **MODBUSCTL_SUNSPEC_BASES** | string | Sunspec algo: comma-separated candidate base addresses    | `--sunspec-bases` |          |
+| **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Sunspec algo: max model headers to read (0=256)         | `--sunspec-max-models` | 0   |
+| **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Sunspec algo: max address span from base (0=no limit)  | `--sunspec-max-span` | 0     |
 | **MODBUSCTL_SUBNETS**     | string   | Subnets to scan for Modbus devices (comma-separated)     | `--subnets`     |            |
 | **MODBUSCTL_TIMEOUT**     | uint16   | Timeout in milliseconds for the request(s)               | `--timeout`     | 2000       |
 | **MODBUSCTL_UNIT**        | string   | Unit ID (1-255); for multi-unit commands: single, range (1-10), list (1,5,25), mixed (1-10,255), or `all` | `--unit` | 1       |

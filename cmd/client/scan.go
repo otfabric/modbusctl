@@ -67,6 +67,10 @@ func init() {
 		SeedStart:               0,
 		SeedCount:               0,
 		RetryOnTimeoutTransport: 0,
+		SunSpecBase:             0,
+		SunSpecBases:            "",
+		SunSpecMaxModels:        0,
+		SunSpecMaxSpan:          0,
 		Debug:                   false,
 	}
 	config.LoadFromEnv(&scanCfg)

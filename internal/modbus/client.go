@@ -325,7 +325,11 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 	if algo == "" {
 		algo = "safe"
 	}
-	fmt.Printf("Scanning registers from %d to %d with function code %d (algo: %s)\n", cfg.StartAddress, cfg.EndAddress, cfg.Function, algo)
+	if algo == "sunspec" {
+		fmt.Printf("SunSpec discovery with function code %d (algo: sunspec)\n", cfg.Function)
+	} else {
+		fmt.Printf("Scanning registers from %d to %d with function code %d (algo: %s)\n", cfg.StartAddress, cfg.EndAddress, cfg.Function, algo)
+	}
 	printScanWorstCaseHint(cfg, algo)
 
 	var stats ScanStats
