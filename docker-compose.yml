@@ -1,0 +1,324 @@
+# Docker Compose file for PPG Supported Modbus devices
+x-modbusctl-image: &modbusctl-image pratexonexus.pratexo.com/modbusctl:1.1.9
+x-modbusctl-healthcheck: &modbusctl-healthcheck
+  healthcheck:
+    test: ["CMD", "/bin/healthcheck", "-tcp", "127.0.0.1:502"]
+    interval: 10s
+    timeout: 3s
+    retries: 5
+    start_period: 5s
+
+services:
+  abb-b24-static:
+    container_name: abb-b24-static
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_B24.mcap
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=22
+    command: ["static"]
+    ports:
+      - "502:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-b24-dynamic:
+    container_name: abb-b24-dynamic
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_DELAY=0
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_B24.mcap
+      - MODBUSCTL_LOOPS=0
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=22
+    command: ["replay"]
+    ports:
+      - "503:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-e4-2n3200-static:
+    container_name: abb-e4-2n3200-static
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_FUNCTION=4
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_E4.2N3200.mcap
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["static"]
+    ports:
+      - "504:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-e4-2n3200-dynamic:
+    container_name: abb-e4-2n3200-dynamic
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_DELAY=0
+      - MODBUSCTL_FUNCTION=4
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_E4.2N3200.mcap
+      - MODBUSCTL_LOOPS=0
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["replay"]
+    ports:
+      - "505:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-m4m-30-static:
+    container_name: abb-m4m-30-static
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_M4M.30.mcap
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=255
+    command: ["static"]
+    ports:
+      - "506:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-m4m-30-dynamic:
+    container_name: abb-m4m-30-dynamic
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_DELAY=0
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_M4M.30.mcap
+      - MODBUSCTL_LOOPS=0
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=255
+    command: ["replay"]
+    ports:
+      - "507:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-xt2s-static:
+    container_name: abb-xt2s-static
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_FUNCTION=4
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_XT2S.mcap
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["static"]
+    ports:
+      - "508:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-xt2s-dynamic:
+    container_name: abb-xt2s-dynamic
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_DELAY=0
+      - MODBUSCTL_FUNCTION=4
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_XT2S.mcap
+      - MODBUSCTL_LOOPS=0
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["replay"]
+    ports:
+      - "509:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-xt4s-static:
+    container_name: abb-xt4s-static
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_FUNCTION=4
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_XT4S.mcap
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["static"]
+    ports:
+      - "510:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-xt4s-dynamic:
+    container_name: abb-xt4s-dynamic
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_DELAY=0
+      - MODBUSCTL_FUNCTION=4
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_XT4S.mcap
+      - MODBUSCTL_LOOPS=0
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["replay"]
+    ports:
+      - "511:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-xt5s-static:
+    container_name: abb-xt5s-static
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_FUNCTION=4
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_XT5S.mcap
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["static"]
+    ports:
+      - "512:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-xt5s-dynamic:
+    container_name: abb-xt5s-dynamic
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_DELAY=0
+      - MODBUSCTL_FUNCTION=4
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_XT5S.mcap
+      - MODBUSCTL_LOOPS=0
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["replay"]
+    ports:
+      - "513:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  schneider-mtz-31-static:
+    container_name: schneider-mtz-31-static
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-SCHNEIDER_MTZ_31.mcap
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=255
+    command: ["static"]
+    ports:
+      - "514:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  schneider-mtz-31-dynamic:
+    container_name: schneider-mtz-31-dynamic
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_DELAY=0
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-SCHNEIDER_MTZ_31.mcap
+      - MODBUSCTL_LOOPS=0
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=255
+    command: ["replay"]
+    ports:
+      - "515:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-a43-static:
+    container_name: abb-a43-static
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_A43.mcap
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=2
+    command: ["static"]
+    ports:
+      - "516:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-a43-dynamic:
+    container_name: abb-a43-dynamic
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_DELAY=0
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_A43.mcap
+      - MODBUSCTL_LOOPS=0
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=2
+    command: ["replay"]
+    ports:
+      - "517:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-ref615-static:
+    container_name: abb-ref615-static
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_REF615.mcap
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["static"]
+    ports:
+      - "518:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+  abb-ref615-dynamic:
+    container_name: abb-ref615-dynamic
+    image: *modbusctl-image
+    environment:
+      - MODBUSCTL_DELAY=0
+      - MODBUSCTL_FUNCTION=3
+      - MODBUSCTL_INPUT=/mcap/recording-ABB_REF615.mcap
+      - MODBUSCTL_LOOPS=0
+      - MODBUSCTL_PORT=502
+      - MODBUSCTL_UNIT=1
+    command: ["replay"]
+    ports:
+      - "519:502"
+    volumes:
+      - modbusctldata:/mcap
+    <<: *modbusctl-healthcheck
+    restart: always
+
+volumes:
+  modbusctldata:
+    driver: local
+    driver_opts:
+      type: none
+      device: /home/ptx/mcap
+      o: bind

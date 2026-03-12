@@ -1,0 +1,282 @@
+package validate
+
+import (
+	"os"
+	"testing"
+
+	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestCheckIdentifyConfig(t *testing.T) {
+	validCfg := config.IdentifyConfig{
+		UnitClientConfig: config.UnitClientConfig{IP: "192.168.1.1", Port: 502, UnitID: "1", Timeout: 1000, Parallel: 10},
+	}
+	assert.NoError(t, CheckIdentifyConfig(validCfg))
+	validCfg.UnitID = "all"
+	assert.NoError(t, CheckIdentifyConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.IP = "invalid"
+	assert.Error(t, CheckIdentifyConfig(invalidCfg))
+	invalidCfg = validCfg
+	invalidCfg.UnitID = "999"
+	assert.Error(t, CheckIdentifyConfig(invalidCfg))
+	invalidCfg.UnitID = "abc"
+	assert.Error(t, CheckIdentifyConfig(invalidCfg))
+	invalidCfg.Timeout = 0
+	assert.Error(t, CheckIdentifyConfig(invalidCfg))
+}
+
+func TestCheckFingerprintConfig(t *testing.T) {
+	validCfg := config.FingerprintConfig{
+		IP: "10.0.0.1", Port: 502, UnitID: "1", Timeout: 2000, Interval: 0,
+	}
+	assert.NoError(t, CheckFingerprintConfig(validCfg))
+	validCfg.UnitID = "1-10"
+	assert.NoError(t, CheckFingerprintConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.UnitID = ""
+	assert.Error(t, CheckFingerprintConfig(invalidCfg))
+	invalidCfg = validCfg
+	invalidCfg.IP = "invalid"
+	assert.Error(t, CheckFingerprintConfig(invalidCfg))
+}
+
+func TestCheckReadConfig(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "valid_output_*.json")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	validCfg := config.ReadConfig{
+		DeviceConfig:  config.DeviceConfig{IP: "192.168.1.1", Port: 502, Unit: 1},
+		Function:      3,
+		StartAddress:  0,
+		RegisterCount: 10,
+		OutputFile:    tmpFile.Name(),
+	}
+	assert.NoError(t, CheckReadConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.IP = "invalid"
+	assert.Error(t, CheckReadConfig(invalidCfg))
+
+	invalidCfg = validCfg
+	invalidCfg.Function = 99
+	assert.Error(t, CheckReadConfig(invalidCfg))
+
+	invalidCfg = validCfg
+	invalidCfg.RegisterCount = 0
+	assert.Error(t, CheckReadConfig(invalidCfg))
+
+	invalidCfg = validCfg
+	invalidCfg.StartAddress = 65534
+	invalidCfg.RegisterCount = 2
+	assert.Error(t, CheckReadConfig(invalidCfg))
+}
+
+func TestCheckScanConfig(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "scan_output_*.json")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	validCfg := config.ScanConfig{
+		DeviceConfig: config.DeviceConfig{IP: "10.0.0.1", Port: 502, Unit: 2},
+		Function:     3,
+		StartAddress: 0,
+		EndAddress:   100,
+		Delay:        500,
+		OutputFile:   tmpFile.Name(),
+	}
+	assert.NoError(t, CheckScanConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.EndAddress = 0
+	assert.Error(t, CheckScanConfig(invalidCfg))
+
+	invalidCfg = validCfg
+	invalidCfg.Delay = 60001
+	assert.Error(t, CheckScanConfig(invalidCfg))
+
+	// Algo: valid values (empty defaults to safe in executor; safe/smart/deep accepted)
+	assert.NoError(t, CheckScanConfig(validCfg)) // Algo empty
+	validSafe := validCfg
+	validSafe.Algo = "safe"
+	assert.NoError(t, CheckScanConfig(validSafe))
+	validSmart := validCfg
+	validSmart.Algo = "smart"
+	assert.NoError(t, CheckScanConfig(validSmart))
+	validDeep := validCfg
+	validDeep.Algo = "deep"
+	assert.NoError(t, CheckScanConfig(validDeep))
+
+	validStepped := validCfg
+	validStepped.Algo = "stepped"
+	validStepped.Step = 1000
+	assert.NoError(t, CheckScanConfig(validStepped))
+	validLinear := validCfg
+	validLinear.Algo = "linear"
+	assert.NoError(t, CheckScanConfig(validLinear))
+
+	validBoundary := validCfg
+	validBoundary.Algo = "boundary"
+	validBoundary.SeedStart = 50
+	validBoundary.SeedCount = 10
+	assert.NoError(t, CheckScanConfig(validBoundary))
+
+	// Boundary: requires seed-count 1..125
+	invalidCfg = validCfg
+	invalidCfg.Algo = "boundary"
+	invalidCfg.SeedCount = 0
+	assert.Error(t, CheckScanConfig(invalidCfg))
+	invalidCfg.SeedCount = 126
+	assert.Error(t, CheckScanConfig(invalidCfg))
+
+	// Boundary: full seed must lie inside [StartAddress, EndAddress]
+	invalidCfg = validCfg
+	invalidCfg.Algo = "boundary"
+	invalidCfg.SeedStart = 0
+	invalidCfg.SeedCount = 10
+	invalidCfg.StartAddress = 5 // seed start 0 < 5
+	assert.Error(t, CheckScanConfig(invalidCfg))
+	invalidCfg = validCfg
+	invalidCfg.Algo = "boundary"
+	invalidCfg.SeedStart = 95
+	invalidCfg.SeedCount = 10 // seed end 104 > EndAddress 100
+	assert.Error(t, CheckScanConfig(invalidCfg))
+
+	// Algo: invalid value
+	invalidCfg = validCfg
+	invalidCfg.Algo = "invalid"
+	assert.Error(t, CheckScanConfig(invalidCfg))
+
+	// Stepped: step must be 1..65535
+	invalidCfg = validCfg
+	invalidCfg.Algo = "stepped"
+	invalidCfg.Step = 0
+	assert.Error(t, CheckScanConfig(invalidCfg))
+}
+
+func TestCheckRecordConfig(t *testing.T) {
+	inputTmp, err := os.CreateTemp("", "input_*.json")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(inputTmp.Name()) }()
+
+	_, err = inputTmp.WriteString(`[{"start_address":0,"register_count":10}]`)
+	assert.NoError(t, err)
+	err = inputTmp.Close()
+	assert.NoError(t, err)
+
+	outputTmp, err := os.CreateTemp("", "record_output_*.json")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(outputTmp.Name()) }()
+
+	validCfg := config.RecordConfig{
+		DeviceConfig: config.DeviceConfig{IP: "127.0.0.1", Port: 502, Unit: 1},
+		Function:     4,
+		Interval:     5,
+		Duration:     30,
+		InputFile:    inputTmp.Name(),
+		OutputFile:   outputTmp.Name(),
+	}
+	assert.NoError(t, CheckRecordConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.Duration = 2
+	assert.Error(t, CheckRecordConfig(invalidCfg))
+
+	invalidCfg = validCfg
+	invalidCfg.InputFile = ""
+	assert.Error(t, CheckRecordConfig(invalidCfg))
+}
+
+func TestCheckConvertConfig(t *testing.T) {
+	inputTmp, err := os.CreateTemp("", "input_*.mcap")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(inputTmp.Name()) }()
+
+	outputTmp, err := os.CreateTemp("", "output_*.json")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(outputTmp.Name()) }()
+
+	validCfg := config.ConvertConfig{
+		InputFile:  inputTmp.Name(),
+		FormatType: "json",
+		OutputFile: outputTmp.Name(),
+	}
+	assert.NoError(t, CheckConvertConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.FormatType = "unsupported"
+	assert.Error(t, CheckConvertConfig(invalidCfg))
+}
+
+func TestCheckExtractConfig(t *testing.T) {
+	inputTmp, err := os.CreateTemp("", "valid_input_*.mcap")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(inputTmp.Name()) }()
+
+	outputTmp, err := os.CreateTemp("", "extracted_output_*.json")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(outputTmp.Name()) }()
+
+	validCfg := config.ExtractConfig{
+		InputFile:  inputTmp.Name(),
+		OutputFile: outputTmp.Name(),
+	}
+	assert.NoError(t, CheckExtractConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.InputFile = ""
+	assert.Error(t, CheckExtractConfig(invalidCfg))
+}
+
+func TestCheckDeviceProfileDecodeConfig(t *testing.T) {
+	inputTmp, err := os.CreateTemp("", "valid_input_*.mcap")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(inputTmp.Name()) }()
+
+	profileTmp, err := os.CreateTemp("", "profile_*.json")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(profileTmp.Name()) }()
+
+	_, err = profileTmp.WriteString(`{
+    "protocolData": {
+        "registers": [
+            {
+                "controlledPropertyId": "breaker.contactwear",
+                "valueScaleFactor": 0.001538,
+                "start": 20,
+                "size": 1,
+                "format": ">H"
+            },
+            {
+                "controlledPropertyId": "breaker.totaloperations",
+                "valueScaleFactor": 1,
+                "start": 21,
+                "size": 1,
+                "format": ">H"
+            }
+        ]
+    }
+}`)
+	assert.NoError(t, err)
+	err = profileTmp.Close()
+	assert.NoError(t, err)
+
+	outputTmp, err := os.CreateTemp("", "decoded_output_*.json")
+	assert.NoError(t, err)
+	defer func() { _ = os.Remove(outputTmp.Name()) }()
+
+	validCfg := config.DeviceProfileDecodeConfig{
+		InputFile:     inputTmp.Name(),
+		DeviceProfile: profileTmp.Name(),
+		OutputFile:    outputTmp.Name(),
+	}
+	assert.NoError(t, CheckDeviceProfileDecodeConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.DeviceProfile = ""
+	assert.Error(t, CheckDeviceProfileDecodeConfig(invalidCfg))
+}

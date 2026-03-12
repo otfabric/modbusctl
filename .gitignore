@@ -1,0 +1,17 @@
+# Build output
+/bootstrap/bootstrap
+/release/*
+/docker.tar
+/modbusctl
+
+# Scan results
+*.csv
+*.json
+*.log
+*.mcap
+
+# Editor settings
+.vscode/
+
+# MacOS
+.DS_Store
