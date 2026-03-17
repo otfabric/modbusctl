@@ -7,7 +7,7 @@ help: ## This help
 
 APP_NAME       = modbusctl
 APP_SRC	= main.go
-ARCHS	  = linux/amd64 linux/arm64 linux/arm/v7 darwin/amd64 darwin/arm64
+ARCHS	  = linux/amd64 linux/arm64 linux/arm/v7 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 VERSION       := $(shell head -1 version.txt)
 LDFLAGS       := -ldflags "-X 'github.com/otfabric/modbusctl/cmd.version=$(VERSION)'"
 RELEASE_DIR   := release
@@ -63,7 +63,10 @@ build-all: ## Build the application for all architectures
 		rest=$${arch#*/}; \
 		cpu=$${rest%%/*}; \
 		variant=$${rest#*/}; \
-		if [ "$$cpu" = "arm" ] && [ "$$variant" = "v7" ]; then \
+		if [ "$$os" = "windows" ]; then \
+			echo "Building $(APP_NAME)-$(VERSION)-$$os-$$cpu.exe..."; \
+			GOOS=$$os GOARCH=$$cpu go build $(LDFLAGS) -o $(RELEASE_DIR)/$(APP_NAME)-$(VERSION)-$$os-$$cpu.exe $(APP_SRC); \
+		elif [ "$$cpu" = "arm" ] && [ "$$variant" = "v7" ]; then \
 			echo "Building $(APP_NAME)-$(VERSION)-$$os-armv7..."; \
 			GOOS=$$os GOARCH=$$cpu GOARM=7 go build $(LDFLAGS) -o $(RELEASE_DIR)/$(APP_NAME)-$(VERSION)-$$os-armv7 $(APP_SRC); \
 		else \
@@ -72,20 +75,26 @@ build-all: ## Build the application for all architectures
 		fi \
 	done
 
-release-all: build-all ## Package the build binaries into tar.gz archives for all architectures
+release-all: build-all ## Package the build binaries into tar.gz (Unix) or zip (Windows) for all architectures
 	@mkdir -p $(RELEASE_DIR)
 	@for arch in $(ARCHS); do \
 		os=$${arch%%/*}; \
 		rest=$${arch#*/}; \
 		cpu=$${rest%%/*}; \
 		variant=$${rest#*/}; \
-		if [ "$$cpu" = "arm" ] && [ "$$variant" = "v7" ]; then \
+		if [ "$$os" = "windows" ]; then \
+			bin=$(APP_NAME)-$(VERSION)-$$os-$$cpu.exe; \
+			echo "Packaging $$bin into $(APP_NAME)-$(VERSION)-$$os-$$cpu.zip..."; \
+			cd $(RELEASE_DIR) && zip -q $(APP_NAME)-$(VERSION)-$$os-$$cpu.zip $$bin && cd - > /dev/null; \
+		elif [ "$$cpu" = "arm" ] && [ "$$variant" = "v7" ]; then \
 			bin=$(APP_NAME)-$(VERSION)-$$os-armv7; \
+			echo "Packaging $$bin.tar.gz..."; \
+			tar czf $(RELEASE_DIR)/$$bin.tar.gz -C $(RELEASE_DIR) $$bin; \
 		else \
 			bin=$(APP_NAME)-$(VERSION)-$$os-$$cpu; \
+			echo "Packaging $$bin.tar.gz..."; \
+			tar czf $(RELEASE_DIR)/$$bin.tar.gz -C $(RELEASE_DIR) $$bin; \
 		fi; \
-		echo "Packaging $$bin.tar.gz..."; \
-		tar czf $(RELEASE_DIR)/$$bin.tar.gz -C $(RELEASE_DIR) $$bin; \
 	done
 
 install: build ## Install the built binary to /usr/local/bin

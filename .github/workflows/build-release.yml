@@ -109,7 +109,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: modbusctl-${{ needs.bump-version.outputs.version }}
-          path: release/*.tar.gz
+          path: |
+            release/*.tar.gz
+            release/*.zip
 
   create-github-release:
     name: Create GitHub Release
@@ -134,7 +136,9 @@ jobs:
           name: v${{ needs.bump-version.outputs.version }}
           draft: false
           prerelease: false
-          files: artifacts/*.tar.gz
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
 
   build-docker-amd64:
     name: Build Docker Image (AMD64)
