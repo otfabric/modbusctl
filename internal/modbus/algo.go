@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/otfabric/modbus"
+	"github.com/otfabric/go-modbus/sunspec"
 	"github.com/otfabric/modbusctl/internal/config"
 )
 
@@ -1371,7 +1371,7 @@ func printScanWorstCaseHint(cfg config.ScanConfig, algo string) {
 		// 1 seed + left expand (up to 8) + left binary (log2 range) + right expand (8) + right binary (log2 range)
 		fmt.Printf("Boundary algo: 1 seed + left/right expansion + binary search (depends on range)\n")
 	case "sunspec":
-		bases := len(modbus.SunSpecDefaultBaseAddresses)
+		bases := len(sunspec.DefaultBaseAddresses)
 		if cfg.SunSpecBases != "" {
 			parsed, err := config.ParseSunSpecBases(cfg.SunSpecBases)
 			if err == nil {

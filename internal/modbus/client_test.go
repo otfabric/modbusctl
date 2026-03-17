@@ -4,6 +4,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/otfabric/go-modbus"
 )
 
 func TestObjectDescription(t *testing.T) {
@@ -26,7 +28,7 @@ func TestObjectDescription(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := objectDescription(tt.id); got != tt.want {
+		if got := objectDescription(modbus.DeviceIDObjectID(tt.id)); got != tt.want {
 			t.Errorf("objectDescription(%#02x) = %q, want %q", tt.id, got, tt.want)
 		}
 	}

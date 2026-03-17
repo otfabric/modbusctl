@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/otfabric/modbus"
+	"github.com/otfabric/go-modbus/sunspec"
 	"github.com/otfabric/modbusctl/internal/config"
 )
 
@@ -47,11 +47,11 @@ func drainBody(t *testing.T, s *sunspecStrategy, length uint16) {
 }
 
 func sunSpecMarkerData() []byte {
-	return makeSunSpecData(modbus.SunSpecMarkerReg0, modbus.SunSpecMarkerReg1)
+	return makeSunSpecData(sunspec.MarkerReg0, sunspec.MarkerReg1)
 }
 
 func sunSpecEndModelData() []byte {
-	return makeSunSpecData(modbus.SunSpecEndModelID, modbus.SunSpecEndModelLength)
+	return makeSunSpecData(sunspec.EndModelID, sunspec.EndModelLength)
 }
 
 func TestSunSpec_NonSunSpecDevice(t *testing.T) {
@@ -69,8 +69,8 @@ func TestSunSpec_NonSunSpecDevice(t *testing.T) {
 		count++
 		s.OnResult(task, ScanResult{Success: false})
 	}
-	if count != len(modbus.SunSpecDefaultBaseAddresses) {
-		t.Errorf("expected %d base probes, got %d", len(modbus.SunSpecDefaultBaseAddresses), count)
+	if count != len(sunspec.DefaultBaseAddresses) {
+		t.Errorf("expected %d base probes, got %d", len(sunspec.DefaultBaseAddresses), count)
 	}
 	if !s.Done() {
 		t.Error("expected Done() after all bases failed")
@@ -88,8 +88,8 @@ func TestSunSpec_DetectAt40000(t *testing.T) {
 	if !ok {
 		t.Fatal("expected first probe task")
 	}
-	if task.Start != modbus.SunSpecDefaultBaseAddresses[0] {
-		t.Errorf("first probe start = %d, want %d", task.Start, modbus.SunSpecDefaultBaseAddresses[0])
+	if task.Start != sunspec.DefaultBaseAddresses[0] {
+		t.Errorf("first probe start = %d, want %d", task.Start, sunspec.DefaultBaseAddresses[0])
 	}
 	s.OnResult(task, ScanResult{Success: false})
 

@@ -7,9 +7,17 @@ import (
 	"os"
 	"time"
 
-	"github.com/otfabric/modbus"
+	"github.com/otfabric/go-modbus"
+	"github.com/otfabric/go-modbus/sunspec"
 	"github.com/otfabric/modbusctl/internal/config"
 )
+
+// readerAdapter adapts *modbus.Client to sunspec.Reader (sunspec expects ReadRawBytes; Client has ReadRegisterBytes).
+type readerAdapter struct{ client *modbus.Client }
+
+func (r *readerAdapter) ReadRawBytes(ctx context.Context, unitID uint8, addr uint16, byteCount uint16, regType sunspec.RegType) ([]byte, error) {
+	return r.client.ReadRegisterBytes(ctx, unitID, addr, byteCount, regType)
+}
 
 func regTypeFromString(s string) modbus.RegType {
 	switch s {
@@ -20,14 +28,16 @@ func regTypeFromString(s string) modbus.RegType {
 	}
 }
 
-func sunSpecOptionsFromBase(cfg *config.SunSpecBaseConfig, bases []uint16) *modbus.SunSpecOptions {
-	opts := &modbus.SunSpecOptions{
+func sunSpecOptionsFromBase(cfg *config.SunSpecBaseConfig, bases []uint16) *sunspec.Options {
+	opts := &sunspec.Options{
 		UnitID:    cfg.Unit,
 		RegType:   regTypeFromString(cfg.Regtype),
 		MaxModels: 256,
 	}
 	if len(bases) > 0 {
 		opts.BaseAddresses = bases
+	} else {
+		opts.BaseAddresses = sunspec.DefaultBaseAddresses
 	}
 	return opts
 }
@@ -50,11 +60,11 @@ func SunSpecDetect(cfg config.SunSpecDetectConfig) error {
 
 	opts := sunSpecOptionsFromBase(&cfg.SunSpecBaseConfig, bases)
 
-	conf := &modbus.ClientConfiguration{
-		URL:     modbusURL,
-		Timeout: 10 * time.Second,
+	conf := buildClientConfig(modbusURL, 10*time.Second, false)
+	if err := modbus.ValidateConfig(conf); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
-	mc, err := modbus.NewClient(conf)
+	mc, err := modbus.New(conf)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
@@ -66,7 +76,7 @@ func SunSpecDetect(cfg config.SunSpecDetectConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	res, err := mc.DetectSunSpec(ctx, opts)
+	res, err := sunspec.Detect(ctx, &readerAdapter{mc}, opts)
 	if err != nil {
 		return fmt.Errorf("detect failed: %w", err)
 	}
@@ -95,7 +105,7 @@ func SunSpecDetect(cfg config.SunSpecDetectConfig) error {
 		for i, a := range res.Attempts {
 			result := "matched SunS"
 			if !a.Matched {
-				if a.Error != nil {
+				if a.ErrorString != "" {
 					result = a.ErrorString
 				} else if len(a.Registers) != 2 {
 					result = "no marker"
@@ -123,11 +133,11 @@ func SunSpecModels(cfg config.SunSpecModelsConfig) error {
 	}
 	opts.MaxAddressSpan = cfg.MaxAddressSpan
 
-	conf := &modbus.ClientConfiguration{
-		URL:     modbusURL,
-		Timeout: 10 * time.Second,
+	conf := buildClientConfig(modbusURL, 10*time.Second, false)
+	if err := modbus.ValidateConfig(conf); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
-	mc, err := modbus.NewClient(conf)
+	mc, err := modbus.New(conf)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
@@ -140,31 +150,31 @@ func SunSpecModels(cfg config.SunSpecModelsConfig) error {
 	defer cancel()
 
 	var baseAddr uint16
-	var models []modbus.SunSpecModelHeader
+	var models []sunspec.ModelHeader
 
 	if cfg.Base != 0 {
 		baseAddr = cfg.Base
-		models, err = mc.ReadSunSpecModelHeaders(ctx, opts, baseAddr)
+		models, err = sunspec.ReadModelHeaders(ctx, &readerAdapter{mc}, opts, baseAddr)
 		if err != nil {
 			return fmt.Errorf("read model headers: %w", err)
 		}
 	} else {
-		det, err := mc.DetectSunSpec(ctx, opts)
+		det, err := sunspec.Detect(ctx, &readerAdapter{mc}, opts)
 		if err != nil {
 			return fmt.Errorf("detect: %w", err)
 		}
 		if !det.Detected {
 			if cfg.JSON {
 				return json.NewEncoder(os.Stdout).Encode(struct {
-					Base   uint16                      `json:"base"`
-					Models []modbus.SunSpecModelHeader `json:"models"`
+					Base   uint16                `json:"base"`
+					Models []sunspec.ModelHeader `json:"models"`
 				}{Models: nil})
 			}
 			fmt.Println("SunSpec not detected.")
 			return nil
 		}
 		baseAddr = det.BaseAddress
-		models, err = mc.ReadSunSpecModelHeaders(ctx, opts, baseAddr)
+		models, err = sunspec.ReadModelHeaders(ctx, &readerAdapter{mc}, opts, baseAddr)
 		if err != nil {
 			return fmt.Errorf("read model headers: %w", err)
 		}
@@ -172,8 +182,8 @@ func SunSpecModels(cfg config.SunSpecModelsConfig) error {
 
 	if cfg.JSON {
 		out := struct {
-			Base   uint16                      `json:"base"`
-			Models []modbus.SunSpecModelHeader `json:"models"`
+			Base   uint16                `json:"base"`
+			Models []sunspec.ModelHeader `json:"models"`
 		}{Base: baseAddr, Models: models}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -201,11 +211,11 @@ func SunSpecMap(cfg config.SunSpecMapConfig) error {
 
 	opts := sunSpecOptionsFromBase(&cfg.SunSpecBaseConfig, nil)
 
-	conf := &modbus.ClientConfiguration{
-		URL:     modbusURL,
-		Timeout: 10 * time.Second,
+	conf := buildClientConfig(modbusURL, 10*time.Second, false)
+	if err := modbus.ValidateConfig(conf); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
-	mc, err := modbus.NewClient(conf)
+	mc, err := modbus.New(conf)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
@@ -218,16 +228,16 @@ func SunSpecMap(cfg config.SunSpecMapConfig) error {
 	defer cancel()
 
 	var baseAddr uint16
-	var models []modbus.SunSpecModelHeader
+	var models []sunspec.ModelHeader
 
 	if cfg.Base != 0 {
 		baseAddr = cfg.Base
-		models, err = mc.ReadSunSpecModelHeaders(ctx, opts, baseAddr)
+		models, err = sunspec.ReadModelHeaders(ctx, &readerAdapter{mc}, opts, baseAddr)
 		if err != nil {
 			return fmt.Errorf("read model headers: %w", err)
 		}
 	} else {
-		det, err := mc.DetectSunSpec(ctx, opts)
+		det, err := sunspec.Detect(ctx, &readerAdapter{mc}, opts)
 		if err != nil {
 			return fmt.Errorf("detect: %w", err)
 		}
@@ -236,7 +246,7 @@ func SunSpecMap(cfg config.SunSpecMapConfig) error {
 			return nil
 		}
 		baseAddr = det.BaseAddress
-		models, err = mc.ReadSunSpecModelHeaders(ctx, opts, baseAddr)
+		models, err = sunspec.ReadModelHeaders(ctx, &readerAdapter{mc}, opts, baseAddr)
 		if err != nil {
 			return fmt.Errorf("read model headers: %w", err)
 		}
@@ -244,9 +254,9 @@ func SunSpecMap(cfg config.SunSpecMapConfig) error {
 
 	if cfg.JSON {
 		out := struct {
-			Base       uint16                      `json:"base"`
-			MarkerRegs string                      `json:"marker_regs"`
-			Models     []modbus.SunSpecModelHeader `json:"models"`
+			Base       uint16                `json:"base"`
+			MarkerRegs string                `json:"marker_regs"`
+			Models     []sunspec.ModelHeader `json:"models"`
 		}{
 			Base:       baseAddr,
 			MarkerRegs: fmt.Sprintf("%d-%d", baseAddr, baseAddr+1),
@@ -288,11 +298,11 @@ func SunSpecProbe(cfg config.SunSpecProbeConfig) error {
 		return fmt.Errorf("either --url or --ip must be set")
 	}
 
-	conf := &modbus.ClientConfiguration{
-		URL:     modbusURL,
-		Timeout: 10 * time.Second,
+	conf := buildClientConfig(modbusURL, 10*time.Second, false)
+	if err := modbus.ValidateConfig(conf); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
-	mc, err := modbus.NewClient(conf)
+	mc, err := modbus.New(conf)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
@@ -318,22 +328,22 @@ func SunSpecProbe(cfg config.SunSpecProbeConfig) error {
 		{"FC04", modbus.FCReadInputRegisters},
 		{"FC43", modbus.FCEncapsulatedInterface},
 	} {
-		ok, _ := mc.HasUnitReadFunction(ctx, cfg.Unit, pair.fc)
+		ok, _ := mc.SupportsFunction(ctx, cfg.Unit, pair.fc)
 		fcResults = append(fcResults, fcStatus{label: pair.label, ok: ok})
 	}
 
 	// SunSpec detection
 	opts := sunSpecOptionsFromBase(&cfg.SunSpecBaseConfig, nil)
-	det, err := mc.DetectSunSpec(ctx, opts)
+	det, err := sunspec.Detect(ctx, &readerAdapter{mc}, opts)
 	if err != nil {
-		det = &modbus.SunSpecDetectionResult{UnitID: cfg.Unit}
+		det = &sunspec.DetectionResult{UnitID: cfg.Unit}
 	}
 
-	var models []modbus.SunSpecModelHeader
+	var models []sunspec.ModelHeader
 	modelsFound := 0
 	endModel := false
 	if det != nil && det.Detected {
-		models, err = mc.ReadSunSpecModelHeaders(ctx, opts, det.BaseAddress)
+		models, err = sunspec.ReadModelHeaders(ctx, &readerAdapter{mc}, opts, det.BaseAddress)
 		if err == nil {
 			modelsFound = len(models)
 			for _, m := range models {

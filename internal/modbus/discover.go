@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/mdlayher/arp"
-	mb "github.com/otfabric/modbus"
+	mb "github.com/otfabric/go-modbus"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/types"
 )
@@ -54,13 +54,13 @@ func PerformDiscoveryScan(cfg config.DiscoverConfig) error {
 			conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
 			if err == nil {
 				modbusURL := config.ModbusURL("", ip, cfg.Port)
-				client, cleanup, err := connect(modbusURL)
+				client, cleanup, err := connect(modbusURL, false)
 				if err != nil {
 					_ = conn.Close()
 					return
 				}
 				defer cleanup()
-				_, err = client.ReadRawBytes(context.Background(), 1, 0, 2, mb.HoldingRegister)
+				_, err = client.ReadRegisterBytes(context.Background(), 1, 0, 2, mb.HoldingRegister)
 				if !isValidModbusResponse(err) {
 					_ = conn.Close()
 					return

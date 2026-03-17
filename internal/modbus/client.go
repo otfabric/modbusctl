@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/otfabric/modbus"
+	"github.com/otfabric/go-modbus"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/types"
@@ -26,18 +26,36 @@ const MaxBlockSize = 125
 // Modbus standard valid slave/unit IDs when using "all".
 const modbusUnitIDMin, modbusUnitIDMax = 1, 255
 
+// defaultDialTimeout is used when building client config (TCP dial; TLS would use a longer value).
+const defaultDialTimeout = 5 * time.Second
+
 var (
 	ErrTCPConnection    = errors.New("TCP connection error")
 	ErrFC43Timeout      = errors.New("FC43 timeout")
 	ErrFC43NotSupported = errors.New("FC43 not supported or invalid response")
 )
 
-func connect(modbusURL string) (*modbus.ModbusClient, func(), error) {
-	conf := &modbus.ClientConfiguration{
-		URL:     modbusURL,
-		Timeout: 10 * time.Second,
+// buildClientConfig returns a modbus.Config with URL, Timeout, DialTimeout, and Logger set.
+// When debug is true, Logger is modbus.NewStdLogger(nil); otherwise modbus.NopLogger().
+func buildClientConfig(modbusURL string, timeout time.Duration, debug bool) modbus.Config {
+	logger := modbus.NopLogger()
+	if debug {
+		logger = modbus.NewStdLogger(nil)
 	}
-	client, err := modbus.NewClient(conf)
+	return modbus.Config{
+		URL:         modbusURL,
+		Timeout:     timeout,
+		DialTimeout: defaultDialTimeout,
+		Logger:      logger,
+	}
+}
+
+// validateAndConnect validates conf, creates a client, and opens the connection.
+func validateAndConnect(conf modbus.Config) (*modbus.Client, func(), error) {
+	if err := modbus.ValidateConfig(conf); err != nil {
+		return nil, nil, err
+	}
+	client, err := modbus.New(conf)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -48,6 +66,11 @@ func connect(modbusURL string) (*modbus.ModbusClient, func(), error) {
 		_ = client.Close()
 	}
 	return client, cleanup, nil
+}
+
+func connect(modbusURL string, debug bool) (*modbus.Client, func(), error) {
+	conf := buildClientConfig(modbusURL, 10*time.Second, debug)
+	return validateAndConnect(conf)
 }
 
 // classifyOutcome returns outcome type and Modbus exception code (0 when not an exception).
@@ -63,8 +86,8 @@ func classifyOutcome(err error, _, _ int64) (ScanOutcomeType, uint8) {
 	if errors.Is(err, modbus.ErrRequestTimedOut) {
 		return ScanOutcomeTimeout, 0
 	}
-	if errors.Is(err, modbus.ErrProtocolError) || errors.Is(err, modbus.ErrBadUnitId) ||
-		errors.Is(err, modbus.ErrBadTransactionId) || errors.Is(err, modbus.ErrUnknownProtocolId) {
+	if errors.Is(err, modbus.ErrProtocolError) || errors.Is(err, modbus.ErrBadUnitID) ||
+		errors.Is(err, modbus.ErrBadTransactionID) || errors.Is(err, modbus.ErrUnknownProtocolID) {
 		return ScanOutcomeProtocol, 0
 	}
 	if shouldReconnect(err) {
@@ -88,7 +111,7 @@ func shouldReconnect(err error) bool {
 	return strings.Contains(msg, "broken pipe") || strings.Contains(msg, "EOF") || strings.Contains(msg, "connection reset")
 }
 
-func performRead(client *modbus.ModbusClient, unitID uint8, fc uint8, start, count uint16) ([]byte, error) {
+func performRead(client *modbus.Client, unitID uint8, fc uint8, start, count uint16) ([]byte, error) {
 	ctx := context.Background()
 	switch fc {
 	case 1:
@@ -104,9 +127,9 @@ func performRead(client *modbus.ModbusClient, unitID uint8, fc uint8, start, cou
 		}
 		return packCoilsToBytes(bools), nil
 	case 3:
-		return client.ReadRawBytes(ctx, unitID, start, count*2, modbus.HoldingRegister)
+		return client.ReadRegisterBytes(ctx, unitID, start, count*2, modbus.HoldingRegister)
 	case 4:
-		return client.ReadRawBytes(ctx, unitID, start, count*2, modbus.InputRegister)
+		return client.ReadRegisterBytes(ctx, unitID, start, count*2, modbus.InputRegister)
 	default:
 		return nil, fmt.Errorf("unsupported function code: %d", fc)
 	}
@@ -124,7 +147,7 @@ func packCoilsToBytes(bools []bool) []byte {
 	return out
 }
 
-func readRegisters(clientPtr **modbus.ModbusClient, fc uint8, start, count uint16, retries uint8, modbusURL string, unit uint8, cleanup *func(), delay uint16, debug bool) (data []byte, requestTS int64, responseTS int64, err error) {
+func readRegisters(clientPtr **modbus.Client, fc uint8, start, count uint16, retries uint8, modbusURL string, unit uint8, cleanup *func(), delay uint16, debug bool) (data []byte, requestTS int64, responseTS int64, err error) {
 	for attempt := 1; attempt <= int(retries); attempt++ {
 		if delay > 0 {
 			if debug {
@@ -153,9 +176,9 @@ func readRegisters(clientPtr **modbus.ModbusClient, fc uint8, start, count uint1
 			if cleanup != nil {
 				(*cleanup)()
 			}
-			var newClient *modbus.ModbusClient
+			var newClient *modbus.Client
 			var newCleanup func()
-			newClient, newCleanup, err = connect(modbusURL)
+			newClient, newCleanup, err = connect(modbusURL, debug)
 			if err != nil {
 				return nil, 0, 0, fmt.Errorf("reconnect failed: %w", err)
 			}
@@ -170,7 +193,7 @@ func readRegisters(clientPtr **modbus.ModbusClient, fc uint8, start, count uint1
 }
 
 // executeReadTask runs a single read and returns a ScanResult.
-func executeReadTask(clientPtr **modbus.ModbusClient, cfg config.ScanConfig, task ScanTask, cleanup *func(), modbusURL string) ScanResult {
+func executeReadTask(clientPtr **modbus.Client, cfg config.ScanConfig, task ScanTask, cleanup *func(), modbusURL string) ScanResult {
 	data, reqTS, resTS, err := readRegisters(clientPtr, cfg.Function, task.Start, task.Count, 1, modbusURL, cfg.Unit, cleanup, cfg.Delay, cfg.Debug)
 	outcome, excCode := classifyOutcome(err, reqTS, resTS)
 	rtt := int64(0)
@@ -193,7 +216,7 @@ func executeReadTask(clientPtr **modbus.ModbusClient, cfg config.ScanConfig, tas
 
 func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connect(modbusURL)
+	client, cleanup, err := connect(modbusURL, cfg.Debug)
 	if err != nil {
 		return fmt.Errorf("connection error: %w", err)
 	}
@@ -278,7 +301,7 @@ func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 
 func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connect(modbusURL)
+	client, cleanup, err := connect(modbusURL, cfg.Debug)
 	if err != nil {
 		return fmt.Errorf("connection error: %w", err)
 	}
@@ -435,7 +458,7 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 	}
 
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connect(modbusURL)
+	client, cleanup, err := connect(modbusURL, cfg.Debug)
 	if err != nil {
 		return fmt.Errorf("connection error: %w", err)
 	}
@@ -515,21 +538,21 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 
 // objectDescription returns a human-readable name for a device identification
 // object ID when the library does not provide one (e.g. extended objects).
-func objectDescription(id byte) string {
+func objectDescription(id modbus.DeviceIDObjectID) string {
 	switch {
-	case id == 0x00:
+	case id == modbus.DeviceIDObjectID(0x00):
 		return "VendorName"
-	case id == 0x01:
+	case id == modbus.DeviceIDObjectID(0x01):
 		return "ProductCode"
-	case id == 0x02:
+	case id == modbus.DeviceIDObjectID(0x02):
 		return "MajorMinorRevision"
-	case id == 0x03:
+	case id == modbus.DeviceIDObjectID(0x03):
 		return "VendorUrl"
-	case id == 0x04:
+	case id == modbus.DeviceIDObjectID(0x04):
 		return "ProductName"
-	case id == 0x05:
+	case id == modbus.DeviceIDObjectID(0x05):
 		return "ModelName"
-	case id == 0x06:
+	case id == modbus.DeviceIDObjectID(0x06):
 		return "UserApplicationName"
 	case id >= 0x07 && id <= 0x7F:
 		return "Reserved"
@@ -624,14 +647,14 @@ func DeviceIdentification(cfg config.IdentifyConfig) error {
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	fmt.Printf("🔍 Connecting to %s...\n", modbusURL)
 
-	conf := &modbus.ClientConfiguration{
-		URL:     modbusURL,
-		Timeout: time.Duration(cfg.Timeout) * time.Millisecond,
+	conf := buildClientConfig(modbusURL, time.Duration(cfg.Timeout)*time.Millisecond, false)
+	if err := modbus.ValidateConfig(conf); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
 
 	useParallel := len(units) > 1 && cfg.Parallel > 1
 	if !useParallel {
-		mc, err := modbus.NewClient(conf)
+		mc, err := modbus.New(conf)
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrFC43NotSupported, err)
 		}
@@ -663,9 +686,9 @@ func DeviceIdentification(cfg config.IdentifyConfig) error {
 	if n > len(units) {
 		n = len(units)
 	}
-	clients := make([]*modbus.ModbusClient, 0, n)
+	clients := make([]*modbus.Client, 0, n)
 	for i := 0; i < n; i++ {
-		mc, err := modbus.NewClient(conf)
+		mc, err := modbus.New(conf)
 		if err != nil {
 			for _, c := range clients {
 				_ = c.Close()
@@ -734,7 +757,7 @@ func DeviceIdentification(cfg config.IdentifyConfig) error {
 	return nil
 }
 
-func deviceIdentificationForUnit(ctx context.Context, mc *modbus.ModbusClient, cfg config.IdentifyConfig, unit uint8, w io.Writer) error {
+func deviceIdentificationForUnit(ctx context.Context, mc *modbus.Client, cfg config.IdentifyConfig, unit uint8, w io.Writer) error {
 	useCategories := cfg.Basic || cfg.Regular || cfg.Extended
 	if !useCategories {
 		di, err := mc.ReadAllDeviceIdentification(ctx, unit)
@@ -751,20 +774,20 @@ func deviceIdentificationForUnit(ctx context.Context, mc *modbus.ModbusClient, c
 		return nil
 	}
 
-	objectsByID := make(map[uint8]modbus.DeviceIdentificationObject)
+	objectsByID := make(map[modbus.DeviceIDObjectID]modbus.DeviceIdentificationObject)
 	var header *modbus.DeviceIdentification
 	for _, category := range []struct {
 		flag bool
-		code uint8
+		cat  modbus.DeviceIDCategory
 	}{
-		{cfg.Basic, modbus.ReadDeviceIdBasic},
-		{cfg.Regular, modbus.ReadDeviceIdRegular},
-		{cfg.Extended, modbus.ReadDeviceIdExtended},
+		{cfg.Basic, modbus.DeviceIDBasic},
+		{cfg.Regular, modbus.DeviceIDRegular},
+		{cfg.Extended, modbus.DeviceIDExtended},
 	} {
 		if !category.flag {
 			continue
 		}
-		di, err := mc.ReadDeviceIdentification(ctx, unit, category.code, 0)
+		di, err := mc.ReadDeviceIdentification(ctx, unit, category.cat, 0)
 		if err != nil {
 			return err
 		}
@@ -775,8 +798,8 @@ func deviceIdentificationForUnit(ctx context.Context, mc *modbus.ModbusClient, c
 			header = di
 		}
 		for _, obj := range di.Objects {
-			if _, seen := objectsByID[obj.Id]; !seen {
-				objectsByID[obj.Id] = obj
+			if _, seen := objectsByID[obj.ID]; !seen {
+				objectsByID[obj.ID] = obj
 			}
 		}
 	}
@@ -784,23 +807,27 @@ func deviceIdentificationForUnit(ctx context.Context, mc *modbus.ModbusClient, c
 		return ErrFC43NotSupported
 	}
 
-	ids := make([]uint8, 0, len(objectsByID))
+	ids := make([]modbus.DeviceIDObjectID, 0, len(objectsByID))
 	for id := range objectsByID {
 		ids = append(ids, id)
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	_, _ = fmt.Fprintf(w, "✅ Device Identification (DevID Code: %d, Conformity Level: 0x%02X, More Follows: 0x%02X, Next Object ID: %d, Object Count: %d)\n",
-		header.ReadDeviceIdCode, header.ConformityLevel, header.MoreFollows, header.NextObjectId, len(ids))
+	moreStr := "false"
+	if header.MoreFollows {
+		moreStr = "true"
+	}
+	_, _ = fmt.Fprintf(w, "✅ Device Identification (Category: %d, Conformity Level: 0x%02X, More Follows: %s, Next Object ID: %d, Object Count: %d)\n",
+		header.Category, header.ConformityLevel, moreStr, header.NextObjectID, len(ids))
 	for _, id := range ids {
 		obj := objectsByID[id]
 		desc := obj.Name
 		if desc == "" {
-			desc = objectDescription(obj.Id)
+			desc = objectDescription(obj.ID)
 		}
 		if desc != "" {
-			_, _ = fmt.Fprintf(w, " - Object %d: %s [%s]\n", obj.Id, obj.Value, desc)
+			_, _ = fmt.Fprintf(w, " - Object %d: %s [%s]\n", obj.ID, obj.Value, desc)
 		} else {
-			_, _ = fmt.Fprintf(w, " - Object %d: %s\n", obj.Id, obj.Value)
+			_, _ = fmt.Fprintf(w, " - Object %d: %s\n", obj.ID, obj.Value)
 		}
 	}
 	if cfg.ServerID {
@@ -809,32 +836,36 @@ func deviceIdentificationForUnit(ctx context.Context, mc *modbus.ModbusClient, c
 	return nil
 }
 
-func printReportServerId(ctx context.Context, mc *modbus.ModbusClient, unit uint8, w io.Writer) {
-	rs, err := mc.ReportServerId(ctx, unit)
+func printReportServerId(ctx context.Context, mc *modbus.Client, unit uint8, w io.Writer) {
+	rs, err := mc.ReportServerID(ctx, unit)
 	if err != nil {
 		_, _ = fmt.Fprintf(w, "  FC17 Report Server ID: ⚠️ %v\n", err)
 		return
 	}
-	_, _ = fmt.Fprintf(w, "  FC17 Report Server ID (byte count: %d): % X\n", rs.ByteCount, rs.Data)
+	_, _ = fmt.Fprintf(w, "  FC17 Report Server ID: % X\n", rs.Data)
 }
 
 func printDeviceIdentification(w io.Writer, di *modbus.DeviceIdentification) {
-	_, _ = fmt.Fprintf(w, "✅ Device Identification (DevID Code: %d, Conformity Level: 0x%02X, More Follows: 0x%02X, Next Object ID: %d, Object Count: %d)\n",
-		di.ReadDeviceIdCode, di.ConformityLevel, di.MoreFollows, di.NextObjectId, len(di.Objects))
+	moreStr := "false"
+	if di.MoreFollows {
+		moreStr = "true"
+	}
+	_, _ = fmt.Fprintf(w, "✅ Device Identification (Category: %d, Conformity Level: 0x%02X, More Follows: %s, Next Object ID: %d, Object Count: %d)\n",
+		di.Category, di.ConformityLevel, moreStr, di.NextObjectID, len(di.Objects))
 	for _, obj := range di.Objects {
 		desc := obj.Name
 		if desc == "" {
-			desc = objectDescription(obj.Id)
+			desc = objectDescription(obj.ID)
 		}
 		if desc != "" {
-			_, _ = fmt.Fprintf(w, " - Object %d: %s [%s]\n", obj.Id, obj.Value, desc)
+			_, _ = fmt.Fprintf(w, " - Object %d: %s [%s]\n", obj.ID, obj.Value, desc)
 		} else {
-			_, _ = fmt.Fprintf(w, " - Object %d: %s\n", obj.Id, obj.Value)
+			_, _ = fmt.Fprintf(w, " - Object %d: %s\n", obj.ID, obj.Value)
 		}
 	}
 }
 
-// readFCsForFingerprint are the read-style function codes probed by HasUnitReadFunction (FC08, FC43, FC03, FC04, FC01, FC02, FC11, FC18, FC20).
+// readFCsForFingerprint are the read-style function codes probed by SupportsFunction (FC08, FC43, FC03, FC04, FC01, FC02, FC11, FC18, FC20).
 var readFCsForFingerprint = []modbus.FunctionCode{
 	modbus.FCDiagnostics,           // 0x08
 	modbus.FCEncapsulatedInterface, // 0x2B (FC43)
@@ -847,7 +878,7 @@ var readFCsForFingerprint = []modbus.FunctionCode{
 	modbus.FCReadFileRecord,        // 0x14 (FC20)
 }
 
-// FingerprintDeviceProbe probes each requested unit with HasUnitReadFunction for supported read FCs and prints results.
+// FingerprintDeviceProbe probes each requested unit with SupportsFunction for supported read FCs and prints results.
 // Uses --interval (ms) between probes; no parallel.
 func FingerprintDeviceProbe(cfg config.FingerprintConfig) error {
 	units, err := parseUnitIDs(cfg.UnitID)
@@ -857,11 +888,11 @@ func FingerprintDeviceProbe(cfg config.FingerprintConfig) error {
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	fmt.Printf("🔍 Fingerprinting device at %s (supported read functions per unit)...\n", modbusURL)
 
-	conf := &modbus.ClientConfiguration{
-		URL:     modbusURL,
-		Timeout: time.Duration(cfg.Timeout) * time.Millisecond,
+	conf := buildClientConfig(modbusURL, time.Duration(cfg.Timeout)*time.Millisecond, false)
+	if err := modbus.ValidateConfig(conf); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
-	mc, err := modbus.NewClient(conf)
+	mc, err := modbus.New(conf)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
@@ -881,7 +912,7 @@ func FingerprintDeviceProbe(cfg config.FingerprintConfig) error {
 		var supported []string
 		for _, fc := range readFCsForFingerprint {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Millisecond)
-			ok, err := mc.HasUnitReadFunction(ctx, unit, fc)
+			ok, err := mc.SupportsFunction(ctx, unit, fc)
 			cancel()
 			if err != nil {
 				if len(units) > 1 {
@@ -918,12 +949,12 @@ func RunDiagnostics(cfg config.DiagnosticConfig) error {
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	fmt.Printf("🔍 Sending FC08 Diagnostics to %s (unit %d, sub-function %s / 0x%04X)...\n", modbusURL, cfg.UnitID, cfg.SubFunction, subFuncCode)
 
-	conf := &modbus.ClientConfiguration{
-		URL:     modbusURL,
-		Timeout: time.Duration(cfg.Timeout) * time.Millisecond,
+	conf := buildClientConfig(modbusURL, time.Duration(cfg.Timeout)*time.Millisecond, false)
+	if err := modbus.ValidateConfig(conf); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
 
-	mc, err := modbus.NewClient(conf)
+	mc, err := modbus.New(conf)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
@@ -966,14 +997,14 @@ func RunReportServerId(cfg config.ReportServerIdConfig) error {
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	fmt.Printf("🔍 Sending FC17 Report Server ID to %s...\n", modbusURL)
 
-	conf := &modbus.ClientConfiguration{
-		URL:     modbusURL,
-		Timeout: time.Duration(cfg.Timeout) * time.Millisecond,
+	conf := buildClientConfig(modbusURL, time.Duration(cfg.Timeout)*time.Millisecond, false)
+	if err := modbus.ValidateConfig(conf); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
 
 	useParallel := len(units) > 1 && cfg.Parallel > 1
 	if !useParallel {
-		mc, err := modbus.NewClient(conf)
+		mc, err := modbus.New(conf)
 		if err != nil {
 			return fmt.Errorf("failed to create client: %w", err)
 		}
@@ -987,7 +1018,7 @@ func RunReportServerId(cfg config.ReportServerIdConfig) error {
 			if len(units) > 1 {
 				fmt.Printf("\n--- Unit ID %d ---\n", unit)
 			}
-			rs, err := mc.ReportServerId(ctx, unit)
+			rs, err := mc.ReportServerID(ctx, unit)
 			cancel()
 			if err != nil {
 				if len(units) > 1 {
@@ -1006,9 +1037,9 @@ func RunReportServerId(cfg config.ReportServerIdConfig) error {
 	if n > len(units) {
 		n = len(units)
 	}
-	clients := make([]*modbus.ModbusClient, 0, n)
+	clients := make([]*modbus.Client, 0, n)
 	for i := 0; i < n; i++ {
-		mc, err := modbus.NewClient(conf)
+		mc, err := modbus.New(conf)
 		if err != nil {
 			for _, c := range clients {
 				_ = c.Close()
@@ -1049,7 +1080,7 @@ func RunReportServerId(cfg config.ReportServerIdConfig) error {
 			defer wg.Done()
 			for unit := range unitsCh {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Millisecond)
-				rs, err := mc.ReportServerId(ctx, unit)
+				rs, err := mc.ReportServerID(ctx, unit)
 				cancel()
 				buf := &bytes.Buffer{}
 				if err == nil {
@@ -1080,22 +1111,14 @@ func RunReportServerId(cfg config.ReportServerIdConfig) error {
 	return nil
 }
 
-func printReportServerIdResult(w io.Writer, unit uint8, rs *modbus.ReportServerIdResponse) {
-	_, _ = fmt.Fprintf(w, "✅ Report Server ID (unit %d, byte count: %d):\n", unit, rs.ByteCount)
+func printReportServerIdResult(w io.Writer, unit uint8, rs *modbus.ReportServerIDResponse) {
+	_, _ = fmt.Fprintf(w, "✅ Report Server ID (unit %d):\n", unit)
 	_, _ = fmt.Fprintf(w, "  Data: % X\n", rs.Data)
-	if len(rs.Data) > 0 {
-		// First byte is typically the server ID
-		_, _ = fmt.Fprintf(w, "  Server ID: 0x%02X (%d)\n", rs.Data[0], rs.Data[0])
-	}
-	if len(rs.Data) > 1 {
-		// Second byte is the run indicator (0x00=OFF, 0xFF=ON)
+	if rs.RunIndicatorStatus != nil {
 		status := "OFF"
-		if rs.Data[1] == 0xFF {
+		if *rs.RunIndicatorStatus {
 			status = "ON"
 		}
-		_, _ = fmt.Fprintf(w, "  Run Indicator: 0x%02X (%s)\n", rs.Data[1], status)
-	}
-	if len(rs.Data) > 2 {
-		_, _ = fmt.Fprintf(w, "  Additional Data: % X\n", rs.Data[2:])
+		_, _ = fmt.Fprintf(w, "  Run Indicator: %s\n", status)
 	}
 }

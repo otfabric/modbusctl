@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/otfabric/modbus"
+	"github.com/otfabric/go-modbus"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/types"
@@ -120,7 +120,7 @@ func newModbusServer(store RegisterStore, cfg ServerConfig) error {
 		Cfg:   cfg,
 	}
 
-	server, err := modbus.NewServer(&modbus.ServerConfiguration{
+	server, err := modbus.NewServer(&modbus.ServerConfig{
 		URL:     fmt.Sprintf("tcp://0.0.0.0:%d", cfg.Port),
 		Timeout: 0,
 	}, handler)
@@ -140,8 +140,8 @@ func newModbusServer(store RegisterStore, cfg ServerConfig) error {
 }
 
 func (h *StaticHandler) HandleCoils(ctx context.Context, req *modbus.CoilsRequest) ([]bool, error) {
-	if req.UnitId != h.Cfg.Unit {
-		return nil, modbus.ErrBadUnitId
+	if req.UnitID != h.Cfg.Unit {
+		return nil, modbus.ErrBadUnitID
 	}
 	data, err := h.Store.get(1, req.Addr, req.Quantity)
 	if err != nil {
@@ -161,8 +161,8 @@ func (h *StaticHandler) HandleDiscreteInputs(ctx context.Context, req *modbus.Di
 }
 
 func (h *StaticHandler) HandleHoldingRegisters(ctx context.Context, req *modbus.HoldingRegistersRequest) ([]uint16, error) {
-	if req.UnitId != h.Cfg.Unit {
-		return nil, modbus.ErrBadUnitId
+	if req.UnitID != h.Cfg.Unit {
+		return nil, modbus.ErrBadUnitID
 	}
 	data, err := h.Store.get(3, req.Addr, req.Quantity)
 	if err != nil {
@@ -177,8 +177,8 @@ func (h *StaticHandler) HandleHoldingRegisters(ctx context.Context, req *modbus.
 }
 
 func (h *StaticHandler) HandleInputRegisters(ctx context.Context, req *modbus.InputRegistersRequest) ([]uint16, error) {
-	if req.UnitId != h.Cfg.Unit {
-		return nil, modbus.ErrBadUnitId
+	if req.UnitID != h.Cfg.Unit {
+		return nil, modbus.ErrBadUnitID
 	}
 	data, err := h.Store.get(4, req.Addr, req.Quantity)
 	if err != nil {

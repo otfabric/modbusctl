@@ -360,7 +360,6 @@ func TestBoundaryStrategy_SeedOutsideRangeImmediatelyDone(t *testing.T) {
 func TestStrategy_OutcomeTypeInResult(t *testing.T) {
 	// Ensure strategies receive ScanResult with OutcomeType set (executor sets it via classifyOutcome)
 	result := ScanResult{
-		Success:       false,
 		OutcomeType:   ScanOutcomeException,
 		ExceptionCode: 0x02,
 	}
@@ -436,8 +435,6 @@ func TestSteppedStrategy_HalfOffsetAddsPositions(t *testing.T) {
 
 func TestScanStats_OutcomeCounts(t *testing.T) {
 	var stats ScanStats
-	stats.TotalRequests = 5
-	stats.SuccessCount = 2
 	stats.FailCount = 3
 	stats.ExceptionCount = 1
 	stats.TimeoutCount = 1

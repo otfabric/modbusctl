@@ -3,7 +3,7 @@ package modbus
 import (
 	"encoding/binary"
 
-	"github.com/otfabric/modbus"
+	"github.com/otfabric/go-modbus/sunspec"
 	"github.com/otfabric/modbusctl/internal/config"
 )
 
@@ -55,8 +55,8 @@ func (s *sunspecStrategy) Init(cfg config.ScanConfig) {
 	}
 	if len(bases) == 0 {
 		// Copy default list so we don't mutate the library slice.
-		bases = make([]uint16, len(modbus.SunSpecDefaultBaseAddresses))
-		copy(bases, modbus.SunSpecDefaultBaseAddresses)
+		bases = make([]uint16, len(sunspec.DefaultBaseAddresses))
+		copy(bases, sunspec.DefaultBaseAddresses)
 	}
 	s.bases = bases
 
@@ -122,7 +122,7 @@ func (s *sunspecStrategy) OnResult(task ScanTask, result ScanResult) {
 		if result.Success && len(result.Data) >= 4 {
 			r0 := binary.BigEndian.Uint16(result.Data[0:2])
 			r1 := binary.BigEndian.Uint16(result.Data[2:4])
-			if r0 == modbus.SunSpecMarkerReg0 && r1 == modbus.SunSpecMarkerReg1 {
+			if r0 == sunspec.MarkerReg0 && r1 == sunspec.MarkerReg1 {
 				s.baseAddr = task.Start
 				s.currentAddr = task.Start + 2
 				s.phase = sunspecWalkModels
@@ -155,7 +155,7 @@ func (s *sunspecStrategy) OnResult(task ScanTask, result ScanResult) {
 		id := binary.BigEndian.Uint16(result.Data[0:2])
 		length := binary.BigEndian.Uint16(result.Data[2:4])
 
-		if id == modbus.SunSpecEndModelID && length == modbus.SunSpecEndModelLength {
+		if id == sunspec.EndModelID && length == sunspec.EndModelLength {
 			// End model found — executor already wrote the successful read.
 			s.phase = sunspecDone
 			return
