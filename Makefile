@@ -7,9 +7,17 @@ help: ## This help
 
 APP_NAME       = modbusctl
 APP_SRC	= main.go
+BIN_DIR        = bin
+BINARY         = $(BIN_DIR)/$(APP_NAME)
 ARCHS	  = linux/amd64 linux/arm64 linux/arm/v7 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
-VERSION       := $(shell head -1 version.txt)
-LDFLAGS       := -ldflags "-X 'github.com/otfabric/modbusctl/cmd.version=$(VERSION)'"
+
+# Override on the command line or in CI (matches reusable release workflow ldflags).
+VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
+TAG        ?= $(shell git describe --tags --exact-match 2>/dev/null || echo "")
+COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+LDFLAGS := -ldflags "-s -w -X 'main.version=$(VERSION)' -X 'main.tag=$(TAG)' -X 'main.commit=$(COMMIT)' -X 'main.buildDate=$(BUILD_DATE)'"
 RELEASE_DIR   := release
 
 all: test build build-all ## Test and build the application
@@ -49,12 +57,14 @@ vet: ## Run go vet on project packages
 	@go vet ./...
 
 build: check ## Build the application
-	@echo "Building $(APP_NAME)"
-	@go build $(LDFLAGS) -o $(APP_NAME) $(APP_SRC)
+	@echo "Building $(BINARY)"
+	@mkdir -p $(BIN_DIR)
+	@go build $(LDFLAGS) -o $(BINARY) $(APP_SRC)
 
 build-nocheck: fmt lint lint-ci vet ## Build without running tests (e.g. Docker where -race needs CGO)
-	@echo "Building $(APP_NAME)"
-	@go build $(LDFLAGS) -o $(APP_NAME) $(APP_SRC)
+	@echo "Building $(BINARY)"
+	@mkdir -p $(BIN_DIR)
+	@go build $(LDFLAGS) -o $(BINARY) $(APP_SRC)
 
 build-all: ## Build the application for all architectures
 	@mkdir -p $(RELEASE_DIR)
@@ -99,10 +109,11 @@ release-all: build-all ## Package the build binaries into tar.gz (Unix) or zip (
 
 install: build ## Install the built binary to /usr/local/bin
 	@echo "Installing $(APP_NAME) to /usr/local/bin"
-	@sudo install -m 0755 $(APP_NAME) /usr/local/bin/$(APP_NAME)
+	@sudo install -m 0755 $(BINARY) /usr/local/bin/$(APP_NAME)
 
 clean: ## Clean the build artifacts
 	@echo "Cleaning build artifacts"
-	@rm -f $(APP_NAME) $(BOOTSTRAP_NAME)
+	@rm -rf $(BIN_DIR)
+	@rm -f $(BOOTSTRAP_NAME)
 	@rm -f $(RELEASE_DIR)/*
 	@rm -f *.{json,csv,log,mcap} results/*.{json,csv,log,mcap}

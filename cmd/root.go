@@ -12,7 +12,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "dev"
+// buildMeta holds link-time metadata set from main via SetBuildMeta.
+var buildMeta struct {
+	version, tag, commit, buildDate string
+}
+
+// SetBuildMeta is called from main before Execute; values come from ldflags -X main.*.
+func SetBuildMeta(version, tag, commit, buildDate string) {
+	buildMeta.version = version
+	buildMeta.tag = tag
+	buildMeta.commit = commit
+	buildMeta.buildDate = buildDate
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "modbusctl",
@@ -32,7 +43,10 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version of modbusctl",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("modbusctl version: %s\n", version)
+		fmt.Printf("modbusctl version: %s\n", buildMeta.version)
+		fmt.Printf("tag:         %s\n", buildMeta.tag)
+		fmt.Printf("commit:      %s\n", buildMeta.commit)
+		fmt.Printf("build date:  %s\n", buildMeta.buildDate)
 	},
 }
 

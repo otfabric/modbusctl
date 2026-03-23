@@ -3,6 +3,7 @@
 /release/*
 /docker.tar
 /modbusctl
+/bin/*
 
 # Scan results
 *.csv

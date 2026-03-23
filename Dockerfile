@@ -15,7 +15,7 @@ FROM scratch
 WORKDIR /
 ARG TARGETPLATFORM
 
-COPY --from=builder /app/modbusctl /bin/modbusctl
+COPY --from=builder /app/bin/modbusctl /bin/modbusctl
 COPY --from=builder /usr/bin/healthcheck /bin/healthcheck
 
 VOLUME ["/mcap"]

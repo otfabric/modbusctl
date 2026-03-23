@@ -20,10 +20,10 @@ github.com/mdlayher/packet v1.1.2/go.mod h1:GEu1+n9sG5VtiRE4SydOmX5GTwyyYlteZiFU
 github.com/mdlayher/socket v0.2.1/go.mod h1:QLlNPkFR88mRUNQIzRBMfXxwKal8H7u1h3bL1CV+f0E=
 github.com/mdlayher/socket v0.5.1 h1:VZaqt6RkGkt2OE9l3GcC6nZkqD3xKeQLyfleW/uBcos=
 github.com/mdlayher/socket v0.5.1/go.mod h1:TjPLHI1UgwEv5J1B5q0zTZq12A/6H7nKmtTanQE37IQ=
-github.com/otfabric/go-modbus v1.0.1 h1:CzjyTFJYF0YzmEyUwdgM7K7mACXBH1ncnrd6ZypcSpM=
-github.com/otfabric/go-modbus v1.0.1/go.mod h1:nxj64w0kQTLHS3k6mounptvScrLtxO5c0NkujXdEK50=
-github.com/otfabric/go-serial v0.1.1 h1:7mb9ic+GDCuKd79IZJmZig01GFke4icYZipzt28k4Mc=
-github.com/otfabric/go-serial v0.1.1/go.mod h1:dpAPeu6Oxcpg7Wbh/x8FMwPqvleKjzQlo326N9EMKtk=
+github.com/otfabric/go-modbus v1.0.4 h1:x+7bDR63e1MDr6490uC9+uOXzp2dXhIQXXBGEgcLDVY=
+github.com/otfabric/go-modbus v1.0.4/go.mod h1:j/z0Zt1N/vzhDQ6/Qm4Mdd7wpQpt41mxMre64h3I9VU=
+github.com/otfabric/go-serial v0.1.3 h1:CuGNLlhZF8Tgk6net5MjhkYUk43zw3EAHuy1ABBS7G4=
+github.com/otfabric/go-serial v0.1.3/go.mod h1:TqbYpWWg6W+IuCLs8YM2cndlMAEaTyaKyUX6Z08gtq8=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=

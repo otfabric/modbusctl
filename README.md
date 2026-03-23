@@ -1,10 +1,10 @@
 # modbusctl
 
-[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/otfabric/modbusctl)](https://goreportcard.com/report/github.com/otfabric/modbusctl)
 [![CI](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/release-v2.1.0-blue.svg)](https://github.com/otfabric/modbusctl/releases)
+[![Release](https://img.shields.io/github/v/release/otfabric/modbusctl?label=release)](https://github.com/otfabric/modbusctl/releases)
 
 Modbusctl is a versatile command-line utility designed for efficient communication, scanning, recording, replaying, decoding, and analysis of Modbus TCP devices. It simplifies working with Modbus data through convenient CLI commands, environment variable integration, and flexible output formats (MCAP, JSON, CSV).
 
@@ -661,6 +661,8 @@ clean                          Clean the build artifacts
 ```
 
 ### Building
+
+`make build` writes the binary to **`bin/modbusctl`** (not the repo root).
 
 ```console
 make build
