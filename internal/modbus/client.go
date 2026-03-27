@@ -1,18 +1,14 @@
 package modbus
 
 import (
-	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/otfabric/go-modbus"
@@ -151,7 +147,7 @@ func readRegisters(clientPtr **modbus.Client, fc uint8, start, count uint16, ret
 	for attempt := 1; attempt <= int(retries); attempt++ {
 		if delay > 0 {
 			if debug {
-				fmt.Printf("⏳ Waiting %d ms before retrying...\n", delay)
+				fmt.Fprintf(os.Stderr, "⏳ Waiting %d ms before retrying...\n", delay)
 			}
 			time.Sleep(time.Duration(delay) * time.Millisecond)
 		}
@@ -238,25 +234,26 @@ func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	fmt.Printf("Reading %d registers starting from address %d using function code %d\n", cfg.RegisterCount, cfg.StartAddress, cfg.Function)
 	rawData, requestTimestamp, responseTimestamp, err := readRegisters(&client, cfg.Function, cfg.StartAddress, cfg.RegisterCount, 1, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug)
 	if err != nil {
 		return fmt.Errorf("read error: %w", err)
 	}
-	fmt.Printf("Read %d bytes of data: % X\n", len(rawData), rawData)
 
+	byteCount := len(rawData)
+	preSwapHex := ""
 	if cfg.SwapBytes {
+		preSwapHex = fmt.Sprintf("% X", rawData)
 		if len(rawData)%2 != 0 {
 			fmt.Fprintf(os.Stderr, "⚠️ ByteSwap requested but data length (%d) is not even; last byte will be left as-is\n", len(rawData))
 		}
 		for i := 0; i+1 < len(rawData); i += 2 {
 			rawData[i], rawData[i+1] = rawData[i+1], rawData[i]
 		}
-		fmt.Printf("🔁 Byte-swapped data: % X\n", rawData)
 	}
 
+	finalHex := fmt.Sprintf("% X", rawData)
+	asciiDecoded := ""
 	if cfg.Ascii {
-		fmt.Println("Decoding data as ASCII:")
 		var builder strings.Builder
 		for _, b := range rawData {
 			if strconv.IsPrint(rune(b)) {
@@ -265,7 +262,7 @@ func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 				builder.WriteByte('.')
 			}
 		}
-		fmt.Printf("ASCII: %s\n", builder.String())
+		asciiDecoded = builder.String()
 	}
 
 	headerIP, headerPort := cfg.IP, cfg.Port
@@ -295,15 +292,34 @@ func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 		return fmt.Errorf("failed to write record: %w", err)
 	}
 
-	fmt.Printf("✅ Output written to %s\n", out)
+	readRes := &types.ReadResult{
+		Target:         modbusURL,
+		UnitID:         cfg.Unit,
+		Function:       cfg.Function,
+		StartAddress:   cfg.StartAddress,
+		RegisterCount:  cfg.RegisterCount,
+		RawByteCount:   byteCount,
+		PreSwapHex:     preSwapHex,
+		RawDataHex:     finalHex,
+		BytesSwapped:   cfg.SwapBytes,
+		AsciiDecoded:   asciiDecoded,
+		McapOutputPath: out,
+	}
+	outFmt, err := format.Parse(cfg.OutputFormat)
+	if err != nil {
+		return err
+	}
+	if err := format.Write(os.Stdout, outFmt, readRes); err != nil {
+		return err
+	}
 	return nil
 }
 
-func ScanAndWriteMCAP(cfg config.ScanConfig) error {
+func ScanAndWriteMCAP(cfg config.ScanConfig) (*types.ScanSummaryResult, error) {
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	client, cleanup, err := connect(modbusURL, cfg.Debug)
 	if err != nil {
-		return fmt.Errorf("connection error: %w", err)
+		return nil, fmt.Errorf("connection error: %w", err)
 	}
 	defer cleanup()
 
@@ -319,7 +335,7 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 
 	f, err := os.Create(out)
 	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
+		return nil, fmt.Errorf("failed to create output file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -335,12 +351,12 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 		StartTime: time.Now().UnixNano(),
 	}
 	if err := format.WriteHeader(f, header); err != nil {
-		return fmt.Errorf("failed to write header: %w", err)
+		return nil, fmt.Errorf("failed to write header: %w", err)
 	}
 
 	strategy, err := newScanStrategy(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	strategy.Init(cfg)
 
@@ -349,9 +365,9 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 		algo = "safe"
 	}
 	if algo == "sunspec" {
-		fmt.Printf("SunSpec discovery with function code %d (algo: sunspec)\n", cfg.Function)
+		fmt.Fprintf(os.Stderr, "SunSpec discovery with function code %d (algo: sunspec)\n", cfg.Function)
 	} else {
-		fmt.Printf("Scanning registers from %d to %d with function code %d (algo: %s)\n", cfg.StartAddress, cfg.EndAddress, cfg.Function, algo)
+		fmt.Fprintf(os.Stderr, "Scanning registers from %d to %d with function code %d (algo: %s)\n", cfg.StartAddress, cfg.EndAddress, cfg.Function, algo)
 	}
 	printScanWorstCaseHint(cfg, algo)
 
@@ -366,7 +382,7 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 		}
 		if cfg.Debug && task.Count > 0 {
 			end := task.Start + task.Count - 1
-			fmt.Printf("DEBUG [exec] next task: start=%d count=%d end=%d\n", task.Start, task.Count, end)
+			fmt.Fprintf(os.Stderr, "DEBUG [exec] next task: start=%d count=%d end=%d\n", task.Start, task.Count, end)
 		}
 		result := executeReadTask(&client, cfg, task, &cleanup, modbusURL)
 		// Milestone B: retry once on timeout/transport if configured
@@ -384,7 +400,7 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 					outcome = fmt.Sprintf("%s code=0x%02x", result.OutcomeType, result.ExceptionCode)
 				}
 			}
-			fmt.Printf("DEBUG [exec] result: %s (start=%d count=%d)\n", outcome, result.Start, result.Count)
+			fmt.Fprintf(os.Stderr, "DEBUG [exec] result: %s (start=%d count=%d)\n", outcome, result.Start, result.Count)
 		}
 		strategy.OnResult(task, result)
 
@@ -404,9 +420,9 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 				Data:              result.Data,
 			}
 			if err := format.AppendRecord(f, rec); err != nil {
-				return fmt.Errorf("failed to write record: %w", err)
+				return nil, fmt.Errorf("failed to write record: %w", err)
 			}
-			fmt.Printf("Block: Start: %d, End: %d, Count: %d\n", rec.StartAddress, rec.StartAddress+rec.RegisterCount-1, rec.RegisterCount)
+			fmt.Fprintf(os.Stderr, "Block: Start: %d, End: %d, Count: %d\n", rec.StartAddress, rec.StartAddress+rec.RegisterCount-1, rec.RegisterCount)
 		} else {
 			stats.FailCount++
 			switch result.OutcomeType {
@@ -425,42 +441,43 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) error {
 
 	stats.TotalDurationNanos = time.Since(startTime).Nanoseconds()
 
-	// Summary
-	fmt.Println()
-	fmt.Printf("Algo: %s\n", algo)
-	fmt.Printf("Requests: %d\n", stats.TotalRequests)
-	fmt.Printf("Success: %d\n", stats.SuccessCount)
-	fmt.Printf("Failed: %d\n", stats.FailCount)
-	if stats.ExceptionCount > 0 || stats.TimeoutCount > 0 || stats.TransportErrorCount > 0 {
-		fmt.Printf("  Exceptions: %d  Timeouts: %d  Transport errors: %d\n", stats.ExceptionCount, stats.TimeoutCount, stats.TransportErrorCount)
+	durStr := time.Duration(stats.TotalDurationNanos).Round(time.Millisecond).String()
+	summary := &types.ScanSummaryResult{
+		Target:              modbusURL,
+		Algo:                algo,
+		TotalRequests:       stats.TotalRequests,
+		SuccessCount:        stats.SuccessCount,
+		FailCount:           stats.FailCount,
+		ExceptionCount:      stats.ExceptionCount,
+		TimeoutCount:        stats.TimeoutCount,
+		TransportErrorCount: stats.TransportErrorCount,
+		BlocksCaptured:      stats.BlocksCaptured,
+		RegistersCaptured:   stats.RegistersCaptured,
+		Duration:            durStr,
+		McapOutputPath:      out,
 	}
-	fmt.Printf("Blocks captured: %d\n", stats.BlocksCaptured)
-	fmt.Printf("Registers captured: %d\n", stats.RegistersCaptured)
 	if stats.SuccessCount > 0 {
-		avgMs := (stats.ResponseTimeNanos / int64(stats.SuccessCount)) / 1e6
-		fmt.Printf("Avg response time: %d ms\n", avgMs)
+		summary.AvgResponseMs = (stats.ResponseTimeNanos / int64(stats.SuccessCount)) / 1e6
 	}
-	fmt.Printf("Duration: %s\n", time.Duration(stats.TotalDurationNanos).Round(time.Millisecond))
-	fmt.Printf("Output: %s\n", out)
-	return nil
+	return summary, nil
 }
 
-func RecordAndWriteMCAP(cfg config.RecordConfig) error {
+func RecordAndWriteMCAP(cfg config.RecordConfig) (*types.RecordSummaryResult, error) {
 	file, err := os.Open(cfg.InputFile)
 	if err != nil {
-		return fmt.Errorf("failed to open input file: %w", err)
+		return nil, fmt.Errorf("failed to open input file: %w", err)
 	}
 	defer func() { _ = file.Close() }()
 
 	var blocks []types.AddressBlock
 	if err := json.NewDecoder(file).Decode(&blocks); err != nil {
-		return fmt.Errorf("failed to decode input blocks: %w", err)
+		return nil, fmt.Errorf("failed to decode input blocks: %w", err)
 	}
 
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	client, cleanup, err := connect(modbusURL, cfg.Debug)
 	if err != nil {
-		return fmt.Errorf("connection error: %w", err)
+		return nil, fmt.Errorf("connection error: %w", err)
 	}
 	defer cleanup()
 
@@ -476,7 +493,7 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 
 	f, err := os.Create(out)
 	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
+		return nil, fmt.Errorf("failed to create output file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -492,7 +509,7 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 		StartTime: time.Now().UnixNano(),
 	}
 	if err := format.WriteHeader(f, header); err != nil {
-		return fmt.Errorf("failed to write header: %w", err)
+		return nil, fmt.Errorf("failed to write header: %w", err)
 	}
 
 	startTime := time.Now()
@@ -503,7 +520,7 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 		if elapsed >= time.Duration(cfg.Duration)*time.Millisecond {
 			break
 		}
-		fmt.Printf("📟 Recording %d started...\n", i)
+		fmt.Fprintf(os.Stderr, "📟 Recording %d started...\n", i)
 		for _, b := range blocks {
 			data, requestTimestamp, responseTimestamp, err := readRegisters(&client, cfg.Function, b.StartAddress, b.RegisterCount, 5, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug)
 			if err != nil {
@@ -519,10 +536,10 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 				Data:              data,
 			}
 			if err := format.AppendRecord(f, rec); err != nil {
-				return fmt.Errorf("failed to write record: %w", err)
+				return nil, fmt.Errorf("failed to write record: %w", err)
 			}
 			blockCount++
-			fmt.Printf("✓ Recorded block: Start %d, Count %d\n", b.StartAddress, b.RegisterCount)
+			fmt.Fprintf(os.Stderr, "✓ Recorded block: Start %d, Count %d\n", b.StartAddress, b.RegisterCount)
 		}
 		i++
 		if cfg.Interval > 0 {
@@ -530,15 +547,17 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) error {
 		}
 	}
 
-	fmt.Printf("📦 Total recorded blocks: %d\n", blockCount)
-	fmt.Printf("🔄 Total iterations: %d\n", i)
-	fmt.Printf("✅ Output written to %s\n", out)
-	return nil
+	return &types.RecordSummaryResult{
+		Target:         modbusURL,
+		BlocksRecorded: blockCount,
+		Iterations:     i,
+		McapOutputPath: out,
+	}, nil
 }
 
-// objectDescription returns a human-readable name for a device identification
+// ObjectDescription returns a human-readable name for a device identification
 // object ID when the library does not provide one (e.g. extended objects).
-func objectDescription(id modbus.DeviceIDObjectID) string {
+func ObjectDescription(id modbus.DeviceIDObjectID) string {
 	switch {
 	case id == modbus.DeviceIDObjectID(0x00):
 		return "VendorName"
@@ -636,235 +655,6 @@ func parseUnitIDs(unitID string) ([]uint8, error) {
 	return ParseUnitIDs(unitID)
 }
 
-// DeviceIdentification reads device identification for one or all units (--unit 1-255 or --unit all).
-// If no category flag is set it uses ReadAllDeviceIdentification; otherwise requests selected categories.
-// When --unit all and --parallel > 1, probes units concurrently with a pool of connections.
-func DeviceIdentification(cfg config.IdentifyConfig) error {
-	units, err := parseUnitIDs(cfg.UnitID)
-	if err != nil {
-		return err
-	}
-	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	fmt.Printf("🔍 Connecting to %s...\n", modbusURL)
-
-	conf := buildClientConfig(modbusURL, time.Duration(cfg.Timeout)*time.Millisecond, false)
-	if err := modbus.ValidateConfig(conf); err != nil {
-		return fmt.Errorf("invalid config: %w", err)
-	}
-
-	useParallel := len(units) > 1 && cfg.Parallel > 1
-	if !useParallel {
-		mc, err := modbus.New(conf)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrFC43NotSupported, err)
-		}
-		if err := mc.Open(); err != nil {
-			return fmt.Errorf("%w: %v", ErrTCPConnection, err)
-		}
-		defer func() { _ = mc.Close() }()
-
-		for _, unit := range units {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Millisecond)
-			if len(units) > 1 {
-				fmt.Printf("\n--- Unit ID %d ---\n", unit)
-			}
-			err := deviceIdentificationForUnit(ctx, mc, cfg, unit, os.Stdout)
-			cancel()
-			if err != nil {
-				if len(units) > 1 {
-					fmt.Printf("⚠️ Unit %d: %v\n", unit, err)
-					continue
-				}
-				return err
-			}
-		}
-		return nil
-	}
-
-	// Parallel path: pool of clients, workers send (unit, output, err), collect and print in unit order.
-	n := int(cfg.Parallel)
-	if n > len(units) {
-		n = len(units)
-	}
-	clients := make([]*modbus.Client, 0, n)
-	for i := 0; i < n; i++ {
-		mc, err := modbus.New(conf)
-		if err != nil {
-			for _, c := range clients {
-				_ = c.Close()
-			}
-			return fmt.Errorf("%w: %v", ErrFC43NotSupported, err)
-		}
-		if err := mc.Open(); err != nil {
-			for _, c := range clients {
-				_ = c.Close()
-			}
-			return fmt.Errorf("%w: %v", ErrTCPConnection, err)
-		}
-		clients = append(clients, mc)
-	}
-	defer func() {
-		for _, c := range clients {
-			_ = c.Close()
-		}
-	}()
-
-	type identifyResult struct {
-		unit   uint8
-		output string
-		err    error
-	}
-	unitsCh := make(chan uint8, len(units))
-	for _, u := range units {
-		unitsCh <- u
-	}
-	close(unitsCh)
-	resultsCh := make(chan identifyResult, len(units))
-
-	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		mc := clients[i]
-		go func() {
-			defer wg.Done()
-			for unit := range unitsCh {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Millisecond)
-				buf := &bytes.Buffer{}
-				err := deviceIdentificationForUnit(ctx, mc, cfg, unit, buf)
-				cancel()
-				resultsCh <- identifyResult{unit: unit, output: buf.String(), err: err}
-			}
-		}()
-	}
-	go func() {
-		wg.Wait()
-		close(resultsCh)
-	}()
-
-	var results []identifyResult
-	for r := range resultsCh {
-		results = append(results, r)
-	}
-	sort.Slice(results, func(i, j int) bool { return results[i].unit < results[j].unit })
-	for _, r := range results {
-		fmt.Printf("\n--- Unit ID %d ---\n", r.unit)
-		if r.err != nil {
-			fmt.Printf("⚠️ Unit %d: %v\n", r.unit, r.err)
-		} else {
-			fmt.Print(r.output)
-		}
-	}
-	return nil
-}
-
-func deviceIdentificationForUnit(ctx context.Context, mc *modbus.Client, cfg config.IdentifyConfig, unit uint8, w io.Writer) error {
-	useCategories := cfg.Basic || cfg.Regular || cfg.Extended
-	if !useCategories {
-		di, err := mc.ReadAllDeviceIdentification(ctx, unit)
-		if err != nil {
-			return err
-		}
-		if di == nil {
-			return ErrFC43NotSupported
-		}
-		printDeviceIdentification(w, di)
-		if cfg.ServerID {
-			printReportServerId(ctx, mc, unit, w)
-		}
-		return nil
-	}
-
-	objectsByID := make(map[modbus.DeviceIDObjectID]modbus.DeviceIdentificationObject)
-	var header *modbus.DeviceIdentification
-	for _, category := range []struct {
-		flag bool
-		cat  modbus.DeviceIDCategory
-	}{
-		{cfg.Basic, modbus.DeviceIDBasic},
-		{cfg.Regular, modbus.DeviceIDRegular},
-		{cfg.Extended, modbus.DeviceIDExtended},
-	} {
-		if !category.flag {
-			continue
-		}
-		di, err := mc.ReadDeviceIdentification(ctx, unit, category.cat, 0)
-		if err != nil {
-			return err
-		}
-		if di == nil {
-			continue
-		}
-		if header == nil {
-			header = di
-		}
-		for _, obj := range di.Objects {
-			if _, seen := objectsByID[obj.ID]; !seen {
-				objectsByID[obj.ID] = obj
-			}
-		}
-	}
-	if header == nil {
-		return ErrFC43NotSupported
-	}
-
-	ids := make([]modbus.DeviceIDObjectID, 0, len(objectsByID))
-	for id := range objectsByID {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	moreStr := "false"
-	if header.MoreFollows {
-		moreStr = "true"
-	}
-	_, _ = fmt.Fprintf(w, "✅ Device Identification (Category: %d, Conformity Level: 0x%02X, More Follows: %s, Next Object ID: %d, Object Count: %d)\n",
-		header.Category, header.ConformityLevel, moreStr, header.NextObjectID, len(ids))
-	for _, id := range ids {
-		obj := objectsByID[id]
-		desc := obj.Name
-		if desc == "" {
-			desc = objectDescription(obj.ID)
-		}
-		if desc != "" {
-			_, _ = fmt.Fprintf(w, " - Object %d: %s [%s]\n", obj.ID, obj.Value, desc)
-		} else {
-			_, _ = fmt.Fprintf(w, " - Object %d: %s\n", obj.ID, obj.Value)
-		}
-	}
-	if cfg.ServerID {
-		printReportServerId(ctx, mc, unit, w)
-	}
-	return nil
-}
-
-func printReportServerId(ctx context.Context, mc *modbus.Client, unit uint8, w io.Writer) {
-	rs, err := mc.ReportServerID(ctx, unit)
-	if err != nil {
-		_, _ = fmt.Fprintf(w, "  FC17 Report Server ID: ⚠️ %v\n", err)
-		return
-	}
-	_, _ = fmt.Fprintf(w, "  FC17 Report Server ID: % X\n", rs.Data)
-}
-
-func printDeviceIdentification(w io.Writer, di *modbus.DeviceIdentification) {
-	moreStr := "false"
-	if di.MoreFollows {
-		moreStr = "true"
-	}
-	_, _ = fmt.Fprintf(w, "✅ Device Identification (Category: %d, Conformity Level: 0x%02X, More Follows: %s, Next Object ID: %d, Object Count: %d)\n",
-		di.Category, di.ConformityLevel, moreStr, di.NextObjectID, len(di.Objects))
-	for _, obj := range di.Objects {
-		desc := obj.Name
-		if desc == "" {
-			desc = objectDescription(obj.ID)
-		}
-		if desc != "" {
-			_, _ = fmt.Fprintf(w, " - Object %d: %s [%s]\n", obj.ID, obj.Value, desc)
-		} else {
-			_, _ = fmt.Fprintf(w, " - Object %d: %s\n", obj.ID, obj.Value)
-		}
-	}
-}
-
 // readFCsForFingerprint are the read-style function codes probed by SupportsFunction (FC08, FC43, FC03, FC04, FC01, FC02, FC11, FC18, FC20).
 var readFCsForFingerprint = []modbus.FunctionCode{
 	modbus.FCDiagnostics,           // 0x08
@@ -876,249 +666,4 @@ var readFCsForFingerprint = []modbus.FunctionCode{
 	modbus.FCReportServerID,        // 0x11
 	modbus.FCReadFIFOQueue,         // 0x18
 	modbus.FCReadFileRecord,        // 0x14 (FC20)
-}
-
-// FingerprintDeviceProbe probes each requested unit with SupportsFunction for supported read FCs and prints results.
-// Uses --interval (ms) between probes; no parallel.
-func FingerprintDeviceProbe(cfg config.FingerprintConfig) error {
-	units, err := parseUnitIDs(cfg.UnitID)
-	if err != nil {
-		return err
-	}
-	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	fmt.Printf("🔍 Fingerprinting device at %s (supported read functions per unit)...\n", modbusURL)
-
-	conf := buildClientConfig(modbusURL, time.Duration(cfg.Timeout)*time.Millisecond, false)
-	if err := modbus.ValidateConfig(conf); err != nil {
-		return fmt.Errorf("invalid config: %w", err)
-	}
-	mc, err := modbus.New(conf)
-	if err != nil {
-		return fmt.Errorf("failed to create client: %w", err)
-	}
-	if err := mc.Open(); err != nil {
-		return fmt.Errorf("%w: %v", ErrTCPConnection, err)
-	}
-	defer func() { _ = mc.Close() }()
-
-	interval := time.Duration(cfg.Interval) * time.Millisecond
-	for i, unit := range units {
-		if i > 0 && interval > 0 {
-			time.Sleep(interval)
-		}
-		if len(units) > 1 {
-			fmt.Printf("\n--- Unit ID %d ---\n", unit)
-		}
-		var supported []string
-		for _, fc := range readFCsForFingerprint {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Millisecond)
-			ok, err := mc.SupportsFunction(ctx, unit, fc)
-			cancel()
-			if err != nil {
-				if len(units) > 1 {
-					fmt.Printf("⚠️ Unit %d: %v\n", unit, err)
-					break
-				}
-				return err
-			}
-			if ok {
-				supported = append(supported, fc.String())
-			}
-			if interval > 0 {
-				time.Sleep(interval)
-			}
-		}
-		if len(supported) > 0 {
-			fmt.Printf("✅ Unit %d: supported read functions:\n", unit)
-			for _, s := range supported {
-				fmt.Printf("  %s\n", s)
-			}
-		} else if len(units) == 1 {
-			fmt.Printf("— No supported read functions detected for unit %d\n", unit)
-		}
-	}
-	return nil
-}
-
-// RunDiagnostics sends FC08 Diagnostics and prints the response.
-func RunDiagnostics(cfg config.DiagnosticConfig) error {
-	subFuncCode, err := config.ParseDiagnosticSubFunction(cfg.SubFunction)
-	if err != nil {
-		return err
-	}
-	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	fmt.Printf("🔍 Sending FC08 Diagnostics to %s (unit %d, sub-function %s / 0x%04X)...\n", modbusURL, cfg.UnitID, cfg.SubFunction, subFuncCode)
-
-	conf := buildClientConfig(modbusURL, time.Duration(cfg.Timeout)*time.Millisecond, false)
-	if err := modbus.ValidateConfig(conf); err != nil {
-		return fmt.Errorf("invalid config: %w", err)
-	}
-
-	mc, err := modbus.New(conf)
-	if err != nil {
-		return fmt.Errorf("failed to create client: %w", err)
-	}
-	if err := mc.Open(); err != nil {
-		return fmt.Errorf("%w: %v", ErrTCPConnection, err)
-	}
-	defer func() { _ = mc.Close() }()
-
-	var data []byte
-	if cfg.Data != "" {
-		data, err = hex.DecodeString(cfg.Data)
-		if err != nil {
-			return fmt.Errorf("invalid hex data: %w", err)
-		}
-	} else {
-		data = []byte{0x00, 0x00}
-	}
-
-	sf := modbus.DiagnosticSubFunction(subFuncCode)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Millisecond)
-	defer cancel()
-
-	resp, err := mc.Diagnostics(ctx, cfg.UnitID, sf, data)
-	if err != nil {
-		return fmt.Errorf("FC08 Diagnostics failed: %w", err)
-	}
-
-	fmt.Printf("✅ Diagnostics response:\n")
-	fmt.Printf("  Sub-function: 0x%04X (%s)\n", uint16(resp.SubFunction), resp.SubFunction)
-	fmt.Printf("  Data:         % X\n", resp.Data)
-	return nil
-}
-
-// RunReportServerId sends FC17 Report Server ID for one or more unit IDs.
-func RunReportServerId(cfg config.ReportServerIdConfig) error {
-	units, err := parseUnitIDs(cfg.UnitID)
-	if err != nil {
-		return err
-	}
-	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	fmt.Printf("🔍 Sending FC17 Report Server ID to %s...\n", modbusURL)
-
-	conf := buildClientConfig(modbusURL, time.Duration(cfg.Timeout)*time.Millisecond, false)
-	if err := modbus.ValidateConfig(conf); err != nil {
-		return fmt.Errorf("invalid config: %w", err)
-	}
-
-	useParallel := len(units) > 1 && cfg.Parallel > 1
-	if !useParallel {
-		mc, err := modbus.New(conf)
-		if err != nil {
-			return fmt.Errorf("failed to create client: %w", err)
-		}
-		if err := mc.Open(); err != nil {
-			return fmt.Errorf("%w: %v", ErrTCPConnection, err)
-		}
-		defer func() { _ = mc.Close() }()
-
-		for _, unit := range units {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Millisecond)
-			if len(units) > 1 {
-				fmt.Printf("\n--- Unit ID %d ---\n", unit)
-			}
-			rs, err := mc.ReportServerID(ctx, unit)
-			cancel()
-			if err != nil {
-				if len(units) > 1 {
-					fmt.Printf("⚠️ Unit %d: %v\n", unit, err)
-					continue
-				}
-				return fmt.Errorf("FC17 Report Server ID failed: %w", err)
-			}
-			printReportServerIdResult(os.Stdout, unit, rs)
-		}
-		return nil
-	}
-
-	// Parallel path
-	n := int(cfg.Parallel)
-	if n > len(units) {
-		n = len(units)
-	}
-	clients := make([]*modbus.Client, 0, n)
-	for i := 0; i < n; i++ {
-		mc, err := modbus.New(conf)
-		if err != nil {
-			for _, c := range clients {
-				_ = c.Close()
-			}
-			return fmt.Errorf("failed to create client: %w", err)
-		}
-		if err := mc.Open(); err != nil {
-			for _, c := range clients {
-				_ = c.Close()
-			}
-			return fmt.Errorf("%w: %v", ErrTCPConnection, err)
-		}
-		clients = append(clients, mc)
-	}
-	defer func() {
-		for _, c := range clients {
-			_ = c.Close()
-		}
-	}()
-
-	type rsResult struct {
-		unit   uint8
-		output string
-		err    error
-	}
-	unitsCh := make(chan uint8, len(units))
-	for _, u := range units {
-		unitsCh <- u
-	}
-	close(unitsCh)
-	resultsCh := make(chan rsResult, len(units))
-
-	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		mc := clients[i]
-		go func() {
-			defer wg.Done()
-			for unit := range unitsCh {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Millisecond)
-				rs, err := mc.ReportServerID(ctx, unit)
-				cancel()
-				buf := &bytes.Buffer{}
-				if err == nil {
-					printReportServerIdResult(buf, unit, rs)
-				}
-				resultsCh <- rsResult{unit: unit, output: buf.String(), err: err}
-			}
-		}()
-	}
-	go func() {
-		wg.Wait()
-		close(resultsCh)
-	}()
-
-	var results []rsResult
-	for r := range resultsCh {
-		results = append(results, r)
-	}
-	sort.Slice(results, func(i, j int) bool { return results[i].unit < results[j].unit })
-	for _, r := range results {
-		fmt.Printf("\n--- Unit ID %d ---\n", r.unit)
-		if r.err != nil {
-			fmt.Printf("⚠️ Unit %d: %v\n", r.unit, r.err)
-		} else {
-			fmt.Print(r.output)
-		}
-	}
-	return nil
-}
-
-func printReportServerIdResult(w io.Writer, unit uint8, rs *modbus.ReportServerIDResponse) {
-	_, _ = fmt.Fprintf(w, "✅ Report Server ID (unit %d):\n", unit)
-	_, _ = fmt.Fprintf(w, "  Data: % X\n", rs.Data)
-	if rs.RunIndicatorStatus != nil {
-		status := "OFF"
-		if *rs.RunIndicatorStatus {
-			status = "ON"
-		}
-		_, _ = fmt.Fprintf(w, "  Run Indicator: %s\n", status)
-	}
 }

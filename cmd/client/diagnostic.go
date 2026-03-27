@@ -2,9 +2,9 @@ package client
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
@@ -37,30 +37,37 @@ var diagnosticCmd = &cobra.Command{
   # Specific unit ID
   modbusctl client diagnostic --ip 192.168.1.10 --unit 5 --sub-function returnquerydata
 `,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validate.CheckDiagnosticConfig(diagnosticCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("invalid input: %w", err)
 		}
-
-		if err := modbus.RunDiagnostics(diagnosticCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
+		outFmt, err := format.Parse(diagnosticCfg.OutputFormat)
+		if err != nil {
+			return err
 		}
+		result, err := modbus.CollectDiagnostics(diagnosticCfg)
+		if err != nil {
+			return err
+		}
+		return format.Write(cmd.OutOrStdout(), outFmt, result)
 	},
 }
 
 func init() {
 	ClientCmd.AddCommand(diagnosticCmd)
 	diagnosticCfg = config.DiagnosticConfig{
-		IP:          "",
-		Port:        502,
-		UnitID:      1,
-		Timeout:     2000,
-		SubFunction: "returnquerydata",
-		Data:        "",
+		OutputFormat: string(format.FormatText),
+		IP:           "",
+		Port:         502,
+		UnitID:       1,
+		Timeout:      2000,
+		SubFunction:  "returnquerydata",
+		Data:         "",
 	}
 	config.LoadFromEnv(&diagnosticCfg)
 	config.RegisterFlags(diagnosticCmd, &diagnosticCfg)
+	if err := format.RegisterStdoutFormatFlagCompletion(diagnosticCmd); err != nil {
+		panic(err)
+	}
 	config.RegisterDiagnosticSubFunctionCompletion(diagnosticCmd)
 }

@@ -2,10 +2,10 @@ package client
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/validate"
 
@@ -34,17 +34,20 @@ var scanClientCmd = &cobra.Command{
   # Use environment variables
   MODBUSCTL_IP=192.168.1.100 MODBUSCTL_START=0 MODBUSCTL_END=10 MODBUSCTL_OUTPUT=scan.mcap modbusctl client scan
 `,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		scanCfg.Debug = cli.Debug(cmd)
 		if err := validate.CheckScanConfig(scanCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("invalid input: %w", err)
 		}
-
-		if err := modbus.ScanAndWriteMCAP(scanCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
+		outFmt, err := format.Parse(scanCfg.OutputFormat)
+		if err != nil {
+			return err
 		}
+		result, err := modbus.ScanAndWriteMCAP(scanCfg)
+		if err != nil {
+			return err
+		}
+		return format.Write(cmd.OutOrStdout(), outFmt, result)
 	},
 }
 
@@ -61,6 +64,7 @@ func init() {
 		StartAddress:            1,
 		EndAddress:              65535,
 		OutputFile:              "",
+		OutputFormat:            string(format.FormatText),
 		Algo:                    "safe",
 		Step:                    1000,
 		StepHalfOffset:          false,
@@ -75,6 +79,9 @@ func init() {
 	}
 	config.LoadFromEnv(&scanCfg)
 	config.RegisterFlags(scanClientCmd, &scanCfg)
+	if err := format.RegisterStdoutFormatFlagCompletion(scanClientCmd); err != nil {
+		panic(err)
+	}
 	config.RegisterScanAlgoCompletion(scanClientCmd)
 	config.RegisterFunctionCompletion(scanClientCmd)
 }

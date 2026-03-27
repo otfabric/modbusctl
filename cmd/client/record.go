@@ -6,6 +6,7 @@ import (
 
 	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
@@ -29,17 +30,21 @@ var recordCmd = &cobra.Command{
   # Use environment variables instead of CLI arguments
   MODBUSCTL_IP=192.168.1.100 MODBUSCTL_INPUT=registers.yaml MODBUSCTL_OUTPUT=data.mcap MODBUSCTL_INTERVAL=5 MODBUSCTL_DURATION=60 modbusctl client record
 `,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		recordCfg.Debug = cli.Debug(cmd)
 		if err := validate.CheckRecordConfig(recordCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("invalid input: %w", err)
 		}
-		fmt.Println("⚙️ Running record mode")
-		if err := modbus.RecordAndWriteMCAP(recordCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
+		fmt.Fprintf(os.Stderr, "⚙️ Running record mode\n")
+		outFmt, err := format.Parse(recordCfg.OutputFormat)
+		if err != nil {
+			return err
 		}
+		result, err := modbus.RecordAndWriteMCAP(recordCfg)
+		if err != nil {
+			return err
+		}
+		return format.Write(cmd.OutOrStdout(), outFmt, result)
 	},
 }
 
@@ -51,15 +56,19 @@ func init() {
 			Port: 502,
 			Unit: 1,
 		},
-		Function:   3,
-		InputFile:  "",
-		Interval:   5000,  // Default to 5 seconds
-		Duration:   60000, // Default to 1 minute
-		OutputFile: "",
-		Debug:      false,
+		Function:     3,
+		InputFile:    "",
+		Interval:     5000,  // Default to 5 seconds
+		Duration:     60000, // Default to 1 minute
+		OutputFile:   "",
+		OutputFormat: string(format.FormatText),
+		Debug:        false,
 	}
 	config.LoadFromEnv(&recordCfg)
 	config.RegisterFlags(recordCmd, &recordCfg)
+	if err := format.RegisterStdoutFormatFlagCompletion(recordCmd); err != nil {
+		panic(err)
+	}
 	config.RegisterFunctionCompletion(recordCmd)
 	if recordCfg.InputFile == "" {
 		if err := recordCmd.MarkFlagRequired("input"); err != nil {

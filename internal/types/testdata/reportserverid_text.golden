@@ -1,0 +1,11 @@
+🔍 Sending FC17 Report Server ID to tcp://192.168.1.1:502...
+
+--- Unit ID 1 ---
+✅ Report Server ID (unit 1):
+  Data: aa
+  Run Indicator: OFF
+
+--- Unit ID 2 ---
+✅ Report Server ID (unit 2):
+  Data: bbbb
+  Run Indicator: ON

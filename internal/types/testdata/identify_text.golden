@@ -1,0 +1,6 @@
+🔍 Connecting to tcp://192.168.1.1:502...
+✅ Device Identification (Category: 1, Conformity Level: 0x83, More Follows: false, Next Object ID: 0, Object Count: 2)
+ - Object 0: Acme [VendorName]
+ - Object 1: X [ProductCode]
+  FC17 Report Server ID: deadbeef
+  Run Indicator: ON

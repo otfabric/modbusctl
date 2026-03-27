@@ -28,8 +28,8 @@ func TestObjectDescription(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := objectDescription(modbus.DeviceIDObjectID(tt.id)); got != tt.want {
-			t.Errorf("objectDescription(%#02x) = %q, want %q", tt.id, got, tt.want)
+		if got := ObjectDescription(modbus.DeviceIDObjectID(tt.id)); got != tt.want {
+			t.Errorf("ObjectDescription(%#02x) = %q, want %q", tt.id, got, tt.want)
 		}
 	}
 }

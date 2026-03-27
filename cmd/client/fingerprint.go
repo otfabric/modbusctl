@@ -2,9 +2,9 @@ package client
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
@@ -29,28 +29,35 @@ var fingerprintCmd = &cobra.Command{
   modbusctl client fingerprint --ip 192.168.1.10 --unit 1-10
   modbusctl client fingerprint --ip 192.168.1.10 --unit all
 `,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validate.CheckFingerprintConfig(fingerprintCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("invalid input: %w", err)
 		}
-
-		if err := modbus.FingerprintDeviceProbe(fingerprintCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
+		outFmt, err := format.Parse(fingerprintCfg.OutputFormat)
+		if err != nil {
+			return err
 		}
+		result, err := modbus.CollectFingerprint(fingerprintCfg)
+		if err != nil {
+			return err
+		}
+		return format.Write(cmd.OutOrStdout(), outFmt, result)
 	},
 }
 
 func init() {
 	ClientCmd.AddCommand(fingerprintCmd)
 	fingerprintCfg = config.FingerprintConfig{
-		IP:       "",
-		Port:     502,
-		UnitID:   "1",
-		Timeout:  2000,
-		Interval: 0,
+		OutputFormat: string(format.FormatText),
+		IP:           "",
+		Port:         502,
+		UnitID:       "1",
+		Timeout:      2000,
+		Interval:     0,
 	}
 	config.LoadFromEnv(&fingerprintCfg)
 	config.RegisterFlags(fingerprintCmd, &fingerprintCfg)
+	if err := format.RegisterStdoutFormatFlagCompletion(fingerprintCmd); err != nil {
+		panic(err)
+	}
 }

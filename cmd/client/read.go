@@ -6,6 +6,7 @@ import (
 
 	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
@@ -60,9 +61,13 @@ func init() {
 		Ascii:         false,
 		SwapBytes:     false,
 		OutputFile:    "",
+		OutputFormat:  string(format.FormatText),
 		Debug:         false,
 	}
 	config.LoadFromEnv(&readCfg)
 	config.RegisterFlags(readCmd, &readCfg)
+	if err := format.RegisterStdoutFormatFlagCompletion(readCmd); err != nil {
+		panic(err)
+	}
 	config.RegisterFunctionCompletion(readCmd)
 }

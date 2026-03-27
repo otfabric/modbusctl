@@ -3,6 +3,7 @@ package modbus
 import (
 	"container/heap"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -1334,14 +1335,14 @@ func printScanWorstCaseHint(cfg config.ScanConfig, algo string) {
 	switch algo {
 	case "safe":
 		worst := rangeLen * 8 // at most 8 candidate sizes (125..1) per address
-		fmt.Printf("Safe algo: worst case with no hits = %d addresses × 8 sizes = %d reads\n", rangeLen, worst)
+		fmt.Fprintf(os.Stderr, "Safe algo: worst case with no hits = %d addresses × 8 sizes = %d reads\n", rangeLen, worst)
 	case "smart":
 		initialChunks := (rangeLen + 124) / 125
 		if initialChunks == 0 {
 			initialChunks = 1
 		}
 		worst := 2*rangeLen - initialChunks
-		fmt.Printf("Smart algo: worst case with no hits ≈ 2×%d − %d = %d reads\n", rangeLen, initialChunks, worst)
+		fmt.Fprintf(os.Stderr, "Smart algo: worst case with no hits ≈ 2×%d − %d = %d reads\n", rangeLen, initialChunks, worst)
 	case "deep":
 		initialChunks := (rangeLen + 124) / 125
 		if initialChunks == 0 {
@@ -1349,7 +1350,7 @@ func printScanWorstCaseHint(cfg config.ScanConfig, algo string) {
 		}
 		phase1 := 2*rangeLen - initialChunks
 		phase2 := uint32(500)
-		fmt.Printf("Deep algo: worst case = phase 1 (smart) %d reads + phase 2 up to %d refinement = up to %d reads\n", phase1, phase2, phase1+phase2)
+		fmt.Fprintf(os.Stderr, "Deep algo: worst case = phase 1 (smart) %d reads + phase 2 up to %d refinement = up to %d reads\n", phase1, phase2, phase1+phase2)
 	case "stepped":
 		step := uint32(cfg.Step)
 		if step < 1 {
@@ -1360,16 +1361,16 @@ func printScanWorstCaseHint(cfg config.ScanConfig, algo string) {
 			nSteps = (rangeLen-1)/step + 1
 		}
 		worst := nSteps * 6
-		fmt.Printf("Stepped algo (step=%d): worst case with no hits = %d steps × 6 probes = %d reads\n", cfg.Step, nSteps, worst)
+		fmt.Fprintf(os.Stderr, "Stepped algo (step=%d): worst case with no hits = %d steps × 6 probes = %d reads\n", cfg.Step, nSteps, worst)
 	case "linear":
 		nBlocks := (rangeLen + 124) / 125
 		if rangeLen > 0 && nBlocks == 0 {
 			nBlocks = 1
 		}
-		fmt.Printf("Linear algo: worst case with no hits = %d probes (one per 125-block)\n", nBlocks)
+		fmt.Fprintf(os.Stderr, "Linear algo: worst case with no hits = %d probes (one per 125-block)\n", nBlocks)
 	case "boundary":
 		// 1 seed + left expand (up to 8) + left binary (log2 range) + right expand (8) + right binary (log2 range)
-		fmt.Printf("Boundary algo: 1 seed + left/right expansion + binary search (depends on range)\n")
+		fmt.Fprintf(os.Stderr, "Boundary algo: 1 seed + left/right expansion + binary search (depends on range)\n")
 	case "sunspec":
 		bases := len(sunspec.DefaultBaseAddresses)
 		if cfg.SunSpecBases != "" {
@@ -1385,6 +1386,6 @@ func printScanWorstCaseHint(cfg config.ScanConfig, algo string) {
 		if maxM <= 0 {
 			maxM = 256
 		}
-		fmt.Printf("SunSpec algo: worst case = %d base probes + up to %d models (header + body reads)\n", bases, maxM)
+		fmt.Fprintf(os.Stderr, "SunSpec algo: worst case = %d base probes + up to %d models (header + body reads)\n", bases, maxM)
 	}
 }

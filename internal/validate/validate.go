@@ -87,7 +87,7 @@ func CheckScanConfig(cfg config.ScanConfig) error {
 		return fmt.Errorf("delay must be between 0 and 60000 milliseconds (1 minute)")
 	}
 	if !config.ValidScanAlgo(cfg.Algo) {
-		return fmt.Errorf("algo must be one of %v, got %q", config.ScanAlgoValues, cfg.Algo)
+		return fmt.Errorf("algo must be one of %v, got %q", config.ScanAlgorithms(), cfg.Algo)
 	}
 	algo := strings.ToLower(strings.TrimSpace(cfg.Algo))
 	if algo == "sunspec" {

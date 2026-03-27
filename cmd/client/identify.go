@@ -2,10 +2,11 @@ package client
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
@@ -37,22 +38,44 @@ var identifyCmd = &cobra.Command{
   modbusctl client identify --ip 192.168.1.10 --unit all --parallel 10
   MODBUSCTL_IP=192.168.1.10 modbusctl client identify
 `,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validate.CheckIdentifyConfig(identifyCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("invalid input: %w", err)
 		}
 
-		if err := modbus.DeviceIdentification(identifyCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
+		outFmt, err := format.Parse(identifyCfg.OutputFormat)
+		if err != nil {
+			return err
 		}
+
+		result, err := modbus.CollectDeviceIdentification(identifyCfg)
+		if err != nil {
+			return err
+		}
+
+		if err := format.Write(cmd.OutOrStdout(), outFmt, result); err != nil {
+			return err
+		}
+
+		return identifyExitError(result)
 	},
+}
+
+// identifyExitError preserves legacy exit status: exactly one requested unit with a Modbus-level failure exits non-zero.
+func identifyExitError(result *types.IdentifyResult) error {
+	if result == nil || len(result.Units) != 1 {
+		return nil
+	}
+	if result.Units[0].Error != "" {
+		return fmt.Errorf("%s", result.Units[0].Error)
+	}
+	return nil
 }
 
 func init() {
 	ClientCmd.AddCommand(identifyCmd)
 	identifyCfg = config.IdentifyConfig{
+		OutputFormat: string(format.FormatText),
 		UnitClientConfig: config.UnitClientConfig{
 			IP:       "",
 			Port:     502,
@@ -63,4 +86,7 @@ func init() {
 	}
 	config.LoadFromEnv(&identifyCfg)
 	config.RegisterFlags(identifyCmd, &identifyCfg)
+	if err := format.RegisterStdoutFormatFlagCompletion(identifyCmd); err != nil {
+		panic(err)
+	}
 }

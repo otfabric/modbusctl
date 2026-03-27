@@ -6,7 +6,7 @@
 [![CI](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/otfabric/modbusctl?label=release)](https://github.com/otfabric/modbusctl/releases)
 
-Modbusctl is a versatile command-line utility designed for efficient communication, scanning, recording, replaying, decoding, and analysis of Modbus TCP devices. It simplifies working with Modbus data through convenient CLI commands, environment variable integration, and flexible output formats (MCAP, JSON, CSV).
+Modbusctl is a versatile command-line utility for Modbus TCP: communication, scanning, recording, replay, decode, and analysis. It supports environment-driven configuration, **MCAP** capture, **mcap convert** exports (**CSV** / **JSON** files), and **client** commands with a shared stdout **`--format`** (**text**, **json**, **table**) for scripting and tables—separate from **`mcap convert --format`** (**csv** / **json**). See [docs/json-output.md](docs/json-output.md) for JSON field conventions on client commands.
 
 ## 📖 Table of Contents
 
@@ -49,7 +49,8 @@ The following features are available:
 | Frequencies      | Extract potential frequency readings around 50Hz from MCAP files to help finding the correct data ranges                  |
 | Discovery        | Discover Modbus devices within specified subnets.                                                                         |
 | SunSpec          | Transport-level SunSpec discovery: detect marker/base, enumerate model headers, print address map, or combined probe (no semantic decoding). |
-| Completion       | Generate shell completion scripts for bash, zsh, fish, or PowerShell.                                                    |
+| Client `--format` | Many **`modbusctl client`** commands accept **`--format text|json|table`** (or **`MODBUSCTL_OUTPUT_FORMAT`**) for structured stdout; **`mcap convert`** uses a different **`--format`** (**csv** / **json**). |
+| Completion       | Generate shell completion scripts for bash, zsh, fish, or PowerShell; enum flags (**`--format`**, **`--algo`**, **`--function`**, **`--regtype`**, **`--sub-function`**, etc.) support tab completion. |
 
 The following tree view gives the overiew of available commands.
 
@@ -148,7 +149,7 @@ cd modbusctl
 make build build-all
 ```
 
-The binary will be generated as `modbusctl`.
+`make build` writes the binary to **`bin/modbusctl`** (see [Building](#building)).
 
 ## 📦 GitHub Releases
 
@@ -161,6 +162,10 @@ Pre-built binaries for various platforms are available for download on the [GitH
 **Global flag:** `--debug` — print debug information (available for all commands; per-command debug behavior is documented where applicable).
 
 **Client address:** All client commands accept either `--url` (e.g. `tcp://192.168.1.10:502`) or `--ip` and optionally `--port`; the two styles are **mutually exclusive** (you must set one and cannot set both).
+
+**Client stdout format (`--format`):** Commands **identify**, **read**, **scan**, **record**, **reportserverid**, **fingerprint**, **diagnostic**, and **client sunspec** (detect, models, map, probe) accept **`--format text`** (default), **`json`**, or **`table`**, or set **`MODBUSCTL_OUTPUT_FORMAT`**. This controls **only** the final human- or machine-readable **result on stdout**. It is **not** the same as **`modbusctl mcap convert --format`**, which chooses **csv** or **json** export for MCAP files (env **`MODBUSCTL_FORMAT`**).
+
+**Scan and record:** Live progress (scan lines, per-block lines, worst-case hints, **`--debug`** traces, record iteration messages) goes to **stderr**; **stdout** is a **single** formatted result after the run (summary for scan/record). When using **`--format json`**, redirect or separate streams if scripts must not mix progress with JSON.
 
 ```console
 modbusctl [command] [flags]
@@ -191,7 +196,7 @@ modbusctl discover
 modbusctl version
 ```
 
-**Shell completion:** Enum-style flags support tab completion (e.g. `--algo`, `--format`, `--function`, `--sub-function` for diagnostic). To enable completion in your shell, generate and source the completion script for your shell (see [Cobra’s shell completion guide](https://github.com/spf13/cobra/blob/main/shell_completions.md)); for example, `modbusctl completion bash` (or `zsh`/`fish`/`powershell`).
+**Shell completion:** Enum-style flags support tab completion, including **`--format`** (client: text/json/table; **`mcap convert`**: csv/json), **`--algo`**, **`--function`**, **`--regtype`**, and **`--sub-function`**. To enable completion, generate and source the script (see [Cobra’s shell completion guide](https://github.com/spf13/cobra/blob/main/shell_completions.md)); for example, `modbusctl completion bash` (or `zsh` / `fish` / `powershell`).
 
 ### Common Commands
 
@@ -208,7 +213,7 @@ By default the command requests all categories (basic + regular + extended). You
 | `N-M,P,...`| Mix of range(s) and list   | `--unit 1-10,255` |
 | `all`      | All units 1–255            | `--unit all`      |
 
-When probing multiple units, use `--parallel N` (default 10) to run probes concurrently.
+When probing multiple units, use `--parallel N` (default 10) to run probes concurrently. Use **`--format json`** or **`--format table`** for machine-readable or tabular output.
 
 ```console
 # All categories (default), single unit
@@ -338,22 +343,23 @@ modbusctl client reportserverid --ip 192.168.1.10 --unit 1-10
 modbusctl client reportserverid --ip 192.168.1.10 --unit all --parallel 10
 ```
 
-Example output:
+Example output (default **`--format text`**):
 
 ```console
-🔍 Sending FC17 Report Server ID to 192.168.1.10:502...
-✅ Report Server ID (unit 1, byte count: 5):
+🔍 Sending FC17 Report Server ID to tcp://192.168.1.10:502...
+✅ Report Server ID (unit 1):
   Data: 01 FF 48 55 41
-  Server ID: 0x01 (1)
-  Run Indicator: 0xFF (ON)
-  Additional Data: 48 55 41
+  Run Indicator: ON
 ```
 
 #### Read registers (single or block)
 
+Use **`--format`** for stdout (after any MCAP write). **`--output`** still writes MCAP when set.
+
 ```console
 modbusctl client read --ip 192.168.1.10 --start 30001 --count 2
 modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --output data.mcap
+modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --format json
 modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --ascii
 modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --ascii --swap-bytes
 ```
@@ -372,7 +378,7 @@ Scan discovers which register ranges are readable and writes successful reads to
 | **boundary** | Given a known-good read (`--seed-start`, `--seed-count`), expands left/right with exponential then binary search; **clamps** to `--start`/`--end` (no skip). Invalid or out-of-range seed → no tasks. | One known-good range; find maximal readable interval around it. |
 | **sunspec** | SunSpec protocol-aware: probes candidate base addresses for the SunS marker, then walks the model chain — reads each header (2 regs) followed by the full model body (in chunks of ≤125 regs). No `--start`/`--end` needed. Use `--sunspec-base` to skip detection; `--sunspec-bases` for custom candidates; `--sunspec-max-models` / `--sunspec-max-span` for limits. | SunSpec-compliant devices; full model capture to MCAP. |
 
-**Flags:** `--ip` (required), `--start`, `--end`, `--function` (3=holding, 4=input), `--delay` (ms between requests), `--algo` (safe | smart | deep | stepped | linear | boundary | sunspec), `--step` (stepped algo only, default 1000), `--step-half-offset` (stepped: also probe at step/2), `--retry-timeout` (0 or 1: retry once on timeout/transport error), `--seed-start` and `--seed-count` (boundary algo: known-good read), `--sunspec-base` (sunspec: known base, skip detection), `--sunspec-bases` (sunspec: custom candidate bases), `--sunspec-max-models` (sunspec: max headers, 0=256), `--sunspec-max-span` (sunspec: max address span, 0=unlimited), `--output` (MCAP file). Use global `--debug` to print each read range (start, count, end) before attempting. Default algo is **safe**.
+**Flags:** `--ip` (required), `--start`, `--end`, `--function` (3=holding, 4=input), `--delay` (ms between requests), `--algo` (safe | smart | deep | stepped | linear | boundary | sunspec), `--step` (stepped algo only, default 1000), `--step-half-offset` (stepped: also probe at step/2), `--retry-timeout` (0 or 1: retry once on timeout/transport error), `--seed-start` and `--seed-count` (boundary algo: known-good read), `--sunspec-base` (sunspec: known base, skip detection), `--sunspec-bases` (sunspec: custom candidate bases), `--sunspec-max-models` (sunspec: max headers, 0=256), `--sunspec-max-span` (sunspec: max address span, 0=unlimited), `--output` (MCAP file), **`--format`** (stdout summary: **text** | **json** | **table**). Use global **`--debug`** to print each read range (start, count, end) on **stderr** before attempting. Default algo is **safe**.
 
 ```console
 # Safe (default): conservative, low device load
@@ -413,14 +419,15 @@ modbusctl client scan --ip 192.168.1.10 --algo sunspec --sunspec-base 40000 --ou
 modbusctl client scan --ip 192.168.1.10 --algo sunspec --sunspec-bases "0,40000,50000" --output sunspec.mcap
 ```
 
-For every algorithm, a one-line **worst-case hint** is printed at the start (how many reads if there were no hits at all), using your `--start` and `--end` range. At the end of a scan, summary statistics are printed: algorithm, total requests, success/failed counts, **exception/timeout/transport error breakdown** (when non-zero), blocks and registers captured, average response time, duration, and output path. Example:
+For every algorithm, a one-line **worst-case hint** and all **live progress** (scanning banner, each **Block:** line, **`--debug`** traces) go to **stderr**. **Stdout** prints **one** final summary after the run (default **text**, or **json** / **table** via **`--format`**). The summary includes algorithm, total requests, success/failed counts, **exception/timeout/transport error breakdown** (when non-zero), blocks and registers captured, average response time, duration, and output path.
 
 ```console
+# stderr (illustrative)
 Scanning registers from 0 to 1000 with function code 3 (algo: smart)
 Block: Start: 0, End: 124, Count: 125
 Block: Start: 250, End: 311, Count: 62
-...
 
+# stdout (default text)
 Algo: smart
 Requests: 418
 Success: 91
@@ -463,8 +470,11 @@ Failures are classified (success, Modbus exception, timeout, transport error) so
 
 #### Record registers over time (interval, duration based)
 
+Progress messages (e.g. each iteration and recorded block) go to **stderr**; **stdout** is a **single** final summary (**`--format text|json|table`**).
+
 ```console
 modbusctl client record --ip 192.168.1.10 --input register-ranges.json --interval 1000 --duration 60000 --output session.mcap
+modbusctl client record --ip 192.168.1.10 --input register-ranges.json --interval 1000 --duration 60000 --output session.mcap --format json
 ```
 
 ####  Statically host data (no changes in data)
@@ -533,19 +543,19 @@ Transport-level SunSpec discovery: detect the SunSpec "SunS" marker, enumerate m
 
 | Command | Description |
 |--------|-------------|
-| **detect** | Is the unit SunSpec? Shows base address; use `--bases 0,40000,50000` to probe specific bases, `--verbose` for attempt log, `--json` for JSON. |
-| **models** | Enumerate the SunSpec model chain (start/end address, model ID, length, end model). Use `--base` to skip detection when base is known; `--max-models`, `--max-address-span` to limit reads; `--json` for JSON. |
-| **map** | Human-friendly address map (marker regs + model ranges). Options: `--show-header-regs`, `--show-next`, `--compact`, `--json`. |
+| **detect** | Is the unit SunSpec? Shows base address; use `--bases 0,40000,50000` to probe specific bases, `--verbose` for attempt log, `--format json` for JSON. |
+| **models** | Enumerate the SunSpec model chain (start/end address, model ID, length, end model). Use `--base` to skip detection when base is known; `--max-models`, `--max-address-span` to limit reads; `--format json` for JSON. |
+| **map** | Human-friendly address map (marker regs + model ranges). Options: `--show-header-regs`, `--show-next`, `--compact`, `--format json`. |
 | **probe** | One-shot summary: Modbus FC03/FC04/FC43 support plus SunSpec detection (base, model count, end model). Complements `fingerprint` and `identify`. |
 
 ```console
 # Detect SunSpec and show base address
 modbusctl client sunspec detect --url tcp://192.168.1.10:502 --unit 1
-modbusctl client sunspec detect --ip 192.168.1.10 --unit 1 --regtype holding --bases 0,40000,50000 --verbose --json
+modbusctl client sunspec detect --ip 192.168.1.10 --unit 1 --regtype holding --bases 0,40000,50000 --verbose --format json
 
 # List model headers (most-used)
 modbusctl client sunspec models --url tcp://192.168.1.10:502 --unit 1
-modbusctl client sunspec models --ip 192.168.1.10 --unit 1 --base 40000 --max-models 64 --json
+modbusctl client sunspec models --ip 192.168.1.10 --unit 1 --base 40000 --max-models 64 --format json
 
 # Address map view
 modbusctl client sunspec map --url tcp://192.168.1.10:502 --unit 1
@@ -553,12 +563,14 @@ modbusctl client sunspec map --ip 192.168.1.10 --unit 1 --show-header-regs --com
 
 # Combined fingerprint + SunSpec summary
 modbusctl client sunspec probe --url tcp://192.168.1.10:502 --unit 1
-modbusctl client sunspec probe --ip 192.168.1.10 --unit 1 --json
+modbusctl client sunspec probe --ip 192.168.1.10 --unit 1 --format json
 ```
+
+SunSpec subcommands use the same `--format` / `MODBUSCTL_OUTPUT_FORMAT` as other client commands (`text` default, `json`, `table`). A hidden parent flag `--json` is deprecated and maps to `--format json`.
 
 #### Shell completion (install)
 
-Generate and source the completion script for your shell so subcommands and flags (including enum values like `--regtype`, `--algo`, `--function`) are completed:
+Generate and source the completion script for your shell so subcommands and flags (including enum values like `--regtype`, `--algo`, `--function`, `--format` on client and `mcap convert`) are completed:
 
 ```console
 # Bash
@@ -577,12 +589,12 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 
 | Variable               | Type     | Description                                                 | Flag            | Default    |
 |------------------------|----------|-------------------------------------------------------------|-----------------|------------|
-| **MODBUSCTL_ALGO**        | string   | Scan algorithm: safe, smart, deep, stepped, linear, or boundary | `--algo`        | safe       |
+| **MODBUSCTL_ALGO**        | string   | Scan algorithm: safe, smart, deep, stepped, linear, boundary, or sunspec | `--algo`        | safe       |
 | **MODBUSCTL_COUNT**       | uint16   | Number of registers to read                              | `--count`       | 1          |
 | **MODBUSCTL_DELAY**       | uint16   | Delay in ms between client scan requests                 | `--delay`       | 0          |
 | **MODBUSCTL_DURATION**    | uint32   | Total duration to record in ms                           | `--duration`    | 60000      |
 | **MODBUSCTL_END**         | uint16   | End register address                                     | `--end`         | 65535      |
-| **MODBUSCTL_FORMAT**      | string   | Output format type (e.g., CSV, JSON)                     | `--format`      |            |
+| **MODBUSCTL_FORMAT**      | string   | **`mcap convert`** output type: **csv** or **json** (not client stdout) | `--format`      |            |
 | **MODBUSCTL_FUNCTION**    | uint8    | Function code (1=coil, 2=discrete, 3=holding, 4=input)   | `--function`    | 3          |
 | **MODBUSCTL_INPUT**       | string   | Input MCAP file or file to replay                        | `--input`       |            |
 | **MODBUSCTL_INTERFACE**   | string   | Network interface to use for discovery                   | `--interface`   | eth0       |
@@ -616,7 +628,7 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Maximum model headers to read; 0 = 256 (sunspec models) | `--max-models` | 0 |
 | **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Maximum address span from base; 0 = no limit (sunspec models) | `--max-address-span` | 0 |
 | **MODBUSCTL_VERBOSE**     | bool     | Show probe attempts or extra detail (e.g. sunspec detect) | `--verbose` | false |
-| **MODBUSCTL_JSON**        | bool     | Output JSON instead of human-readable (e.g. sunspec commands) | `--json` | false |
+| **MODBUSCTL_OUTPUT_FORMAT** | string | Client stdout format: **text**, **json**, or **table** (identify, read, scan, record, reportserverid, fingerprint, diagnostic, sunspec, …). Empty/unset defaults to **text**. Not used by `mcap convert` (see **MODBUSCTL_FORMAT**). | `--format` | text |
 
 Example usage:
 
@@ -636,7 +648,8 @@ modbusctl/
 │   └── server (Modbus TCP data replay server)
 ├── internal/
 │   ├── config (CLI & ENV config management)
-│   ├── format (MCAP, JSON, CSV format handling)
+│   ├── cli (shared Cobra helpers, e.g. enum flag completion)
+│   ├── format (MCAP I/O, **mcap** CSV/JSON export, client stdout rendering **text/json/table**)
 │   ├── modbus (Modbus TCP client/server logic)
 │   ├── types (Shared data types and data structures)
 │   └── validate (Input validation and checks)
@@ -674,4 +687,8 @@ make build-all
 ```console
 make test
 ```
+
+## 🗒️ Version History
+
+Release notes for each version are maintained in **[RELEASE.md](RELEASE.md)** (e.g. migration notes and breaking changes).
 

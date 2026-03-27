@@ -2,10 +2,11 @@ package client
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
@@ -31,22 +32,39 @@ var reportServerIdCmd = &cobra.Command{
   # Query all units in parallel
   modbusctl client reportserverid --ip 192.168.1.10 --unit all --parallel 10
 `,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validate.CheckReportServerIdConfig(reportServerIdCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("invalid input: %w", err)
 		}
-
-		if err := modbus.RunReportServerId(reportServerIdCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
+		outFmt, err := format.Parse(reportServerIdCfg.OutputFormat)
+		if err != nil {
+			return err
 		}
+		result, err := modbus.CollectReportServerID(reportServerIdCfg)
+		if err != nil {
+			return err
+		}
+		if err := format.Write(cmd.OutOrStdout(), outFmt, result); err != nil {
+			return err
+		}
+		return reportServerIDExitError(result)
 	},
+}
+
+func reportServerIDExitError(result *types.ReportServerIDResult) error {
+	if result == nil || len(result.Units) != 1 {
+		return nil
+	}
+	if result.Units[0].Error != "" {
+		return fmt.Errorf("%s", result.Units[0].Error)
+	}
+	return nil
 }
 
 func init() {
 	ClientCmd.AddCommand(reportServerIdCmd)
 	reportServerIdCfg = config.ReportServerIdConfig{
+		OutputFormat: string(format.FormatText),
 		UnitClientConfig: config.UnitClientConfig{
 			IP:       "",
 			Port:     502,
@@ -57,4 +75,7 @@ func init() {
 	}
 	config.LoadFromEnv(&reportServerIdCfg)
 	config.RegisterFlags(reportServerIdCmd, &reportServerIdCfg)
+	if err := format.RegisterStdoutFormatFlagCompletion(reportServerIdCmd); err != nil {
+		panic(err)
+	}
 }

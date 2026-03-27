@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -130,10 +131,11 @@ type UnitClientConfig struct {
 
 type IdentifyConfig struct {
 	UnitClientConfig
-	Basic    bool `env:"MODBUSCTL_IDENTIFY_BASIC" desc:"Request Basic category only (VendorName, ProductCode, MajorMinorRevision)" flag:"basic"`
-	Regular  bool `env:"MODBUSCTL_IDENTIFY_REGULAR" desc:"Request Regular category only (Basic + VendorUrl, ProductName, ModelName, UserApplicationName)" flag:"regular"`
-	Extended bool `env:"MODBUSCTL_IDENTIFY_EXTENDED" desc:"Request Extended category only (Regular + vendor-specific objects)" flag:"extended"`
-	ServerID bool `env:"MODBUSCTL_IDENTIFY_SERVERID" desc:"Also query FC17 Report Server ID for additional device information" flag:"server-id"`
+	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	Basic        bool   `env:"MODBUSCTL_IDENTIFY_BASIC" desc:"Request Basic category only (VendorName, ProductCode, MajorMinorRevision)" flag:"basic"`
+	Regular      bool   `env:"MODBUSCTL_IDENTIFY_REGULAR" desc:"Request Regular category only (Basic + VendorUrl, ProductName, ModelName, UserApplicationName)" flag:"regular"`
+	Extended     bool   `env:"MODBUSCTL_IDENTIFY_EXTENDED" desc:"Request Extended category only (Regular + vendor-specific objects)" flag:"extended"`
+	ServerID     bool   `env:"MODBUSCTL_IDENTIFY_SERVERID" desc:"Also query FC17 Report Server ID for additional device information" flag:"server-id"`
 }
 
 type ReadConfig struct {
@@ -144,17 +146,19 @@ type ReadConfig struct {
 	Ascii         bool   `env:"MODBUSCTL_ASCII" desc:"Attempt ASCII decoding for output" flag:"ascii"`
 	SwapBytes     bool   `env:"MODBUSCTL_BYTESWAP" desc:"Enable byte swapping for registers" flag:"byteswap"`
 	OutputFile    string `env:"MODBUSCTL_OUTPUT" desc:"Output MCAP file or directory" flag:"output"`
+	OutputFormat  string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Debug         bool   // set from global --debug (root persistent flag)
 }
 
 type RecordConfig struct {
 	DeviceConfig
-	Function   uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (3=holding, 4=input)" flag:"function"`
-	Interval   uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between reads" flag:"interval"`
-	Duration   uint32 `env:"MODBUSCTL_DURATION" desc:"Total duration to record in milliseconds" flag:"duration"`
-	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Input MCAP file to append to" flag:"input"`
-	OutputFile string `env:"MODBUSCTL_OUTPUT" desc:"Output MCAP file or directory" flag:"output"`
-	Debug      bool   // set from global --debug (root persistent flag)
+	Function     uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (3=holding, 4=input)" flag:"function"`
+	Interval     uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between reads" flag:"interval"`
+	Duration     uint32 `env:"MODBUSCTL_DURATION" desc:"Total duration to record in milliseconds" flag:"duration"`
+	InputFile    string `env:"MODBUSCTL_INPUT" desc:"Input MCAP file to append to" flag:"input"`
+	OutputFile   string `env:"MODBUSCTL_OUTPUT" desc:"Output MCAP file or directory" flag:"output"`
+	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	Debug        bool   // set from global --debug (root persistent flag)
 }
 
 // ScanAlgorithm selects the scan strategy: safe (conservative linear), smart (interval splitting), or deep (smart + boundary refinement).
@@ -183,6 +187,7 @@ type ScanConfig struct {
 	SunSpecBases            string `env:"MODBUSCTL_SUNSPEC_BASES" desc:"Sunspec algo: comma-separated candidate base addresses" flag:"sunspec-bases"`
 	SunSpecMaxModels        int    `env:"MODBUSCTL_SUNSPEC_MAX_MODELS" desc:"Sunspec algo: max model headers to read (0=256)" flag:"sunspec-max-models"`
 	SunSpecMaxSpan          uint16 `env:"MODBUSCTL_SUNSPEC_MAX_SPAN" desc:"Sunspec algo: max address span from base (0=no limit)" flag:"sunspec-max-span"`
+	OutputFormat            string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table (final summary on stdout; progress on stderr)" flag:"format"`
 	Debug                   bool   // set from global --debug (root persistent flag)
 }
 
@@ -234,23 +239,25 @@ type DiscoverConfig struct {
 
 // FingerprintConfig is used by the fingerprint command (probe supported read FCs per unit via HasUnitReadFunction).
 type FingerprintConfig struct {
-	URL      string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
-	IP       string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
-	Port     uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
-	UnitID   string `env:"MODBUSCTL_UNIT" desc:"Unit ID: single, range (1-10), list (1,5,25), mixed (1-10,255), or 'all'" flag:"unit"`
-	Timeout  uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds per probe" flag:"timeout"`
-	Interval uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between probes" flag:"interval"`
+	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
+	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
+	UnitID       string `env:"MODBUSCTL_UNIT" desc:"Unit ID: single, range (1-10), list (1,5,25), mixed (1-10,255), or 'all'" flag:"unit"`
+	Timeout      uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds per probe" flag:"timeout"`
+	Interval     uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between probes" flag:"interval"`
+	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 }
 
 // DiagnosticConfig is used by the diagnostic command (FC08 Diagnostics).
 type DiagnosticConfig struct {
-	URL         string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
-	IP          string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
-	Port        uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
-	UnitID      uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID of the Modbus device" flag:"unit"`
-	Timeout     uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds for the request" flag:"timeout"`
-	SubFunction string `env:"MODBUSCTL_SUB_FUNCTION" desc:"FC08 sub-function name (e.g. returnquerydata, clearcountersanddiagnosticreg)" flag:"sub-function"`
-	Data        string `env:"MODBUSCTL_DATA" desc:"Hex-encoded request data (e.g. 'A537'); defaults to 0000" flag:"data"`
+	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
+	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
+	UnitID       uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID of the Modbus device" flag:"unit"`
+	Timeout      uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds for the request" flag:"timeout"`
+	SubFunction  string `env:"MODBUSCTL_SUB_FUNCTION" desc:"FC08 sub-function name (e.g. returnquerydata, clearcountersanddiagnosticreg)" flag:"sub-function"`
+	Data         string `env:"MODBUSCTL_DATA" desc:"Hex-encoded request data (e.g. 'A537'); defaults to 0000" flag:"data"`
+	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 }
 
 // Diagnostic sub-functions (match github.com/boeboe/modbus DiagnosticSubFunction). Single source of truth for names and codes.
@@ -275,19 +282,24 @@ var diagnosticSubFunctions = []struct {
 	{"clearoverruncounterandflag", 0x0014},
 }
 
-// DiagnosticSubFunctionNames is the list of valid --sub-function values (for completion and validation).
-var DiagnosticSubFunctionNames []string
+// diagnosticSubFunctionNames is populated in init (valid --sub-function values).
+var diagnosticSubFunctionNames []string
 
 // diagnosticSubFunctionMap maps lowercase name -> code for ParseDiagnosticSubFunction.
 var diagnosticSubFunctionMap map[string]uint16
 
 func init() {
-	DiagnosticSubFunctionNames = make([]string, len(diagnosticSubFunctions))
+	diagnosticSubFunctionNames = make([]string, len(diagnosticSubFunctions))
 	diagnosticSubFunctionMap = make(map[string]uint16, len(diagnosticSubFunctions))
 	for i, sf := range diagnosticSubFunctions {
-		DiagnosticSubFunctionNames[i] = sf.name
+		diagnosticSubFunctionNames[i] = sf.name
 		diagnosticSubFunctionMap[sf.name] = sf.code
 	}
+}
+
+// DiagnosticSubFunctions returns valid FC08 --sub-function names (completion and validation).
+func DiagnosticSubFunctions() []string {
+	return diagnosticSubFunctionNames
 }
 
 // ParseDiagnosticSubFunction returns the uint16 value for the given sub-function name (case-insensitive).
@@ -299,12 +311,13 @@ func ParseDiagnosticSubFunction(name string) (uint16, error) {
 	if v, ok := diagnosticSubFunctionMap[key]; ok {
 		return v, nil
 	}
-	return 0, fmt.Errorf("unknown diagnostic sub-function %q (allowed: %v)", name, DiagnosticSubFunctionNames)
+	return 0, fmt.Errorf("unknown diagnostic sub-function %q (allowed: %v)", name, DiagnosticSubFunctions())
 }
 
 // ReportServerIdConfig is used by the reportserverid command (FC17 Report Server ID).
 type ReportServerIdConfig struct {
 	UnitClientConfig
+	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 }
 
 type DeviceProfileDecodeConfig struct {
@@ -313,24 +326,49 @@ type DeviceProfileDecodeConfig struct {
 	OutputFile    string `env:"MODBUSCTL_OUTPUT" desc:"Output file for decoded profile" flag:"output"`
 }
 
-// Enum values for shell completion (single source of truth; validation should use these too).
+// Fixed-choice flag values (canonical lists). Completion helpers call [cli.RegisterEnumFlagCompletion] with these.
 
-// ScanAlgoValues is the list of valid --algo values for the scan command.
-var ScanAlgoValues = []string{"safe", "smart", "deep", "stepped", "linear", "boundary", "sunspec"}
+var scanAlgorithmValues = []string{"safe", "smart", "deep", "stepped", "linear", "boundary", "sunspec"}
 
-// ConvertFormatValues is the list of valid --format values for mcap convert.
-var ConvertFormatValues = []string{"csv", "json"}
+// ScanAlgorithms returns valid --algo values for the scan command.
+func ScanAlgorithms() []string {
+	return scanAlgorithmValues
+}
 
-// FunctionCodeValues is the list of valid Modbus read function codes for --function (1=coils, 2=discrete, 3=holding, 4=input).
-var FunctionCodeValues = []string{"1", "2", "3", "4"}
+var convertFormatValues = []string{"csv", "json"}
 
-// ValidScanAlgo returns true if algo (after trim and lower) is in ScanAlgoValues. Use for validation so allowed values stay in sync with completion.
+// ConvertFormats returns valid mcap convert --format values (distinct from client stdout [format.Values]).
+func ConvertFormats() []string {
+	return convertFormatValues
+}
+
+// ConvertFormatDescriptions maps mcap convert --format values to short shell-completion descriptions (keys must match [ConvertFormats]).
+var ConvertFormatDescriptions = map[string]string{
+	"csv":  "comma-separated values",
+	"json": "JSON export",
+}
+
+var functionCodeValues = []string{"1", "2", "3", "4"}
+
+// FunctionCodes returns valid Modbus read function codes for --function (1=coils, 2=discrete, 3=holding, 4=input).
+func FunctionCodes() []string {
+	return functionCodeValues
+}
+
+var sunspecRegtypeValues = []string{"holding", "input"}
+
+// SunspecRegtypes returns valid sunspec --regtype values.
+func SunspecRegtypes() []string {
+	return sunspecRegtypeValues
+}
+
+// ValidScanAlgo returns true if algo (after trim and lower) is allowed for --algo.
 func ValidScanAlgo(algo string) bool {
 	algo = strings.ToLower(strings.TrimSpace(algo))
 	if algo == "" {
 		return true
 	}
-	for _, v := range ScanAlgoValues {
+	for _, v := range scanAlgorithmValues {
 		if algo == v {
 			return true
 		}
@@ -340,51 +378,38 @@ func ValidScanAlgo(algo string) bool {
 
 // RegisterScanAlgoCompletion registers shell completion for the --algo flag (scan command).
 func RegisterScanAlgoCompletion(cmd *cobra.Command) {
-	_ = cmd.RegisterFlagCompletionFunc("algo", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return ScanAlgoValues, cobra.ShellCompDirectiveNoFileComp
-	})
+	_ = cli.RegisterEnumFlagCompletion(cmd, "algo", ScanAlgorithms())
 }
 
 // RegisterConvertFormatCompletion registers shell completion for the --format flag (mcap convert).
 func RegisterConvertFormatCompletion(cmd *cobra.Command) {
-	_ = cmd.RegisterFlagCompletionFunc("format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return ConvertFormatValues, cobra.ShellCompDirectiveNoFileComp
-	})
+	_ = cli.RegisterEnumFlagCompletionWithDescriptions(cmd, "format", ConvertFormatDescriptions)
 }
 
 // RegisterFunctionCompletion registers shell completion for the --function flag (read/record/scan/static/replay).
 func RegisterFunctionCompletion(cmd *cobra.Command) {
-	_ = cmd.RegisterFlagCompletionFunc("function", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return FunctionCodeValues, cobra.ShellCompDirectiveNoFileComp
-	})
+	_ = cli.RegisterEnumFlagCompletion(cmd, "function", FunctionCodes())
 }
 
 // RegisterDiagnosticSubFunctionCompletion registers shell completion for the --sub-function flag (diagnostic command).
 func RegisterDiagnosticSubFunctionCompletion(cmd *cobra.Command) {
-	_ = cmd.RegisterFlagCompletionFunc("sub-function", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return DiagnosticSubFunctionNames, cobra.ShellCompDirectiveNoFileComp
-	})
+	_ = cli.RegisterEnumFlagCompletion(cmd, "sub-function", DiagnosticSubFunctions())
 }
-
-// SunSpecRegtypeValues is the list of valid --regtype values for sunspec commands.
-var SunSpecRegtypeValues = []string{"holding", "input"}
 
 // RegisterRegtypeCompletion registers shell completion for the --regtype flag (sunspec commands).
 func RegisterRegtypeCompletion(cmd *cobra.Command) {
-	_ = cmd.RegisterFlagCompletionFunc("regtype", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return SunSpecRegtypeValues, cobra.ShellCompDirectiveNoFileComp
-	})
+	_ = cli.RegisterEnumFlagCompletion(cmd, "regtype", SunspecRegtypes())
 }
 
 // SunSpecBaseConfig is shared by all client sunspec commands (URL or IP/Port, unit, regtype, output).
 type SunSpecBaseConfig struct {
-	URL     string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); overrides --ip/--port when set" flag:"url"`
-	IP      string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
-	Port    uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
-	Unit    uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID (0-255, full Modbus range)" flag:"unit"`
-	Regtype string `env:"MODBUSCTL_REGTYPE" desc:"Register type: holding (FC03) or input (FC04)" flag:"regtype"`
-	Verbose bool   `env:"MODBUSCTL_VERBOSE" desc:"Show probe attempts or extra detail" flag:"verbose"`
-	JSON    bool   `env:"MODBUSCTL_JSON" desc:"Output JSON instead of human-readable table" flag:"json"`
+	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); overrides --ip/--port when set" flag:"url"`
+	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
+	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
+	Unit         uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID (0-255, full Modbus range)" flag:"unit"`
+	Regtype      string `env:"MODBUSCTL_REGTYPE" desc:"Register type: holding (FC03) or input (FC04)" flag:"regtype"`
+	Verbose      bool   `env:"MODBUSCTL_VERBOSE" desc:"Show probe attempts or extra detail" flag:"verbose"`
+	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 }
 
 // SunSpecDetectConfig is used by client sunspec detect.

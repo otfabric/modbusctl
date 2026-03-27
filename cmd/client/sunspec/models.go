@@ -2,9 +2,9 @@ package sunspec
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
@@ -19,29 +19,38 @@ var modelsCmd = &cobra.Command{
 	Example: `
   modbusctl client sunspec models --url tcp://192.168.1.10:502 --unit 1
   modbusctl client sunspec models --ip 192.168.1.10 --unit 1 --base 40000 --max-models 64
-  modbusctl client sunspec models --url tcp://192.168.1.10:502 --unit 1 --json
+  modbusctl client sunspec models --url tcp://192.168.1.10:502 --unit 1 --format json
 `,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validate.CheckSunSpecModelsConfig(modelsCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("invalid input: %w", err)
 		}
-		if err := modbus.SunSpecModels(modelsCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
+		mergeSunspecOutputFormat(&modelsCfg.SunSpecBaseConfig)
+		outFmt, err := format.Parse(modelsCfg.OutputFormat)
+		if err != nil {
+			return err
 		}
+		result, err := modbus.CollectSunSpecModels(modelsCfg)
+		if err != nil {
+			return err
+		}
+		return format.Write(cmd.OutOrStdout(), outFmt, result)
 	},
 }
 
 func init() {
 	modelsCfg = config.SunSpecModelsConfig{
 		SunSpecBaseConfig: config.SunSpecBaseConfig{
-			Port:    502,
-			Unit:    1,
-			Regtype: "holding",
+			Port:         502,
+			Unit:         1,
+			Regtype:      "holding",
+			OutputFormat: string(format.FormatText),
 		},
 	}
 	config.LoadFromEnv(&modelsCfg)
 	config.RegisterFlags(modelsCmd, &modelsCfg)
+	if err := format.RegisterStdoutFormatFlagCompletion(modelsCmd); err != nil {
+		panic(err)
+	}
 	config.RegisterRegtypeCompletion(modelsCmd)
 }
