@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 
@@ -21,28 +20,44 @@ const (
 	maxModbusUnitID    = 255
 )
 
-func CheckIdentifyConfig(cfg config.IdentifyConfig) error {
-	if err := validateUnitClientConfig(cfg.UnitClientConfig); err != nil {
-		return err
-	}
-	if cfg.Timeout == 0 {
-		return fmt.Errorf("timeout must be greater than 0")
+// validateOptionalTimeoutMilliseconds is the shared client timeout rule for Modbus TCP commands:
+// 0 selects the default per-request budget (10000 ms) and matching TCP dial cap; otherwise the value must be ≥ 200 ms.
+func validateOptionalTimeoutMilliseconds(ms uint16) error {
+	if ms != 0 && ms < 200 {
+		return fmt.Errorf("timeout must be 0 for default (10000 ms) or at least 200 ms")
 	}
 	return nil
 }
 
-// validateUnitClientConfig validates URL-or-IP (mutually exclusive), and when IP is set also Port and UnitID ("all" or 1-255).
-func validateUnitClientConfig(cfg config.UnitClientConfig) error {
-	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+// validateModbusEndpoint applies layered checks: [config.ValidateModbusAddress] (exactly one of URL or IP),
+// then when --ip is set validates literal IP syntax and a non-zero port.
+func validateModbusEndpoint(url, ip string, port uint16) error {
+	if err := config.ValidateModbusAddress(url, ip); err != nil {
 		return err
 	}
-	if strings.TrimSpace(cfg.IP) != "" {
-		if !isValidIPv4(cfg.IP) {
-			return fmt.Errorf("invalid IP address: %s", cfg.IP)
-		}
-		if cfg.Port == 0 {
-			return fmt.Errorf("invalid port: %d", cfg.Port)
-		}
+	if strings.TrimSpace(ip) == "" {
+		return nil
+	}
+	if !isValidHostIP(ip) {
+		return fmt.Errorf("invalid IP address: %s", ip)
+	}
+	if port == 0 {
+		return fmt.Errorf("invalid port: %d", port)
+	}
+	return nil
+}
+
+func CheckIdentifyConfig(cfg config.IdentifyConfig) error {
+	if err := validateUnitClientConfig(cfg.UnitClientConfig); err != nil {
+		return err
+	}
+	return validateOptionalTimeoutMilliseconds(cfg.Timeout)
+}
+
+// validateUnitClientConfig validates URL-or-IP (mutually exclusive), and when IP is set also Port and UnitID ("all" or 1-255).
+func validateUnitClientConfig(cfg config.UnitClientConfig) error {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
+		return err
 	}
 	if cfg.UnitID == "" {
 		return fmt.Errorf("unit ID must be 1-255 or \"all\"")
@@ -64,20 +79,26 @@ func CheckReadConfig(cfg config.ReadConfig) error {
 	if err := validateDeviceConfig(cfg.DeviceConfig); err != nil {
 		return err
 	}
+	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
+		return err
+	}
 	if err := validateFunctionCode(cfg.Function); err != nil {
 		return err
 	}
 	if cfg.RegisterCount == 0 || cfg.RegisterCount > maxModbusBlockSize {
 		return fmt.Errorf("register count must be between 1 and %d", maxModbusBlockSize)
 	}
-	if err := validateAddressRange(cfg.StartAddress, cfg.StartAddress+cfg.RegisterCount); err != nil {
+	if err := validateExclusiveRegisterWindow(cfg.StartAddress, cfg.RegisterCount); err != nil {
 		return err
 	}
 	return validateFile(cfg.OutputFile, false)
 }
 
-func CheckScanConfig(cfg config.ScanConfig) error {
+func CheckScanConfig(cfg *config.ScanConfig) error {
 	if err := validateDeviceConfig(cfg.DeviceConfig); err != nil {
+		return err
+	}
+	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
 		return err
 	}
 	if err := validateFunctionCode(cfg.Function); err != nil {
@@ -90,14 +111,23 @@ func CheckScanConfig(cfg config.ScanConfig) error {
 		return fmt.Errorf("algo must be one of %v, got %q", config.ScanAlgorithms(), cfg.Algo)
 	}
 	algo := strings.ToLower(strings.TrimSpace(cfg.Algo))
+	if algo == "" {
+		algo = "safe"
+	}
+	cfg.NormalizedAlgo = config.ScanAlgorithm(algo)
 	if algo == "sunspec" {
 		// SunSpec algo does not use start/end range — skip address validation.
 		if cfg.SunSpecBase > 0 && uint32(cfg.SunSpecBase)+2 > 65535 {
 			return fmt.Errorf("sunspec base %d + 2 would overflow", cfg.SunSpecBase)
 		}
+		if strings.TrimSpace(cfg.SunSpecBases) != "" {
+			if _, err := config.ParseSunSpecBases(cfg.SunSpecBases); err != nil {
+				return fmt.Errorf("sunspec bases: %w", err)
+			}
+		}
 		return validateFile(cfg.OutputFile, false)
 	}
-	if err := validateAddressRange(cfg.StartAddress, cfg.EndAddress); err != nil {
+	if err := validateInclusiveScanRange(cfg.StartAddress, cfg.EndAddress); err != nil {
 		return err
 	}
 	if algo == "stepped" && cfg.Step < 1 {
@@ -125,25 +155,33 @@ func CheckRecordConfig(cfg config.RecordConfig) error {
 	if err := validateDeviceConfig(cfg.DeviceConfig); err != nil {
 		return err
 	}
+	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
+		return err
+	}
 	if err := validateFunctionCode(cfg.Function); err != nil {
 		return err
 	}
 	if cfg.Duration < cfg.Interval {
 		return fmt.Errorf("duration (%d) must be greater than or equal to interval (%d)", cfg.Duration, cfg.Interval)
 	}
-	if err := validateAddressBlockFile(cfg.InputFile); err != nil {
+	if err := validateAddressBlockFile(cfg.BlocksFile); err != nil {
 		return err
 	}
 	return validateFile(cfg.OutputFile, false)
 }
 
-func CheckConvertConfig(cfg config.ConvertConfig) error {
+func CheckConvertConfig(cfg *config.ConvertConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("convert config is nil")
+	}
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
 	}
-	if err := validateFormatType(cfg.FormatType); err != nil {
+	canon, err := canonicalConvertFormat(cfg.FormatType)
+	if err != nil {
 		return err
 	}
+	cfg.FormatType = canon
 	if strings.TrimSpace(cfg.OutputFile) != "" {
 		return validateFile(cfg.OutputFile, false)
 	}
@@ -194,19 +232,11 @@ func CheckInfoConfig(cfg config.InfoConfig) error {
 }
 
 func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
-	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
 		return err
 	}
-	if strings.TrimSpace(cfg.IP) != "" {
-		if !isValidIPv4(cfg.IP) {
-			return fmt.Errorf("invalid IP address: %s", cfg.IP)
-		}
-		if cfg.Port == 0 {
-			return fmt.Errorf("invalid port: %d", cfg.Port)
-		}
-	}
-	if cfg.Timeout == 0 {
-		return fmt.Errorf("timeout must be greater than 0")
+	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
+		return err
 	}
 	if _, err := modbus.ParseUnitIDs(cfg.UnitID); err != nil {
 		return err
@@ -215,39 +245,50 @@ func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
 }
 
 func CheckDiagnosticConfig(cfg config.DiagnosticConfig) error {
-	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
 		return err
 	}
-	if strings.TrimSpace(cfg.IP) != "" {
-		if !isValidIPv4(cfg.IP) {
-			return fmt.Errorf("invalid IP address: %s", cfg.IP)
-		}
-		if cfg.Port == 0 {
-			return fmt.Errorf("invalid port: %d", cfg.Port)
-		}
-	}
-	if cfg.Timeout == 0 {
-		return fmt.Errorf("timeout must be greater than 0")
-	}
-	if _, err := config.ParseDiagnosticSubFunction(cfg.SubFunction); err != nil {
+	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
 		return err
 	}
-	if cfg.Data != "" {
-		if _, err := hex.DecodeString(cfg.Data); err != nil {
-			return fmt.Errorf("invalid hex data %q: %w", cfg.Data, err)
+	subCode, err := config.ParseDiagnosticSubFunction(cfg.SubFunction)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.Data) != "" {
+		clean := strings.ReplaceAll(strings.TrimSpace(cfg.Data), " ", "")
+		if len(clean)%2 != 0 {
+			return fmt.Errorf("diagnostic --data must be an even number of hex digits")
+		}
+		raw, derr := hex.DecodeString(clean)
+		if derr != nil {
+			return fmt.Errorf("invalid hex data: %w", derr)
+		}
+		if err := validateDiagnosticFC08Payload(subCode, raw); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func CheckReportServerIdConfig(cfg config.ReportServerIdConfig) error {
+// validateDiagnosticFC08Payload applies minimal size rules after hex decode.
+// Return Query Data (0) may carry longer echo payloads; other sub-functions use at most 2 data bytes on the wire.
+func validateDiagnosticFC08Payload(subCode uint16, data []byte) error {
+	const maxFC08Data = 250
+	if len(data) > maxFC08Data {
+		return fmt.Errorf("diagnostic data exceeds %d bytes", maxFC08Data)
+	}
+	if subCode != 0 && len(data) > 2 {
+		return fmt.Errorf("for this diagnostic sub-function, data must be at most 2 bytes, got %d", len(data))
+	}
+	return nil
+}
+
+func CheckReportServerIDConfig(cfg config.ReportServerIDConfig) error {
 	if err := validateUnitClientConfig(cfg.UnitClientConfig); err != nil {
 		return err
 	}
-	if cfg.Timeout == 0 {
-		return fmt.Errorf("timeout must be greater than 0")
-	}
-	return nil
+	return validateOptionalTimeoutMilliseconds(cfg.Timeout)
 }
 
 func CheckDiscoverConfig(cfg config.DiscoverConfig) error {
@@ -264,17 +305,22 @@ func CheckDiscoverConfig(cfg config.DiscoverConfig) error {
 		return fmt.Errorf("port must be between 1 and 65535")
 	}
 
+	if cfg.Parallel < 1 || cfg.Parallel > 64 {
+		return fmt.Errorf("parallel must be between 1 and 64, got %d", cfg.Parallel)
+	}
+
 	if cfg.ResolveMAC && strings.TrimSpace(cfg.NetworkInterface) == "" {
 		return fmt.Errorf("network interface must be provided if ResolveMAC is enabled")
 	}
 
-	if cfg.ResolveMAC {
-		currentUser, err := user.Current()
+	if !cfg.ForceLargeScan {
+		n, err := modbus.EstimateDiscoverHostCount(cfg)
 		if err != nil {
-			return fmt.Errorf("could not determine current user: %w", err)
+			return fmt.Errorf("estimate discovery scope: %w", err)
 		}
-		if currentUser.Uid != "0" {
-			fmt.Printf("⚠️  Warning: Resolving MAC addresses typically requires elevated privileges (e.g., sudo).\n")
+		const maxDiscoverHosts = 65536
+		if n > maxDiscoverHosts {
+			return fmt.Errorf("discovery would probe %d unique hosts (exceeds cap %d); use --force-large-scan to override", n, maxDiscoverHosts)
 		}
 	}
 
@@ -286,50 +332,49 @@ func CheckStaticServerConfig(cfg config.StaticServerConfig) error {
 		return fmt.Errorf("port must be greater than 0")
 	}
 
-	if cfg.Unit > maxModbusUnitID {
-		return fmt.Errorf("invalid Modbus unit ID: %d (must be between 0 and %d)", cfg.Unit, maxModbusUnitID)
-	}
-
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
 	}
 
+	if cfg.Function != 0 {
+		if err := validateFunctionCode(cfg.Function); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
+
 func CheckReplayServerConfig(cfg config.ReplayServerConfig) error {
 	if cfg.Port == 0 {
 		return fmt.Errorf("port must be greater than 0")
 	}
 
-	if cfg.Unit > maxModbusUnitID {
-		return fmt.Errorf("invalid Modbus unit ID: %d (must be between 0 and %d)", cfg.Unit, maxModbusUnitID)
-	}
-
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
+	}
+
+	if cfg.Function != 0 {
+		if err := validateFunctionCode(cfg.Function); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func isValidIPv4(ip string) bool {
-	return net.ParseIP(ip) != nil && strings.Count(ip, ":") < 2
+// isValidHostIP reports whether s is a literal IPv4 or IPv6 address (not a hostname).
+func isValidHostIP(s string) bool {
+	return net.ParseIP(strings.TrimSpace(s)) != nil
 }
 
 func validateDeviceConfig(cfg config.DeviceConfig) error {
-	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
 		return err
 	}
-	if strings.TrimSpace(cfg.IP) != "" {
-		if !isValidIPv4(cfg.IP) {
-			return fmt.Errorf("invalid IP address: %s", cfg.IP)
-		}
-		if cfg.Port == 0 {
-			return fmt.Errorf("invalid port: %d", cfg.Port)
-		}
-	}
-	if cfg.Unit > maxModbusUnitID {
-		return fmt.Errorf("invalid Modbus unit ID: %d (must be between 0 and %d)", cfg.Unit, maxModbusUnitID)
+	// uint8 cannot exceed 255; reject 0 (broadcast / invalid for directed TCP client reads).
+	if cfg.Unit < 1 || cfg.Unit > maxModbusUnitID {
+		return fmt.Errorf("invalid Modbus unit ID: %d (must be between 1 and %d)", cfg.Unit, maxModbusUnitID)
 	}
 	return nil
 }
@@ -343,7 +388,20 @@ func validateFunctionCode(fc uint8) error {
 	}
 }
 
-func validateAddressRange(start, end uint16) error {
+// validateExclusiveRegisterWindow ensures [start, start+count) lies in valid Modbus address space using uint32 math (avoids uint16 wrap on start+count).
+func validateExclusiveRegisterWindow(start, count uint16) error {
+	if start > maxModbusRegister {
+		return fmt.Errorf("start address %d is out of range", start)
+	}
+	sum := uint32(start) + uint32(count)
+	if sum > uint32(maxModbusRegister)+1 {
+		return fmt.Errorf("start address %d with count %d exceeds maximum register space", start, count)
+	}
+	return nil
+}
+
+// validateInclusiveScanRange requires start ≤ end ≤ maxModbusRegister and start < end (scan end is inclusive).
+func validateInclusiveScanRange(start, end uint16) error {
 	if start > maxModbusRegister {
 		return fmt.Errorf("start address %d is out of range", start)
 	}
@@ -356,12 +414,13 @@ func validateAddressRange(start, end uint16) error {
 	return nil
 }
 
-func validateFormatType(format string) error {
-	switch format {
+func canonicalConvertFormat(format string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(format))
+	switch s {
 	case "csv", "json":
-		return nil
+		return s, nil
 	default:
-		return fmt.Errorf("unsupported format: %s (expected csv or json)", format)
+		return "", fmt.Errorf("unsupported format: %q (expected csv or json)", format)
 	}
 }
 
@@ -404,7 +463,10 @@ func CheckSunSpecProbeConfig(cfg config.SunSpecProbeConfig) error {
 }
 
 func checkSunSpecBaseConfig(cfg *config.SunSpecBaseConfig) error {
-	if err := config.ValidateModbusAddress(cfg.URL, cfg.IP); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
+		return err
+	}
+	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
 		return err
 	}
 	// Unit ID: allow full Modbus range 0-255 (e.g. SunSpec over gateway)
@@ -417,25 +479,25 @@ func checkSunSpecBaseConfig(cfg *config.SunSpecBaseConfig) error {
 
 func validateAddressBlockFile(path string) error {
 	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("input file path is required")
+		return fmt.Errorf("blocks file path is required (--blocks-file / MODBUSCTL_BLOCKS_FILE)")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("input file not accessible: %w", err)
+		return fmt.Errorf("blocks file not accessible: %w", err)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("input file cannot be a directory")
+		return fmt.Errorf("blocks file cannot be a directory")
 	}
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to read input file: %w", err)
+		return fmt.Errorf("failed to read blocks file: %w", err)
 	}
 	var blocks []types.AddressBlock
 	if err := json.Unmarshal(content, &blocks); err != nil {
-		return fmt.Errorf("input file does not contain valid address blocks: %w", err)
+		return fmt.Errorf("blocks file does not contain valid address-block JSON: %w", err)
 	}
 	if len(blocks) == 0 {
-		return fmt.Errorf("input file contains no address blocks")
+		return fmt.Errorf("blocks file contains no address blocks")
 	}
 	for _, b := range blocks {
 		if b.RegisterCount == 0 ||
@@ -505,6 +567,19 @@ func validateFile(path string, mustExist bool) error {
 		return nil
 	}
 	if path == "" {
+		return nil
+	}
+	// Directory-style output: auto-named MCAP under this directory (trailing / or \).
+	trimTrail := strings.TrimRight(path, `/\`)
+	if trimTrail != path {
+		dir := filepath.Clean(trimTrail)
+		if dir == "" || dir == "." {
+			dir = "."
+		}
+		dirInfo, err := os.Stat(dir)
+		if err != nil || !dirInfo.IsDir() {
+			return fmt.Errorf("output directory not accessible: %w", err)
+		}
 		return nil
 	}
 	dir := filepath.Dir(path)

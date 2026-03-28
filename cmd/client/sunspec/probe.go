@@ -1,16 +1,16 @@
 package sunspec
 
 import (
-	"fmt"
+	"context"
 
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/runner"
+	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
-
-var probeCfg config.SunSpecProbeConfig
 
 var probeCmd = &cobra.Command{
 	Use:   "probe",
@@ -20,25 +20,10 @@ var probeCmd = &cobra.Command{
   modbusctl client sunspec probe --url tcp://192.168.1.10:502 --unit 1
   modbusctl client sunspec probe --ip 192.168.1.10 --unit 1 --format json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validate.CheckSunSpecProbeConfig(probeCfg); err != nil {
-			return fmt.Errorf("invalid input: %w", err)
-		}
-		mergeSunspecOutputFormat(&probeCfg.SunSpecBaseConfig)
-		outFmt, err := format.Parse(probeCfg.OutputFormat)
-		if err != nil {
-			return err
-		}
-		result, err := modbus.CollectSunSpecProbe(probeCfg)
-		if err != nil {
-			return err
-		}
-		return format.Write(cmd.OutOrStdout(), outFmt, result)
-	},
 }
 
 func init() {
-	probeCfg = config.SunSpecProbeConfig{
+	cfg := config.SunSpecProbeConfig{
 		SunSpecBaseConfig: config.SunSpecBaseConfig{
 			Port:         502,
 			Unit:         1,
@@ -46,10 +31,19 @@ func init() {
 			OutputFormat: string(format.FormatText),
 		},
 	}
-	config.LoadFromEnv(&probeCfg)
-	config.RegisterFlags(probeCmd, &probeCfg)
-	if err := format.RegisterStdoutFormatFlagCompletion(probeCmd); err != nil {
-		panic(err)
+	runner.RegisterClientCommandCfg(probeCmd, &cfg, config.RegisterRegtypeCompletion)
+
+	probeCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		mergeSunspecOutputFormat(&cfg.SunSpecBaseConfig)
+		return runner.RunClientFormattedWithDebug(cmd, func(d bool) { cfg.Debug = d }, cfg.OutputFormat,
+			func() error { return validate.CheckSunSpecProbeConfig(cfg) },
+			func(ctx context.Context) (any, error) {
+				r, e := modbus.CollectSunSpecProbe(ctx, cfg)
+				if e != nil {
+					return nil, modbus.WrapCollectError(e)
+				}
+				return r, nil
+			},
+			runner.WithSuccessExit(types.SuccessExitForPayload))
 	}
-	config.RegisterRegtypeCompletion(probeCmd)
 }

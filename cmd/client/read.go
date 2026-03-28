@@ -1,18 +1,15 @@
 package client
 
 import (
-	"fmt"
-	"os"
+	"context"
 
-	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/runner"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
-
-var readCfg config.ReadConfig
 
 var readCmd = &cobra.Command{
 	Use:   "read",
@@ -33,28 +30,16 @@ var readCmd = &cobra.Command{
   # Use environment variables instead of CLI arguments
   MODBUSCTL_IP=192.168.1.10 MODBUSCTL_START=40001 MODBUSCTL_COUNT=5 modbusctl client read
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		readCfg.Debug = cli.Debug(cmd)
-		if err := validate.CheckReadConfig(readCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
-		}
-
-		if err := modbus.ReadAndWriteMCAP(readCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
-		}
-	},
 }
 
 func init() {
-	ClientCmd.AddCommand(readCmd)
-	readCfg = config.ReadConfig{
+	cfg := config.ReadConfig{
 		DeviceConfig: config.DeviceConfig{
 			IP:   "",
 			Port: 502,
 			Unit: 1,
 		},
+		Timeout:       0,
 		Function:      3,
 		StartAddress:  1,
 		RegisterCount: 1,
@@ -64,10 +49,17 @@ func init() {
 		OutputFormat:  string(format.FormatText),
 		Debug:         false,
 	}
-	config.LoadFromEnv(&readCfg)
-	config.RegisterFlags(readCmd, &readCfg)
-	if err := format.RegisterStdoutFormatFlagCompletion(readCmd); err != nil {
-		panic(err)
+	runner.WireClientCommand(ClientCmd, readCmd, &cfg, config.RegisterFunctionCompletion)
+
+	readCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return runner.RunClientFormattedWithDebug(cmd, func(d bool) { cfg.Debug = d }, cfg.OutputFormat,
+			func() error { return validate.CheckReadConfig(cfg) },
+			func(ctx context.Context) (any, error) {
+				r, err := modbus.CollectRead(ctx, cfg, cmd.ErrOrStderr())
+				if err != nil {
+					return nil, modbus.WrapCollectError(err)
+				}
+				return r, nil
+			})
 	}
-	config.RegisterFunctionCompletion(readCmd)
 }

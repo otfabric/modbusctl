@@ -1,10 +1,40 @@
-# Enable linters that catch unused code and parameters so "make check" is effective.
-# Without this file, golangci-lint uses defaults that do not include unparam.
 version: "2"
 
 linters:
+  default: none
   enable:
-    - unparam   # report unused function parameters
+    - errcheck       # unchecked errors
+    - govet          # go vet checks (shadow, printf, etc.)
+    - ineffassign    # assigned but never used
+    - staticcheck    # comprehensive static analysis (includes gosimple + unused)
+    - misspell       # common spelling mistakes
+    - godot          # comment punctuation
+    - nilerr         # return nil instead of err
+    - exhaustive     # exhaustive switch on enums
   settings:
-    unparam:
-      check-exported: false  # only report unused params in unexported functions (less noisy)
+    exhaustive:
+      default-signifies-exhaustive: true  # a default: case satisfies exhaustiveness
+
+formatters:
+  enable:
+    - gofmt          # formatting
+    - goimports      # import grouping / formatting
+
+  exclusions:
+    paths:
+      - examples
+
+issues:
+  # Bump the default per-linter issue limit (default is 50)
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Whole-module analysis. If this is true (or inherited from a user/global config),
+  # golangci-lint can hide compiler/typecheck issues such as duplicate declarations
+  # when the conflicting file is outside the "new" diff — unlike gopls, which always
+  # typechecks the full package.
+  new: false
+
+run:
+  timeout: 5m
+  # Typecheck tests too (matches go test / IDE behavior for packages with _test.go).
+  tests: true

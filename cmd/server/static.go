@@ -1,57 +1,55 @@
 package server
 
 import (
-	"fmt"
-	"os"
+	"context"
+	"errors"
 
+	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
 
-var staticCfg config.StaticServerConfig
-
 var staticCmd = &cobra.Command{
 	Use:   "static",
 	Short: "Host a static Modbus TCP server with fixed register values",
 	Example: `
-  # Host a static Modbus TCP server with fixed register values from an MCAP file
+  # Serve last-known values from an MCAP file (function code comes from the MCAP header)
   modbusctl server static --port 502 --unit 1 --input mydata.mcap
 
-  # Host a static server with a specific port and unit ID
-  modbusctl server static --port 1502 --unit 2 --input mydata.mcap
+  # Override is only for verification: --function must match the file's FC (here FC3 holding registers)
+  modbusctl server static --port 502 --unit 1 --input holding.mcap --function 3
 
   # Use environment variables instead of CLI arguments
   MODBUSCTL_PORT=502 MODBUSCTL_UNIT=1 MODBUSCTL_INPUT=mydata.mcap modbusctl server static
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := validate.CheckStaticServerConfig(staticCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
-		}
-
-		if err := modbus.LoadMCAPAndServeStatic(staticCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Failed to start static server: %v\n", err)
-			os.Exit(1)
-		}
-	},
 }
 
 func init() {
-	ServerCmd.AddCommand(staticCmd)
-	staticCfg = config.StaticServerConfig{
-
+	cfg := config.StaticServerConfig{
 		Port:      502,
 		Unit:      1,
 		InputFile: "",
 	}
-	config.LoadFromEnv(&staticCfg)
-	config.RegisterFlags(staticCmd, &staticCfg)
+	config.MustLoadFromEnv(&cfg)
+	config.RegisterFlags(staticCmd, &cfg)
 	config.RegisterFunctionCompletion(staticCmd)
-	if staticCfg.InputFile == "" {
-		if err := staticCmd.MarkFlagRequired("input"); err != nil {
-			panic(err)
+	cli.MustMarkFlagRequired(staticCmd, "input")
+	ServerCmd.AddCommand(staticCmd)
+
+	staticCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		cfg.Debug = cli.Debug(cmd)
+		if err := validate.CheckStaticServerConfig(cfg); err != nil {
+			return errs.WrapValidation(err)
 		}
+		if err := modbus.LoadMCAPAndServeStatic(cmd.Context(), cfg, cmd.OutOrStdout()); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return modbus.WrapCollectError(err)
+		}
+		return nil
 	}
 }

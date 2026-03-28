@@ -1,5 +1,29 @@
 # modbusctl Releases
 
+## v2.2.4
+
+**Date:** 2026-03-28  
+**Previous release:** v2.2.3
+
+### Summary
+
+Maintenance release: internal package boundaries, validation and tests, and Makefile/CI alignment with full-module typecheck. No intentional user-facing CLI or output-format breaks.
+
+### Highlights
+
+- **Packages:** MCAP binary codec, load, and CSV/JSON/blocks exports live in **`internal/mcap`**; client stdout (**text/json/table**) and MCAP-derived **strings** / **frequencies** helpers stay in **`internal/format`**. Command wiring and formatted runs use **`internal/runner`**; typed CLI errors and exit mapping use **`internal/errs`**.
+- **Config & discover:** Modbus URL and SunSpec base parsing are split into focused **`internal/config`** helpers (with tests). **Discover** adds **`--force-large-scan`** and **`MODBUSCTL_DISCOVER_FORCE_LARGE`** to allow probing beyond the default unique-host safety cap.
+- **Modbus & MCAP:** Capture path resolution, cancel-aware sleeps, clearer layered address validation, multi-unit pooling where applicable; MCAP export paths share load/stitch/sort; fingerprint **partial** vs **failed** outcomes and related types are clearer.
+- **Server:** Static handler FC gating and replay comments tightened.
+- **Tooling:** **`make compile`** (`go build ./...`) feeds **`lint`** / **`lint-ci`**; **`check`** runs fmt, lint, lint-ci, vet, test, and coverage; **`check-legacy`** helps catch duplicate root packages. **golangci-lint** uses **`issues.new: false`** and **`run.tests: true`** so the linter sees the same typecheck surface as a full build (see `.golangci.yml`).
+- **Tests & docs:** More unit tests across config, modbus, types, format/mcap, and CLI fatals; exit codes remain documented in **`docs/exitcodes.md`**.
+
+### Upgrading
+
+- Same CLI and **`--format`** contract as v2.2.3 unless you rely on discover host-count limits—in which case use **`--force-large-scan`** when you intentionally need a larger probe.
+
+---
+
 ## v2.2.3
 
 **Date:** 2026-03-27  
@@ -18,6 +42,7 @@ This release standardizes **client command output** behind a shared **`--format`
 - **SunSpec:** Subcommands use the same **`--format`** mechanism. A **hidden** parent **`--json`** remains as a deprecated alias mapping to **`--format json`**.
 - **Shell completion:** Generic **`cli.RegisterEnumFlagCompletion`** / **`RegisterEnumFlagCompletionWithDescriptions`**; canonical value lists live with their domains (e.g. **`format.Values()`** for client stdout formats, **`config.ScanAlgorithms()`**, **`ConvertFormats()`**, etc.). **`--format`** is registered next to flags on each command (no deferred command-tree walk).
 - **Tests:** Golden-style checks for representative text output and JSON structure; config/format completion maps stay aligned with allowed values via small tests.
+- **Errors & exits:** Root uses **`ExecuteContext`**, typed **`internal/errs`** failures, **`internal/runner`** for **`AttachOutputFormat` / `RunFormattedWithOutputFormat`**, and JSON fatals buffered to stdout. Exit codes are documented in **`docs/exitcodes.md`**. Embedded unit errors on **identify** / **reportserverid** / **fingerprint** are structured **`ErrorInfo`** in JSON; aggregate text/JSON payloads include a **`summary`** block with requested / succeeded / failed counts. **`ExitPartial` (7)** applies when the formatted result was written successfully but **any** requested unit (or scan request) failed at the Modbus/transport layer—**identify**, **reportserverid**, **fingerprint**, and **scan** (see **`docs/exitcodes.md`**).
 
 ### Upgrading
 

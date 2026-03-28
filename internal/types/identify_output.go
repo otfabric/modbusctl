@@ -7,14 +7,15 @@ import (
 
 // IdentifyResult is the aggregate FC43 (and optional FC17) identification output for one connection target.
 type IdentifyResult struct {
-	Target string               `json:"target"`
-	Units  []IdentifyUnitResult `json:"units"`
+	Target  string               `json:"target"`
+	Summary *ResultSummary       `json:"summary,omitempty"`
+	Units   []IdentifyUnitResult `json:"units"`
 }
 
 // IdentifyUnitResult is one unit’s identification outcome (success payload or per-unit error).
 type IdentifyUnitResult struct {
-	UnitID uint8  `json:"unit_id"`
-	Error  string `json:"error,omitempty"`
+	UnitID uint8      `json:"unit_id"`
+	Error  *ErrorInfo `json:"error,omitempty"`
 
 	Category        *uint8 `json:"category,omitempty"`
 	ConformityLevel *uint8 `json:"conformity_level,omitempty"`
@@ -35,9 +36,9 @@ type IdentifyObjectRow struct {
 
 // IdentifyReportServerOutput is FC17 Report Server ID payload when requested.
 type IdentifyReportServerOutput struct {
-	Error          string `json:"error,omitempty"`
-	DataHex        string `json:"data_hex,omitempty"`
-	RunIndicatorOn *bool  `json:"run_indicator_on,omitempty"`
+	Error          *ErrorInfo `json:"error,omitempty"`
+	DataHex        string     `json:"data_hex,omitempty"`
+	RunIndicatorOn *bool      `json:"run_indicator_on,omitempty"`
 }
 
 // MarshalTextOutput preserves the historical human-readable identify layout.
@@ -47,12 +48,15 @@ func (r *IdentifyResult) MarshalTextOutput() (string, error) {
 	}
 	var b strings.Builder
 	_, _ = fmt.Fprintf(&b, "🔍 Connecting to %s...\n", r.Target)
+	if sum := r.Summary; sum != nil {
+		_, _ = fmt.Fprintf(&b, "Units requested: %d  succeeded: %d  failed: %d\n\n", sum.Requested, sum.Succeeded, sum.Failed)
+	}
 	for _, u := range r.Units {
 		if len(r.Units) > 1 {
 			_, _ = fmt.Fprintf(&b, "\n--- Unit ID %d ---\n", u.UnitID)
 		}
-		if u.Error != "" {
-			_, _ = fmt.Fprintf(&b, "⚠️ Unit %d: %s\n", u.UnitID, u.Error)
+		if msg := ErrorMessage(u.Error); msg != "" {
+			_, _ = fmt.Fprintf(&b, "⚠️ Unit %d: %s\n", u.UnitID, msg)
 			continue
 		}
 		if u.Category != nil && u.ConformityLevel != nil && u.MoreFollows != nil && u.NextObjectID != nil {
@@ -71,12 +75,12 @@ func (r *IdentifyResult) MarshalTextOutput() (string, error) {
 			}
 		}
 		if rs := u.ReportServerID; rs != nil {
-			if rs.Error != "" {
-				_, _ = fmt.Fprintf(&b, "  FC17 Report Server ID: ⚠️ %s\n", rs.Error)
+			if msg := ErrorMessage(rs.Error); msg != "" {
+				_, _ = fmt.Fprintf(&b, "  FC17 Report Server ID: ⚠️ %s\n", msg)
 			} else if rs.DataHex != "" {
 				_, _ = fmt.Fprintf(&b, "  FC17 Report Server ID: %s\n", rs.DataHex)
 			}
-			if rs.RunIndicatorOn != nil && rs.Error == "" {
+			if rs.RunIndicatorOn != nil && ErrorMessage(rs.Error) == "" {
 				status := "OFF"
 				if *rs.RunIndicatorOn {
 					status = "ON"
@@ -100,12 +104,12 @@ func (r *IdentifyResult) TableRows() [][]string {
 	}
 	var rows [][]string
 	for _, u := range r.Units {
-		if u.Error != "" {
+		if msg := ErrorMessage(u.Error); msg != "" {
 			rows = append(rows, []string{
 				fmt.Sprintf("%d", u.UnitID),
 				"-",
 				"error",
-				u.Error,
+				msg,
 			})
 			continue
 		}

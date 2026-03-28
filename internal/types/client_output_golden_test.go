@@ -48,7 +48,7 @@ func TestIdentifyResult_jsonStructure(t *testing.T) {
 	res := &types.IdentifyResult{
 		Target: "tcp://x:502",
 		Units: []types.IdentifyUnitResult{
-			{UnitID: 3, Error: "timeout"},
+			{UnitID: 3, Error: types.EmbeddedModbusError("timeout")},
 		},
 	}
 	var buf bytes.Buffer
@@ -73,8 +73,12 @@ func TestIdentifyResult_jsonStructure(t *testing.T) {
 	if _, ok := u0["unit_id"]; !ok {
 		t.Fatal("json missing unit_id")
 	}
-	if _, ok := u0["error"]; !ok {
-		t.Fatal("json missing error")
+	errObj, ok := u0["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("json error not object: %#v", u0["error"])
+	}
+	if _, ok := errObj["message"]; !ok {
+		t.Fatal("json error missing message")
 	}
 }
 
@@ -98,7 +102,7 @@ func TestReportServerIDResult_jsonStructure(t *testing.T) {
 	res := &types.ReportServerIDResult{
 		Target: "tcp://x:502",
 		Units: []types.ReportServerIDUnitResult{
-			{UnitID: 10, Error: "modbus error"},
+			{UnitID: 10, Error: types.EmbeddedModbusError("modbus error")},
 		},
 	}
 	var buf bytes.Buffer

@@ -1,16 +1,13 @@
 package mcap
 
 import (
-	"fmt"
-	"os"
-
+	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
-	"github.com/otfabric/modbusctl/internal/format"
+	"github.com/otfabric/modbusctl/internal/errs"
+	mcapfile "github.com/otfabric/modbusctl/internal/mcap"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
-
-var decodeCfg config.DeviceProfileDecodeConfig
 
 var decodeCmd = &cobra.Command{
 	Use:   "decode",
@@ -25,49 +22,31 @@ var decodeCmd = &cobra.Command{
   # Use environment variables instead of CLI arguments
   MODBUSCTL_INPUT=data.mcap MODBUSCTL_PROFILE=device_profile.json MODBUSCTL_OUTPUT=output.csv modbusctl mcap decode
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := validate.CheckDeviceProfileDecodeConfig(decodeCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
-		}
-
-		var out *os.File
-		if decodeCfg.OutputFile != "" {
-			var err error
-			out, err = os.Create(decodeCfg.OutputFile)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "❌ Failed to create output file: %v\n", err)
-				os.Exit(1)
-			}
-			defer func() { _ = out.Close() }()
-		} else {
-			out = os.Stdout
-		}
-
-		if err := format.ExportDeviceProfileDecode(out, decodeCfg.InputFile, decodeCfg.DeviceProfile); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ ExportDeviceProfileDecode failed: %v\n", err)
-			os.Exit(1)
-		}
-	},
 }
 
 func init() {
-	McapCmd.AddCommand(decodeCmd)
-	decodeCfg = config.DeviceProfileDecodeConfig{
+	cfg := config.DeviceProfileDecodeConfig{
 		InputFile:     "",
 		DeviceProfile: "",
 		OutputFile:    "",
 	}
-	config.LoadFromEnv(&decodeCfg)
-	config.RegisterFlags(decodeCmd, &decodeCfg)
-	if decodeCfg.InputFile == "" {
-		if err := decodeCmd.MarkFlagRequired("input"); err != nil {
-			panic(err)
+	config.MustLoadFromEnv(&cfg)
+	config.RegisterFlags(decodeCmd, &cfg)
+	McapCmd.AddCommand(decodeCmd)
+
+	decodeCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := validate.CheckDeviceProfileDecodeConfig(cfg); err != nil {
+			return errs.WrapValidation(err)
 		}
-	}
-	if decodeCfg.DeviceProfile == "" {
-		if err := decodeCmd.MarkFlagRequired("profile"); err != nil {
-			panic(err)
+		w, cleanup, err := cli.OpenStdoutOrFile(cfg.OutputFile)
+		if err != nil {
+			return errs.Output(errs.CodeOutputFileCreateFailed, err)
 		}
+		defer cleanup()
+
+		if err := mcapfile.ExportDeviceProfileDecode(w, cfg.InputFile, cfg.DeviceProfile); err != nil {
+			return errs.Output(errs.CodeMCAPLoadFailed, err)
+		}
+		return nil
 	}
 }

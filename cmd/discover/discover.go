@@ -1,16 +1,19 @@
 package discover
 
 import (
+	"context"
 	"fmt"
-	"os"
+	"os/user"
 
+	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/errs"
+	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/runner"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
-
-var discoverCfg config.DiscoverConfig
 
 var DiscoverCmd = &cobra.Command{
 	Use:   "discover",
@@ -34,33 +37,37 @@ var DiscoverCmd = &cobra.Command{
   # Use environment variables instead of CLI arguments
   MODBUSCTL_SUBNETS=192.168.1.0/24,192.168.2.0/24 MODBUSCTL_PORT=1502 modbusctl discover
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := validate.CheckDiscoverConfig(discoverCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
-		}
-
-		if err := modbus.PerformDiscoveryScan(discoverCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Discovery failed: %v\n", err)
-			os.Exit(1)
-		}
-	},
 }
 
 func init() {
-	discoverCfg = config.DiscoverConfig{
+	cfg := config.DiscoverConfig{
 		Subnets:          []string{},
 		Port:             502,
 		Parallel:         1,
 		ResolveMAC:       false,
-		NetworkInterface: "eth0",
+		NetworkInterface: "",
 		OutputFile:       "",
+		OutputFormat:     string(format.FormatText),
+		ForceLargeScan:   false,
 	}
-	config.LoadFromEnv(&discoverCfg)
-	config.RegisterFlags(DiscoverCmd, &discoverCfg)
-	if len(discoverCfg.Subnets) == 0 {
-		if err := DiscoverCmd.MarkFlagRequired("subnets"); err != nil {
-			panic(err)
+	config.MustLoadFromEnv(&cfg)
+	config.RegisterFlags(DiscoverCmd, &cfg)
+	cli.MustMarkFlagRequired(DiscoverCmd, "subnets")
+	runner.RegisterStdoutFormatCompletion(DiscoverCmd)
+
+	DiscoverCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		cfg.Debug = cli.Debug(cmd)
+		if err := validate.CheckDiscoverConfig(cfg); err != nil {
+			return errs.WrapValidation(err)
 		}
+		if cfg.ResolveMAC {
+			if u, err := user.Current(); err == nil && u.Uid != "0" {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "⚠️  Warning: Resolving MAC addresses typically requires elevated privileges (e.g., sudo).\n")
+			}
+		}
+		_, err := runner.RunFormatted(cmd, cfg.OutputFormat, func(ctx context.Context) (any, error) {
+			return modbus.CollectDiscover(ctx, cfg, cmd.ErrOrStderr())
+		})
+		return err
 	}
 }

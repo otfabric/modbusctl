@@ -119,7 +119,7 @@ The following is an example of a JSON converted MCAP file:
     {
       "iteration": 0,
       "request_timestamp": "2025-07-14T13:14:24.701149758Z",
-      "reponse_timestamp": "2025-07-14T13:14:24.951906811Z",
+      "response_timestamp": "2025-07-14T13:14:24.951906811Z",
       "start_address": 4096,
       "register_count": 62,
       "raw_data": "000001a7000000f3000000f4000000f5000001a4000001a8000001a8ffffffff0000013f000001ab000001cf00000047000001cdffffffa0ffffffd1ffffffffffffffffffffffffffffffff000001270000004e00000068000000720000001400000024fffffff6fffffffbfffffee9ffffffbeffffff9bffffff90"
@@ -127,7 +127,7 @@ The following is an example of a JSON converted MCAP file:
     {
       "iteration": 1,
       "request_timestamp": "2025-07-14T13:14:31.312332629Z",
-      "reponse_timestamp": "2025-07-14T13:14:31.570347588Z",
+      "response_timestamp": "2025-07-14T13:14:31.570347588Z",
       "start_address": 4158,
       "register_count": 67,
       "raw_data": "000003b40000a790ffffffffffffffff0000c36effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -166,6 +166,8 @@ Pre-built binaries for various platforms are available for download on the [GitH
 **Client stdout format (`--format`):** Commands **identify**, **read**, **scan**, **record**, **reportserverid**, **fingerprint**, **diagnostic**, and **client sunspec** (detect, models, map, probe) accept **`--format text`** (default), **`json`**, or **`table`**, or set **`MODBUSCTL_OUTPUT_FORMAT`**. This controls **only** the final human- or machine-readable **result on stdout**. It is **not** the same as **`modbusctl mcap convert --format`**, which chooses **csv** or **json** export for MCAP files (env **`MODBUSCTL_FORMAT`**).
 
 **Scan and record:** Live progress (scan lines, per-block lines, worst-case hints, **`--debug`** traces, record iteration messages) goes to **stderr**; **stdout** is a **single** formatted result after the run (summary for scan/record). When using **`--format json`**, redirect or separate streams if scripts must not mix progress with JSON.
+
+**Fatal errors:** With `--format json`, client commands write a **single JSON error object** to stdout on failure (fields `kind`, `code`, `message`) and use stable exit codes. With **text** or **table**, fatals use a single **`error:`** line on stderr and leave stdout empty. See [docs/exitcodes.md](docs/exitcodes.md) for the exit-code table. Per-unit failures in JSON success payloads use a structured **`error`** object (`kind`, `code`, `message`) on each affected row where applicable (**identify**, **reportserverid**, **fingerprint**).
 
 ```console
 modbusctl [command] [flags]
@@ -356,6 +358,8 @@ Example output (default **`--format text`**):
 
 Use **`--format`** for stdout (after any MCAP write). **`--output`** still writes MCAP when set.
 
+**Addresses:** `--start`, scan `--start`/`--end`, and record block JSON use **raw Modbus PDU addresses** (16-bit values as on the wire: 0–65535). They are **not** “4xxxx minus 40001” style logical labels — e.g. `--start 40001` is literal address **40001**, not “register 1”.
+
 ```console
 modbusctl client read --ip 192.168.1.10 --start 30001 --count 2
 modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --output data.mcap
@@ -473,8 +477,8 @@ Failures are classified (success, Modbus exception, timeout, transport error) so
 Progress messages (e.g. each iteration and recorded block) go to **stderr**; **stdout** is a **single** final summary (**`--format text|json|table`**).
 
 ```console
-modbusctl client record --ip 192.168.1.10 --input register-ranges.json --interval 1000 --duration 60000 --output session.mcap
-modbusctl client record --ip 192.168.1.10 --input register-ranges.json --interval 1000 --duration 60000 --output session.mcap --format json
+modbusctl client record --ip 192.168.1.10 --blocks-file register-ranges.json --interval 1000 --duration 60000 --output session.mcap
+modbusctl client record --ip 192.168.1.10 --blocks-file register-ranges.json --interval 1000 --duration 60000 --output session.mcap --format json
 ```
 
 ####  Statically host data (no changes in data)
@@ -531,6 +535,8 @@ modbusctl mcap frequencies --input file.mcap --output frequencies.txt
 ```
 
 #### Discover devices (nmap alike probing)
+
+Large subnets are capped by default (unique host count); use **`--force-large-scan`** (or **`MODBUSCTL_DISCOVER_FORCE_LARGE`**) when you intentionally want to probe beyond that safety limit.
 
 ```console
 modbusctl discover --subnets 192.168.1.0/24 --output discovered.json
@@ -596,7 +602,8 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_END**         | uint16   | End register address                                     | `--end`         | 65535      |
 | **MODBUSCTL_FORMAT**      | string   | **`mcap convert`** output type: **csv** or **json** (not client stdout) | `--format`      |            |
 | **MODBUSCTL_FUNCTION**    | uint8    | Function code (1=coil, 2=discrete, 3=holding, 4=input)   | `--function`    | 3          |
-| **MODBUSCTL_INPUT**       | string   | Input MCAP file or file to replay                        | `--input`       |            |
+| **MODBUSCTL_INPUT**       | string   | Input MCAP file (`mcap` subcommands; `server static` / `server replay`) | `--input`       |            |
+| **MODBUSCTL_BLOCKS_FILE** | string   | JSON address blocks for **`client record`** only         | `--blocks-file` |            |
 | **MODBUSCTL_INTERFACE**   | string   | Network interface to use for discovery                   | `--interface`   | eth0       |
 | **MODBUSCTL_INTERVAL**    | uint32   | Interval in ms (record/replay iterations or fingerprint probes) | `--interval`    | 0 (fingerprint), 5000 (record/replay) |
 | **MODBUSCTL_IP**          | string   | Modbus TCP device IP address                             | `--ip`          |            |
@@ -607,6 +614,7 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_PORT**        | uint16   | Modbus TCP port or server port                           | `--port`        | 502        |
 | **MODBUSCTL_PROFILE**     | string   | Device profile to decode                                 | `--profile`     |            |
 | **MODBUSCTL_RESOLVE_MAC** | bool     | Resolve MAC addresses of discovered devices              | `--resolve-mac` | false      |
+| **MODBUSCTL_DISCOVER_FORCE_LARGE** | bool | Allow **discover** when unique host count exceeds the built-in safety cap | `--force-large-scan` | false |
 | **MODBUSCTL_SUB_FUNCTION**| string   | FC08 Diagnostics sub-function name, lowercase (e.g. returnquerydata, clearcountersanddiagnosticreg) | `--sub-function`| returnquerydata |
 | **MODBUSCTL_START**       | uint16   | Start register address                                   | `--start`       | 1          |
 | **MODBUSCTL_STEP**        | uint16   | Stepped algo: step size (e.g. 100, 1000, 2000)           | `--step`        | 1000       |
@@ -619,7 +627,7 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Sunspec algo: max model headers to read (0=256)         | `--sunspec-max-models` | 0   |
 | **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Sunspec algo: max address span from base (0=no limit)  | `--sunspec-max-span` | 0     |
 | **MODBUSCTL_SUBNETS**     | string   | Subnets to scan for Modbus devices (comma-separated)     | `--subnets`     |            |
-| **MODBUSCTL_TIMEOUT**     | uint16   | Timeout in milliseconds for the request(s)               | `--timeout`     | 2000       |
+| **MODBUSCTL_TIMEOUT**     | uint16   | Request timeout in ms and TCP dial cap; **0 = 10000** ms default | `--timeout`     | 0 (most client commands) |
 | **MODBUSCTL_UNIT**        | string   | Unit ID (1-255); for multi-unit commands: single, range (1-10), list (1,5,25), mixed (1-10,255), or `all` | `--unit` | 1       |
 | **MODBUSCTL_URL**         | string   | Modbus URL for client commands (e.g. tcp://192.168.1.10:502); overrides --ip/--port when set (e.g. sunspec) | `--url`  |         |
 | **MODBUSCTL_REGTYPE**     | string   | Register type for sunspec: holding or input | `--regtype` | holding |
@@ -647,11 +655,14 @@ modbusctl/
 │   ├── mcap (MCAP file operations: convert, decode, extract, frequencies, info, strings)
 │   └── server (Modbus TCP data replay server)
 ├── internal/
-│   ├── config (CLI & ENV config management)
-│   ├── cli (shared Cobra helpers, e.g. enum flag completion)
-│   ├── format (MCAP I/O, **mcap** CSV/JSON export, client stdout rendering **text/json/table**)
-│   ├── modbus (Modbus TCP client/server logic)
-│   ├── types (Shared data types and data structures)
+│   ├── config (CLI & env: types, flags, completion, diagnostics, Modbus URL / SunSpec base parsing)
+│   ├── cli (shared Cobra helpers: enum completion, stdout file, required flags, debug)
+│   ├── format (client stdout **text/json/table** via `Write`; MCAP-derived **strings** / **frequencies** heuristics; table rendering)
+│   ├── mcap (MCAP binary codec, load, CSV/JSON/blocks/info exports, profile decode)
+│   ├── runner (client command wiring, formatted run loop, fatal JSON/text rendering)
+│   ├── errs (typed CLI errors, stable codes, exit-kind mapping)
+│   ├── modbus (Modbus TCP client/server logic, collectors, scan strategies)
+│   ├── types (DTOs for JSON/text/table output and MCAP-related structs)
 │   └── validate (Input validation and checks)
 ├── Makefile (Build & test commands)
 └── go.mod (Dependencies)
@@ -659,19 +670,18 @@ modbusctl/
 
 ## ⚙️ Development
 
-A toplevel `Makefile` is provided for convenience:
+A toplevel `Makefile` is provided for convenience. Run **`make`** (or **`make help`**) for the full list. Common targets:
 
-```console
-➜  modbusctl git:(main) $ make
-help                           This help
-all                            Test and build the application
-run                            Run the application
-test                           Run tests
-build                          Build the application
-build-all                      Build the application for all architectures
-release-all                    Package the build binaries into tar.gz archives for all architectures
-clean                          Clean the build artifacts
-```
+| Target | Purpose |
+|--------|---------|
+| **`make test`** | Unit tests with race detector (`go test -race ./...`) |
+| **`make coverage`** | Tests + **`coverage.out`** for `go tool cover` |
+| **`make compile`** | Full-module typecheck (`go build ./...`) |
+| **`make lint`** | `compile` then **staticcheck** |
+| **`make lint-ci`** | `compile`, **go vet**, **golangci-lint** (uses `.golangci.yml`) |
+| **`make check`** | `fmt`, `lint`, `lint-ci`, `vet`, `test`, **`coverage`** |
+| **`make build`** | Runs **`check`** then writes **`bin/modbusctl`** |
+| **`make build-all`** / **`release-all`** | Cross-compile and package archives |
 
 ### Building
 

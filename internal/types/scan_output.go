@@ -7,19 +7,21 @@ import (
 
 // ScanSummaryResult is the final stdout payload after a scan (progress goes to stderr).
 type ScanSummaryResult struct {
-	Target              string `json:"target"`
-	Algo                string `json:"algo"`
-	TotalRequests       int    `json:"total_requests"`
-	SuccessCount        int    `json:"success_count"`
-	FailCount           int    `json:"fail_count"`
-	ExceptionCount      int    `json:"exception_count"`
-	TimeoutCount        int    `json:"timeout_count"`
-	TransportErrorCount int    `json:"transport_error_count"`
-	BlocksCaptured      int    `json:"blocks_captured"`
-	RegistersCaptured   int    `json:"registers_captured"`
-	AvgResponseMs       int64  `json:"avg_response_ms,omitempty"`
-	Duration            string `json:"duration"`
-	McapOutputPath      string `json:"mcap_output_path"`
+	Target string `json:"target"`
+	// Summary counts Modbus read requests (not devices/units); Requested/Succeeded/Failed are per-request.
+	Summary             *ResultSummary `json:"summary,omitempty"`
+	Algo                string         `json:"algo"`
+	TotalRequests       int            `json:"total_requests"`
+	SuccessCount        int            `json:"success_count"`
+	FailCount           int            `json:"fail_count"`
+	ExceptionCount      int            `json:"exception_count"`
+	TimeoutCount        int            `json:"timeout_count"`
+	TransportErrorCount int            `json:"transport_error_count"`
+	BlocksCaptured      int            `json:"blocks_captured"`
+	RegistersCaptured   int            `json:"registers_captured"`
+	AvgResponseMs       int64          `json:"avg_response_ms,omitempty"`
+	Duration            string         `json:"duration"`
+	McapOutputPath      string         `json:"mcap_output_path"`
 }
 
 // MarshalTextOutput prints the historical scan summary block.
@@ -28,7 +30,9 @@ func (r *ScanSummaryResult) MarshalTextOutput() (string, error) {
 		return "", nil
 	}
 	var b strings.Builder
-	_, _ = fmt.Fprintf(&b, "\n")
+	if sum := r.Summary; sum != nil {
+		_, _ = fmt.Fprintf(&b, "Scan requests: %d  succeeded: %d  failed: %d\n", sum.Requested, sum.Succeeded, sum.Failed)
+	}
 	_, _ = fmt.Fprintf(&b, "Algo: %s\n", r.Algo)
 	_, _ = fmt.Fprintf(&b, "Requests: %d\n", r.TotalRequests)
 	_, _ = fmt.Fprintf(&b, "Success: %d\n", r.SuccessCount)
@@ -38,7 +42,7 @@ func (r *ScanSummaryResult) MarshalTextOutput() (string, error) {
 	}
 	_, _ = fmt.Fprintf(&b, "Blocks captured: %d\n", r.BlocksCaptured)
 	_, _ = fmt.Fprintf(&b, "Registers captured: %d\n", r.RegistersCaptured)
-	if r.SuccessCount > 0 && r.AvgResponseMs > 0 {
+	if r.SuccessCount > 0 {
 		_, _ = fmt.Fprintf(&b, "Avg response time: %d ms\n", r.AvgResponseMs)
 	}
 	_, _ = fmt.Fprintf(&b, "Duration: %s\n", r.Duration)

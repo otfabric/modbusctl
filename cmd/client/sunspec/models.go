@@ -1,16 +1,15 @@
 package sunspec
 
 import (
-	"fmt"
+	"context"
 
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/runner"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
-
-var modelsCfg config.SunSpecModelsConfig
 
 var modelsCmd = &cobra.Command{
 	Use:   "models",
@@ -21,25 +20,10 @@ var modelsCmd = &cobra.Command{
   modbusctl client sunspec models --ip 192.168.1.10 --unit 1 --base 40000 --max-models 64
   modbusctl client sunspec models --url tcp://192.168.1.10:502 --unit 1 --format json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validate.CheckSunSpecModelsConfig(modelsCfg); err != nil {
-			return fmt.Errorf("invalid input: %w", err)
-		}
-		mergeSunspecOutputFormat(&modelsCfg.SunSpecBaseConfig)
-		outFmt, err := format.Parse(modelsCfg.OutputFormat)
-		if err != nil {
-			return err
-		}
-		result, err := modbus.CollectSunSpecModels(modelsCfg)
-		if err != nil {
-			return err
-		}
-		return format.Write(cmd.OutOrStdout(), outFmt, result)
-	},
 }
 
 func init() {
-	modelsCfg = config.SunSpecModelsConfig{
+	cfg := config.SunSpecModelsConfig{
 		SunSpecBaseConfig: config.SunSpecBaseConfig{
 			Port:         502,
 			Unit:         1,
@@ -47,10 +31,18 @@ func init() {
 			OutputFormat: string(format.FormatText),
 		},
 	}
-	config.LoadFromEnv(&modelsCfg)
-	config.RegisterFlags(modelsCmd, &modelsCfg)
-	if err := format.RegisterStdoutFormatFlagCompletion(modelsCmd); err != nil {
-		panic(err)
+	runner.RegisterClientCommandCfg(modelsCmd, &cfg, config.RegisterRegtypeCompletion)
+
+	modelsCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		mergeSunspecOutputFormat(&cfg.SunSpecBaseConfig)
+		return runner.RunClientFormattedWithDebug(cmd, func(d bool) { cfg.Debug = d }, cfg.OutputFormat,
+			func() error { return validate.CheckSunSpecModelsConfig(cfg) },
+			func(ctx context.Context) (any, error) {
+				r, e := modbus.CollectSunSpecModels(ctx, cfg)
+				if e != nil {
+					return nil, modbus.WrapCollectError(e)
+				}
+				return r, nil
+			})
 	}
-	config.RegisterRegtypeCompletion(modelsCmd)
 }

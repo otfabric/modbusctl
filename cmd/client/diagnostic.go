@@ -1,16 +1,15 @@
 package client
 
 import (
-	"fmt"
+	"context"
 
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/runner"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
-
-var diagnosticCfg config.DiagnosticConfig
 
 var diagnosticCmd = &cobra.Command{
 	Use:   "diagnostic",
@@ -37,37 +36,29 @@ var diagnosticCmd = &cobra.Command{
   # Specific unit ID
   modbusctl client diagnostic --ip 192.168.1.10 --unit 5 --sub-function returnquerydata
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validate.CheckDiagnosticConfig(diagnosticCfg); err != nil {
-			return fmt.Errorf("invalid input: %w", err)
-		}
-		outFmt, err := format.Parse(diagnosticCfg.OutputFormat)
-		if err != nil {
-			return err
-		}
-		result, err := modbus.CollectDiagnostics(diagnosticCfg)
-		if err != nil {
-			return err
-		}
-		return format.Write(cmd.OutOrStdout(), outFmt, result)
-	},
 }
 
 func init() {
-	ClientCmd.AddCommand(diagnosticCmd)
-	diagnosticCfg = config.DiagnosticConfig{
+	cfg := config.DiagnosticConfig{
 		OutputFormat: string(format.FormatText),
 		IP:           "",
 		Port:         502,
 		UnitID:       1,
-		Timeout:      2000,
+		Timeout:      0,
 		SubFunction:  "returnquerydata",
 		Data:         "",
 	}
-	config.LoadFromEnv(&diagnosticCfg)
-	config.RegisterFlags(diagnosticCmd, &diagnosticCfg)
-	if err := format.RegisterStdoutFormatFlagCompletion(diagnosticCmd); err != nil {
-		panic(err)
+	runner.WireClientCommand(ClientCmd, diagnosticCmd, &cfg, config.RegisterDiagnosticSubFunctionCompletion)
+
+	diagnosticCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return runner.RunClientFormattedWithDebug(cmd, func(d bool) { cfg.Debug = d }, cfg.OutputFormat,
+			func() error { return validate.CheckDiagnosticConfig(cfg) },
+			func(ctx context.Context) (any, error) {
+				r, e := modbus.CollectDiagnostics(ctx, cfg)
+				if e != nil {
+					return nil, modbus.WrapCollectError(e)
+				}
+				return r, nil
+			})
 	}
-	config.RegisterDiagnosticSubFunctionCompletion(diagnosticCmd)
 }

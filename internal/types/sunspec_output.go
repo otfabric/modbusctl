@@ -230,14 +230,35 @@ type SunSpecProbeModbus struct {
 	FC03 bool `json:"fc03"`
 	FC04 bool `json:"fc04"`
 	FC43 bool `json:"fc43"`
+	// FC*Error is set when SupportsFunction failed (transport/protocol); FC* may be false.
+	FC03Error *ErrorInfo `json:"fc03_error,omitempty"`
+	FC04Error *ErrorInfo `json:"fc04_error,omitempty"`
+	FC43Error *ErrorInfo `json:"fc43_error,omitempty"`
+}
+
+// HasPartialFailure implements [PartialResult] for exit code 7 when any probe or SunSpec step errored.
+func (o *SunSpecProbeOutput) HasPartialFailure() bool {
+	if o == nil {
+		return false
+	}
+	if o.Modbus.FC03Error != nil || o.Modbus.FC04Error != nil || o.Modbus.FC43Error != nil {
+		return true
+	}
+	if o.SunSpecDetail.DetectionError != nil || o.SunSpecDetail.ModelHeadersError != nil {
+		return true
+	}
+	return false
 }
 
 // SunSpecProbeSummary is SunSpec detection summary from probe.
 type SunSpecProbeSummary struct {
-	Detected    bool   `json:"detected"`
-	BaseAddress uint16 `json:"base_address"`
-	ModelsFound int    `json:"models_found"`
-	EndModel    bool   `json:"end_model"`
+	Detected       bool       `json:"detected"`
+	BaseAddress    uint16     `json:"base_address"`
+	ModelsFound    int        `json:"models_found"`
+	EndModel       bool       `json:"end_model"`
+	DetectionError *ErrorInfo `json:"detection_error,omitempty"` // set when sunspec.Detect fails (transport/protocol), not when the device is simply not SunSpec
+	// ModelHeadersError is set when the marker was found but ReadModelHeaders failed (transport/protocol).
+	ModelHeadersError *ErrorInfo `json:"model_headers_error,omitempty"`
 }
 
 // MarshalTextOutput matches historical probe layout.
@@ -253,11 +274,16 @@ func (o *SunSpecProbeOutput) MarshalTextOutput() (string, error) {
 	for _, line := range []struct {
 		label string
 		ok    bool
+		err   *ErrorInfo
 	}{
-		{"FC03", o.Modbus.FC03},
-		{"FC04", o.Modbus.FC04},
-		{"FC43", o.Modbus.FC43},
+		{"FC03", o.Modbus.FC03, o.Modbus.FC03Error},
+		{"FC04", o.Modbus.FC04, o.Modbus.FC04Error},
+		{"FC43", o.Modbus.FC43, o.Modbus.FC43Error},
 	} {
+		if msg := ErrorMessage(line.err); msg != "" {
+			_, _ = fmt.Fprintf(&b, "  %-6s : error: %s\n", line.label, msg)
+			continue
+		}
 		supported := "supported"
 		if !line.ok {
 			supported = "not supported"
@@ -265,6 +291,12 @@ func (o *SunSpecProbeOutput) MarshalTextOutput() (string, error) {
 		_, _ = fmt.Fprintf(&b, "  %-6s : %s\n", line.label, supported)
 	}
 	_, _ = fmt.Fprintf(&b, "\nSUNSPEC\n")
+	if msg := ErrorMessage(o.SunSpecDetail.DetectionError); msg != "" {
+		_, _ = fmt.Fprintf(&b, "  detection error : %s\n", msg)
+	}
+	if msg := ErrorMessage(o.SunSpecDetail.ModelHeadersError); msg != "" {
+		_, _ = fmt.Fprintf(&b, "  model headers error : %s\n", msg)
+	}
 	detectedStr := "no"
 	if o.SunSpecDetail.Detected {
 		detectedStr = "yes"
@@ -294,10 +326,27 @@ func (o *SunSpecProbeOutput) TableRows() [][]string {
 		{"modbus", "fc03", fmt.Sprintf("%v", o.Modbus.FC03)},
 		{"modbus", "fc04", fmt.Sprintf("%v", o.Modbus.FC04)},
 		{"modbus", "fc43", fmt.Sprintf("%v", o.Modbus.FC43)},
-		{"sunspec", "detected", fmt.Sprintf("%v", o.SunSpecDetail.Detected)},
-		{"sunspec", "base_address", fmt.Sprintf("%d", o.SunSpecDetail.BaseAddress)},
-		{"sunspec", "models_found", fmt.Sprintf("%d", o.SunSpecDetail.ModelsFound)},
-		{"sunspec", "end_model", fmt.Sprintf("%v", o.SunSpecDetail.EndModel)},
 	}
+	if msg := ErrorMessage(o.Modbus.FC03Error); msg != "" {
+		rows = append(rows, []string{"modbus", "fc03_error", msg})
+	}
+	if msg := ErrorMessage(o.Modbus.FC04Error); msg != "" {
+		rows = append(rows, []string{"modbus", "fc04_error", msg})
+	}
+	if msg := ErrorMessage(o.Modbus.FC43Error); msg != "" {
+		rows = append(rows, []string{"modbus", "fc43_error", msg})
+	}
+	if msg := ErrorMessage(o.SunSpecDetail.DetectionError); msg != "" {
+		rows = append(rows, []string{"sunspec", "detection_error", msg})
+	}
+	if msg := ErrorMessage(o.SunSpecDetail.ModelHeadersError); msg != "" {
+		rows = append(rows, []string{"sunspec", "model_headers_error", msg})
+	}
+	rows = append(rows,
+		[]string{"sunspec", "detected", fmt.Sprintf("%v", o.SunSpecDetail.Detected)},
+		[]string{"sunspec", "base_address", fmt.Sprintf("%d", o.SunSpecDetail.BaseAddress)},
+		[]string{"sunspec", "models_found", fmt.Sprintf("%d", o.SunSpecDetail.ModelsFound)},
+		[]string{"sunspec", "end_model", fmt.Sprintf("%v", o.SunSpecDetail.EndModel)},
+	)
 	return rows
 }

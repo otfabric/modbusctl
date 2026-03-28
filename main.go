@@ -1,6 +1,10 @@
 package main
 
-import "github.com/otfabric/modbusctl/cmd"
+import (
+	"os"
+
+	"github.com/otfabric/modbusctl/cmd"
+)
 
 // Injected at link time (see Makefile): -X main.version=... etc.
 var (
@@ -12,5 +16,5 @@ var (
 
 func main() {
 	cmd.SetBuildMeta(version, tag, commit, buildDate)
-	cmd.Execute()
+	os.Exit(cmd.Execute())
 }

@@ -1,13 +1,18 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
 	"github.com/otfabric/modbusctl/cmd/client"
 	"github.com/otfabric/modbusctl/cmd/discover"
 	"github.com/otfabric/modbusctl/cmd/mcap"
 	"github.com/otfabric/modbusctl/cmd/server"
+	"github.com/otfabric/modbusctl/internal/runner"
 
 	"github.com/spf13/cobra"
 )
@@ -32,6 +37,8 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().Bool("debug", false, "Print debug information")
+	rootCmd.SilenceUsage = true
+	rootCmd.SilenceErrors = true
 	rootCmd.AddCommand(client.ClientCmd)
 	rootCmd.AddCommand(discover.DiscoverCmd)
 	rootCmd.AddCommand(mcap.McapCmd)
@@ -43,16 +50,41 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version of modbusctl",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("modbusctl version: %s\n", buildMeta.version)
-		fmt.Printf("tag:         %s\n", buildMeta.tag)
-		fmt.Printf("commit:      %s\n", buildMeta.commit)
-		fmt.Printf("build date:  %s\n", buildMeta.buildDate)
+		out := cmd.OutOrStdout()
+		ver := strings.TrimSpace(buildMeta.version)
+		if ver == "" {
+			ver = "(unknown)"
+		}
+		_, _ = fmt.Fprintf(out, "modbusctl version: %s\n", ver)
+		if s := strings.TrimSpace(buildMeta.tag); s != "" {
+			_, _ = fmt.Fprintf(out, "tag:         %s\n", s)
+		}
+		if s := strings.TrimSpace(buildMeta.commit); s != "" {
+			_, _ = fmt.Fprintf(out, "commit:      %s\n", s)
+		}
+		if s := strings.TrimSpace(buildMeta.buildDate); s != "" {
+			_, _ = fmt.Fprintf(out, "build date:  %s\n", s)
+		}
 	},
 }
 
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+// Execute runs the root command and returns the process exit code (main should call os.Exit).
+func Execute() int {
+	inv := &runner.Invocation{}
+	ctx := runner.WithInvocation(context.Background(), inv)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	rootCmd.SetContext(ctx)
+
+	err := rootCmd.ExecuteContext(ctx)
+	debug, _ := rootCmd.PersistentFlags().GetBool("debug")
+
+	if err != nil {
+		return runner.RenderFatal(inv, err, os.Stdout, os.Stderr, debug)
 	}
+
+	if inv.SuccessExitSet {
+		return inv.SuccessExitCode
+	}
+	return 0
 }

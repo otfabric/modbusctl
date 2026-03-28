@@ -1,21 +1,21 @@
 package client
 
 import (
-	"fmt"
+	"context"
 
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/runner"
 	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
 
-var identifyCfg config.IdentifyConfig
-
 var identifyCmd = &cobra.Command{
 	Use:   "identify",
 	Short: "Send Modbus FC43/14 request to identify the Modbus TCP device",
+	Long:  `Uses one TCP connection when probing a single unit or when --parallel is 1. With multiple unit IDs and --parallel > 1, opens that many clients and distributes units across them (same model as reportserverid). The --parallel flag is only validated when --unit all; for explicit unit lists it is ignored if set to 1.`,
 	Example: `
   # Identify a device (all categories: basic + regular + extended)
   modbusctl client identify --ip 192.168.1.10
@@ -38,55 +38,31 @@ var identifyCmd = &cobra.Command{
   modbusctl client identify --ip 192.168.1.10 --unit all --parallel 10
   MODBUSCTL_IP=192.168.1.10 modbusctl client identify
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validate.CheckIdentifyConfig(identifyCfg); err != nil {
-			return fmt.Errorf("invalid input: %w", err)
-		}
-
-		outFmt, err := format.Parse(identifyCfg.OutputFormat)
-		if err != nil {
-			return err
-		}
-
-		result, err := modbus.CollectDeviceIdentification(identifyCfg)
-		if err != nil {
-			return err
-		}
-
-		if err := format.Write(cmd.OutOrStdout(), outFmt, result); err != nil {
-			return err
-		}
-
-		return identifyExitError(result)
-	},
-}
-
-// identifyExitError preserves legacy exit status: exactly one requested unit with a Modbus-level failure exits non-zero.
-func identifyExitError(result *types.IdentifyResult) error {
-	if result == nil || len(result.Units) != 1 {
-		return nil
-	}
-	if result.Units[0].Error != "" {
-		return fmt.Errorf("%s", result.Units[0].Error)
-	}
-	return nil
 }
 
 func init() {
-	ClientCmd.AddCommand(identifyCmd)
-	identifyCfg = config.IdentifyConfig{
+	cfg := config.IdentifyConfig{
 		OutputFormat: string(format.FormatText),
 		UnitClientConfig: config.UnitClientConfig{
 			IP:       "",
 			Port:     502,
 			UnitID:   "1",
-			Timeout:  2000,
+			Timeout:  0,
 			Parallel: 10,
 		},
 	}
-	config.LoadFromEnv(&identifyCfg)
-	config.RegisterFlags(identifyCmd, &identifyCfg)
-	if err := format.RegisterStdoutFormatFlagCompletion(identifyCmd); err != nil {
-		panic(err)
+	runner.WireClientCommand(ClientCmd, identifyCmd, &cfg)
+
+	identifyCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return runner.RunClientFormattedWithDebug(cmd, func(d bool) { cfg.Debug = d }, cfg.OutputFormat,
+			func() error { return validate.CheckIdentifyConfig(cfg) },
+			func(ctx context.Context) (any, error) {
+				r, e := modbus.CollectDeviceIdentification(ctx, cfg)
+				if e != nil {
+					return nil, modbus.WrapCollectError(e)
+				}
+				return r, nil
+			},
+			runner.WithSuccessExit(types.SuccessExitForPayload))
 	}
 }

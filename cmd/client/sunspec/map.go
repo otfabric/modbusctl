@@ -1,16 +1,15 @@
 package sunspec
 
 import (
-	"fmt"
+	"context"
 
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/runner"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
-
-var mapCfg config.SunSpecMapConfig
 
 var mapCmd = &cobra.Command{
 	Use:   "map",
@@ -21,25 +20,10 @@ var mapCmd = &cobra.Command{
   modbusctl client sunspec map --ip 192.168.1.10 --unit 1 --show-header-regs --compact
   modbusctl client sunspec map --url tcp://192.168.1.10:502 --unit 1 --format json
 `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validate.CheckSunSpecMapConfig(mapCfg); err != nil {
-			return fmt.Errorf("invalid input: %w", err)
-		}
-		mergeSunspecOutputFormat(&mapCfg.SunSpecBaseConfig)
-		outFmt, err := format.Parse(mapCfg.OutputFormat)
-		if err != nil {
-			return err
-		}
-		result, err := modbus.CollectSunSpecMap(mapCfg)
-		if err != nil {
-			return err
-		}
-		return format.Write(cmd.OutOrStdout(), outFmt, result)
-	},
 }
 
 func init() {
-	mapCfg = config.SunSpecMapConfig{
+	cfg := config.SunSpecMapConfig{
 		SunSpecBaseConfig: config.SunSpecBaseConfig{
 			Port:         502,
 			Unit:         1,
@@ -47,10 +31,18 @@ func init() {
 			OutputFormat: string(format.FormatText),
 		},
 	}
-	config.LoadFromEnv(&mapCfg)
-	config.RegisterFlags(mapCmd, &mapCfg)
-	if err := format.RegisterStdoutFormatFlagCompletion(mapCmd); err != nil {
-		panic(err)
+	runner.RegisterClientCommandCfg(mapCmd, &cfg, config.RegisterRegtypeCompletion)
+
+	mapCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		mergeSunspecOutputFormat(&cfg.SunSpecBaseConfig)
+		return runner.RunClientFormattedWithDebug(cmd, func(d bool) { cfg.Debug = d }, cfg.OutputFormat,
+			func() error { return validate.CheckSunSpecMapConfig(cfg) },
+			func(ctx context.Context) (any, error) {
+				r, e := modbus.CollectSunSpecMap(ctx, cfg)
+				if e != nil {
+					return nil, modbus.WrapCollectError(e)
+				}
+				return r, nil
+			})
 	}
-	config.RegisterRegtypeCompletion(mapCmd)
 }

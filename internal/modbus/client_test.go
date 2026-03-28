@@ -1,8 +1,12 @@
 package modbus
 
 import (
+	"context"
 	"errors"
+	"io"
+	"net"
 	"reflect"
+	"syscall"
 	"testing"
 
 	"github.com/otfabric/go-modbus"
@@ -53,6 +57,11 @@ func TestParseUnitIDs(t *testing.T) {
 		{"invalid single", "999", nil, true},
 		{"invalid range", "5-2", nil, true},
 		{"invalid part", "1,abc", nil, true},
+		{"double comma", "1,,3", nil, true},
+		{"leading comma", ",1", nil, true},
+		{"trailing comma", "1,", nil, true},
+		{"empty range bound", "1-", nil, true},
+		{"empty range low bound", "-5", nil, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,5 +97,41 @@ func TestClassifyOutcome(t *testing.T) {
 	ot, _ = classifyOutcome(errors.New("unknown"), req, res)
 	if ot != ScanOutcomeUnknown {
 		t.Errorf("classifyOutcome(unknown err) = %q, want unknown", ot)
+	}
+}
+
+func TestShouldReconnect(t *testing.T) {
+	if !shouldReconnect(io.EOF) {
+		t.Fatal("EOF should reconnect")
+	}
+	if !shouldReconnect(syscall.ECONNRESET) {
+		t.Fatal("ECONNRESET should reconnect")
+	}
+	if !shouldReconnect(&net.OpError{Err: syscall.EPIPE}) {
+		t.Fatal("OpError wrapping EPIPE should reconnect")
+	}
+	if shouldReconnect(nil) {
+		t.Fatal("nil should not reconnect")
+	}
+	if shouldReconnect(context.Canceled) {
+		t.Fatal("context.Canceled should not reconnect")
+	}
+	nested := &net.OpError{Err: &net.OpError{Err: syscall.ECONNRESET}}
+	if !shouldReconnect(nested) {
+		t.Fatal("nested OpError wrapping ECONNRESET should reconnect")
+	}
+}
+
+func TestClassifyOutcome_timeout(t *testing.T) {
+	ot, code := classifyOutcome(modbus.ErrRequestTimedOut, 0, 0)
+	if ot != ScanOutcomeTimeout || code != 0 {
+		t.Fatalf("got %v code=%d want timeout", ot, code)
+	}
+}
+
+func TestClassifyOutcome_deadlineExceeded(t *testing.T) {
+	ot, code := classifyOutcome(context.DeadlineExceeded, 0, 0)
+	if ot != ScanOutcomeTimeout || code != 0 {
+		t.Fatalf("got %v code=%d want timeout", ot, code)
 	}
 }

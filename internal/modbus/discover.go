@@ -5,92 +5,108 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"os"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/mdlayher/arp"
 	mb "github.com/otfabric/go-modbus"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
-func PerformDiscoveryScan(cfg config.DiscoverConfig) error {
-	var ips []string
-	for _, subnet := range cfg.Subnets {
-		subnetIPs, err := getIPsFromCIDR(subnet)
-		if err != nil {
-			return fmt.Errorf("invalid subnet %s: %w", subnet, err)
-		}
-		ips = append(ips, subnetIPs...)
+// CollectDiscover probes subnets and returns structured output. Debug lines go to stderr when non-nil.
+// Optional JSON file side effect: when cfg.OutputFile is set, writes the legacy []DiscoverJson array (same as before).
+func CollectDiscover(ctx context.Context, cfg config.DiscoverConfig, stderr io.Writer) (*types.DiscoverOutput, error) {
+	if stderr == nil {
+		stderr = io.Discard
 	}
-
 	if cfg.Parallel < 1 {
 		cfg.Parallel = 1
 	}
 
+	jobs := make(chan string, int(cfg.Parallel)*4)
+	go func() {
+		defer close(jobs)
+		seen := make(map[string]struct{}, 1024)
+		for _, subnet := range cfg.Subnets {
+			_ = forEachAssignableHost(subnet, func(ip string) bool {
+				if _, ok := seen[ip]; ok {
+					return true
+				}
+				seen[ip] = struct{}{}
+				select {
+				case <-ctx.Done():
+					return false
+				case jobs <- ip:
+					return true
+				}
+			})
+		}
+	}()
+
 	var (
 		wg    sync.WaitGroup
-		sem   = make(chan struct{}, cfg.Parallel)
 		mutex sync.Mutex
+		raw   []struct {
+			ip  string
+			mac string
+		}
 	)
 
-	var results []struct {
-		ip  string
-		mac string
-	}
-
-	for _, ip := range ips {
+	par := int(cfg.Parallel)
+	for w := 0; w < par; w++ {
 		wg.Add(1)
-		go func(ip string) {
+		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			addr := net.JoinHostPort(ip, fmt.Sprintf("%d", cfg.Port))
-			conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
-			if err == nil {
+			for ip := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 				modbusURL := config.ModbusURL("", ip, cfg.Port)
-				client, cleanup, err := connect(modbusURL, false)
+				client, cleanup, err := connectDiscovery(modbusURL, cfg.Debug)
 				if err != nil {
-					_ = conn.Close()
-					return
+					if cfg.Debug {
+						_, _ = fmt.Fprintf(stderr, "DEBUG [discover] %s: connect/setup: %v\n", ip, err)
+					}
+					continue
 				}
-				defer cleanup()
-				_, err = client.ReadRegisterBytes(context.Background(), 1, 0, 2, mb.HoldingRegister)
-				if !isValidModbusResponse(err) {
-					_ = conn.Close()
-					return
-				}
-
-				mac := ""
-				if cfg.ResolveMAC {
-					mac, _ = resolveMACAddress(ip, cfg.NetworkInterface)
-				}
-				mutex.Lock()
-				results = append(results, struct {
-					ip  string
-					mac string
-				}{
-					ip:  ip,
-					mac: mac,
-				})
-				mutex.Unlock()
-				_ = conn.Close()
+				func() {
+					defer cleanup()
+					_, err = client.ReadRegisterBytes(ctx, 1, 0, 2, mb.HoldingRegister)
+					if !isValidModbusResponse(err) {
+						if cfg.Debug && err != nil {
+							_, _ = fmt.Fprintf(stderr, "DEBUG [discover] %s: holding read: %v\n", ip, err)
+						}
+						return
+					}
+					mac := ""
+					if cfg.ResolveMAC {
+						mac, _ = resolveMACAddress(ip, cfg.NetworkInterface)
+					}
+					mutex.Lock()
+					raw = append(raw, struct {
+						ip  string
+						mac string
+					}{ip: ip, mac: mac})
+					mutex.Unlock()
+				}()
 			}
-		}(ip)
+		}()
 	}
-
 	wg.Wait()
 
-	sort.Slice(results, func(i, j int) bool {
-		ip1 := net.ParseIP(results[i].ip).To4()
-		ip2 := net.ParseIP(results[j].ip).To4()
+	sort.Slice(raw, func(i, j int) bool {
+		ip1 := net.ParseIP(raw[i].ip).To4()
+		ip2 := net.ParseIP(raw[j].ip).To4()
 		if ip1 == nil || ip2 == nil {
-			return results[i].ip < results[j].ip
+			return raw[i].ip < raw[j].ip
 		}
 		for k := range 4 {
 			if ip1[k] != ip2[k] {
@@ -100,51 +116,92 @@ func PerformDiscoveryScan(cfg config.DiscoverConfig) error {
 		return false
 	})
 
-	for _, r := range results {
-		if cfg.ResolveMAC && r.mac != "" {
-			fmt.Printf("✅ Modbus device found at %s:%d (MAC: %s)\n", r.ip, cfg.Port, r.mac)
-		} else {
-			fmt.Printf("✅ Modbus device found at %s:%d\n", r.ip, cfg.Port)
-		}
+	devices := make([]types.DiscoverJson, 0, len(raw))
+	for _, r := range raw {
+		devices = append(devices, types.DiscoverJson{
+			IP:        r.ip,
+			Port:      cfg.Port,
+			Mac:       r.mac,
+			Interface: cfg.NetworkInterface,
+		})
+	}
+
+	out := &types.DiscoverOutput{
+		Port:      cfg.Port,
+		Interface: cfg.NetworkInterface,
+		Subnets:   append([]string(nil), cfg.Subnets...),
+		Devices:   devices,
 	}
 
 	if cfg.OutputFile != "" {
-		jsonResults := []types.DiscoverJson{}
-		for _, r := range results {
-			jsonResults = append(jsonResults, types.DiscoverJson{
-				IP:        r.ip,
-				Port:      cfg.Port,
-				Mac:       r.mac,
-				Interface: cfg.NetworkInterface,
-			})
-		}
-		data, err := json.MarshalIndent(jsonResults, "", "  ")
+		data, err := json.MarshalIndent(devices, "", "  ")
 		if err != nil {
-			return fmt.Errorf("failed to marshal results to JSON: %w", err)
+			return nil, errs.Output(errs.CodeJSONEncodeFailed, err)
 		}
-		if err := os.WriteFile(cfg.OutputFile, data, 0644); err != nil {
-			return fmt.Errorf("failed to write output file: %w", err)
+		if err := os.WriteFile(cfg.OutputFile, data, 0o644); err != nil {
+			return nil, errs.Output(errs.CodeOutputFileWriteFailed, err)
 		}
 	}
 
-	return nil
+	return out, nil
 }
 
-func getIPsFromCIDR(cidr string) ([]string, error) {
+// EstimateDiscoverHostCount returns how many unique assignable IPs would be probed for cfg (same rules as [CollectDiscover]).
+func EstimateDiscoverHostCount(cfg config.DiscoverConfig) (int, error) {
+	seen := make(map[string]struct{}, 1024)
+	n := 0
+	for _, subnet := range cfg.Subnets {
+		err := forEachAssignableHost(subnet, func(ip string) bool {
+			if _, ok := seen[ip]; ok {
+				return true
+			}
+			seen[ip] = struct{}{}
+			n++
+			return true
+		})
+		if err != nil {
+			return 0, err
+		}
+	}
+	return n, nil
+}
+
+// forEachAssignableHost calls yield for each host address to probe in cidr, using the same rules as legacy getIPsFromCIDR
+// (omit network and broadcast when the CIDR has more than two addresses). Stops early if yield returns false.
+func forEachAssignableHost(cidr string, yield func(host string) bool) error {
 	ip, ipnet, err := net.ParseCIDR(cidr)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	var ips []string
-	for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); incIP(ip) {
-		ips = append(ips, ip.String())
+	first := append(net.IP(nil), ip.Mask(ipnet.Mask)...)
+	second := append(net.IP(nil), first...)
+	incIP(second)
+	if !ipnet.Contains(second) {
+		_ = yield(first.String())
+		return nil
 	}
-
-	if len(ips) > 2 {
-		return ips[1 : len(ips)-1], nil
+	third := append(net.IP(nil), second...)
+	incIP(third)
+	if !ipnet.Contains(third) {
+		if !yield(first.String()) {
+			return nil
+		}
+		_ = yield(second.String())
+		return nil
 	}
-	return ips, nil
+	cur := append(net.IP(nil), second...)
+	for ipnet.Contains(cur) {
+		next := append(net.IP(nil), cur...)
+		incIP(next)
+		if !ipnet.Contains(next) {
+			break
+		}
+		if !yield(cur.String()) {
+			return nil
+		}
+		cur = next
+	}
+	return nil
 }
 
 func incIP(ip net.IP) {
