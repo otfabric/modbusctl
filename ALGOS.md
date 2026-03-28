@@ -41,7 +41,7 @@ The **executor** loop is:
 ```
 connect to device
 open output file, write header
-strategy.Init(cfg)
+strategy.Init(settings)   // scan flags/algo; debug lines go to progress when --debug
 while !strategy.Done():
     task, ok := strategy.Next()
     if !ok: break
@@ -587,6 +587,6 @@ With `rangeLen = EndAddress − StartAddress + 1`, `initialChunks = ceil(rangeLe
 - For **stepped**: if Step == 0, strategy done immediately (no tasks). Step positions (with **StepHalfOffset**: add start+Step/2+k×Step, dedupe, sort); 6 probes per step (pos±1, pos × count 1,2); use **hasHit** (not hitAddr==0); expansion **strictly clamped** to [StartAddress, EndAddress]; only micro-probes may extend ±1 at edges.
 - For **linear**: four-phase state machine (Probe → Backward if late hit, else Forward → Tail → Probe), binary search for backward extent and tail count; **hasGapProbe** + **gapProbeAddr** (not address-as-sentinel); **lastTaskWasGapProbe**: OnResult(Probe) does not update state when true; gap probe is observation-only.
 - For **boundary**: seed validation — full seed inside [StartAddress, EndAddress] (else phase=Done). At left/right expand, **clamp when possible**; if clamping would yield Count 0, emit no task and transition to next phase (set leftLow/leftHigh or rightLow/rightHigh as in 7.2/7.5, then LeftBinary or RightBinary). When entering a binary phase with no search space (leftLow ≥ leftHigh or rightLow > rightHigh), emit no task and transition immediately (RightExpand or Done). Left/right binary invariants and termination as specified.
-- For **sunspec**: two-phase state machine (detectBase → walkModels → done). Parse candidate bases from config or use library defaults. If known base set, skip detection. Detection: emit `{base, 2}`; check marker bytes. Walk: emit `{currentAddr, 2}` for header; parse (id, length); then read body in chunks of min(125, remaining) (`readingBody` sub-phase); advance by 2+length; stop on end model (`0xFFFF`, 0), length 0, overflow, maxModels, maxSpan, read failure, or body read failure. Uses exported library constants (`SunSpecMarkerReg0/1`, `SunSpecEndModelID/Length`, `SunSpecDefaultBaseAddresses`).
+- For **sunspec**: two-phase state machine (detectBase → walkModels → done). Parse candidate bases from config or use library defaults. If known base set, skip detection. Detection: emit `{base, 2}`; check marker bytes. Walk: emit `{currentAddr, 2}` for header; parse (id, length); then read body in chunks of min(125, remaining) (`readingBody` sub-phase); advance by 2+length; stop on end model (`0xFFFF`, 0), length 0, overflow, maxModels, maxSpan, read failure, or body read failure. Uses exported library constants (`SunSpecMarkerReg0/1`, `SunSpecEndModelID/Length`, `sunspec.DefaultBaseAddresses`).
 
 All addresses and counts are 16-bit unsigned; clamp to [0, 65535] and to the configured start/end where specified.

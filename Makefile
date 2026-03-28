@@ -1,4 +1,4 @@
-.PHONY: help all run test coverage cover lint lint-ci fmt vet build build-nocheck build-all release-all install clean
+.PHONY: help all run test coverage cover compile lint lint-ci fmt vet build build-nocheck build-all release-all install clean check-legacy
 
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -26,7 +26,7 @@ run: ## Run the application
 	@echo "Running $(APP_NAME)"
 	@go run $(APP_SRC)
 
-check: fmt lint lint-ci vet test ## Run all checks (format, lint, vet, test)
+check: fmt lint lint-ci vet test coverage ## Run all checks (format, lint, vet, test, coverage)
 
 test: ## Run unit tests with race detector
 	@echo "Running unit tests (race detector)"
@@ -40,11 +40,17 @@ cover: coverage ## Open coverage report in browser (run coverage first)
 	@echo "Opening coverage report in browser"
 	@go tool cover -html=coverage.out
 
-lint: ## Run staticcheck
+compile: ## Typecheck entire module (catches redeclarations / same errors as gopls DuplicateDecl)
+	@echo "Typechecking all packages (go build ./...)"
+	@go build ./...
+
+lint: compile ## Run staticcheck after full-module compile
 	@echo "Running staticcheck"
 	@staticcheck ./...
 
-lint-ci: ## Run golangci-lint; uses .golangci.yml (enables unparam for unused-param checks)
+lint-ci: compile ## go vet + golangci-lint (typecheck + configured linters; see issues.new in .golangci.yml)
+	@echo "Running go vet"
+	@go vet ./...
 	@echo "Running golangci-lint"
 	@golangci-lint run ./...
 

@@ -2,6 +2,7 @@ package validate
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/otfabric/modbusctl/internal/config"
@@ -13,6 +14,12 @@ func TestCheckIdentifyConfig(t *testing.T) {
 		UnitClientConfig: config.UnitClientConfig{IP: "192.168.1.1", Port: 502, UnitID: "1", Timeout: 1000, Parallel: 10},
 	}
 	assert.NoError(t, CheckIdentifyConfig(validCfg))
+	ipv6 := validCfg
+	ipv6.IP = "::1"
+	assert.NoError(t, CheckIdentifyConfig(ipv6))
+	ipv6.IP = "2001:db8::1"
+	ipv6.Port = 1502
+	assert.NoError(t, CheckIdentifyConfig(ipv6))
 	validCfg.UnitID = "all"
 	assert.NoError(t, CheckIdentifyConfig(validCfg))
 
@@ -24,7 +31,12 @@ func TestCheckIdentifyConfig(t *testing.T) {
 	assert.Error(t, CheckIdentifyConfig(invalidCfg))
 	invalidCfg.UnitID = "abc"
 	assert.Error(t, CheckIdentifyConfig(invalidCfg))
+	invalidCfg.UnitID = "1,,3"
+	assert.Error(t, CheckIdentifyConfig(invalidCfg))
+	invalidCfg = validCfg
 	invalidCfg.Timeout = 0
+	assert.NoError(t, CheckIdentifyConfig(invalidCfg))
+	invalidCfg.Timeout = 100
 	assert.Error(t, CheckIdentifyConfig(invalidCfg))
 }
 
@@ -42,6 +54,9 @@ func TestCheckFingerprintConfig(t *testing.T) {
 	invalidCfg = validCfg
 	invalidCfg.IP = "invalid"
 	assert.Error(t, CheckFingerprintConfig(invalidCfg))
+	invalidCfg = validCfg
+	invalidCfg.Timeout = 100
+	assert.Error(t, CheckFingerprintConfig(invalidCfg))
 }
 
 func TestCheckReadConfig(t *testing.T) {
@@ -57,6 +72,9 @@ func TestCheckReadConfig(t *testing.T) {
 		OutputFile:    tmpFile.Name(),
 	}
 	assert.NoError(t, CheckReadConfig(validCfg))
+	ipv6 := validCfg
+	ipv6.IP = "::1"
+	assert.NoError(t, CheckReadConfig(ipv6))
 
 	invalidCfg := validCfg
 	invalidCfg.IP = "invalid"
@@ -70,10 +88,25 @@ func TestCheckReadConfig(t *testing.T) {
 	invalidCfg.RegisterCount = 0
 	assert.Error(t, CheckReadConfig(invalidCfg))
 
+	// Last two registers: must not reject due to uint16 wrap on start+count.
+	tail := validCfg
+	tail.StartAddress = 65534
+	tail.RegisterCount = 2
+	assert.NoError(t, CheckReadConfig(tail))
+
 	invalidCfg = validCfg
-	invalidCfg.StartAddress = 65534
-	invalidCfg.RegisterCount = 2
+	invalidCfg.Unit = 0
 	assert.Error(t, CheckReadConfig(invalidCfg))
+
+	invalidCfg = validCfg
+	invalidCfg.Timeout = 100
+	assert.Error(t, CheckReadConfig(invalidCfg))
+
+	// start + count must not wrap uint16 or exceed address space
+	overflow := validCfg
+	overflow.StartAddress = 65520
+	overflow.RegisterCount = 20
+	assert.Error(t, CheckReadConfig(overflow))
 }
 
 func TestCheckScanConfig(t *testing.T) {
@@ -89,49 +122,52 @@ func TestCheckScanConfig(t *testing.T) {
 		Delay:        500,
 		OutputFile:   tmpFile.Name(),
 	}
-	assert.NoError(t, CheckScanConfig(validCfg))
+	assert.NoError(t, CheckScanConfig(&validCfg))
 
 	invalidCfg := validCfg
 	invalidCfg.EndAddress = 0
-	assert.Error(t, CheckScanConfig(invalidCfg))
+	assert.Error(t, CheckScanConfig(&invalidCfg))
 
 	invalidCfg = validCfg
 	invalidCfg.Delay = 60001
-	assert.Error(t, CheckScanConfig(invalidCfg))
+	assert.Error(t, CheckScanConfig(&invalidCfg))
 
 	// Algo: valid values (empty defaults to safe in executor; safe/smart/deep accepted)
-	assert.NoError(t, CheckScanConfig(validCfg)) // Algo empty
+	assert.NoError(t, CheckScanConfig(&validCfg)) // Algo empty
+	assert.Equal(t, config.ScanAlgoSafe, validCfg.NormalizedAlgo)
 	validSafe := validCfg
 	validSafe.Algo = "safe"
-	assert.NoError(t, CheckScanConfig(validSafe))
+	assert.NoError(t, CheckScanConfig(&validSafe))
+	assert.Equal(t, config.ScanAlgoSafe, validSafe.NormalizedAlgo)
 	validSmart := validCfg
 	validSmart.Algo = "smart"
-	assert.NoError(t, CheckScanConfig(validSmart))
+	assert.NoError(t, CheckScanConfig(&validSmart))
+	assert.Equal(t, config.ScanAlgoSmart, validSmart.NormalizedAlgo)
 	validDeep := validCfg
 	validDeep.Algo = "deep"
-	assert.NoError(t, CheckScanConfig(validDeep))
+	assert.NoError(t, CheckScanConfig(&validDeep))
+	assert.Equal(t, config.ScanAlgoDeep, validDeep.NormalizedAlgo)
 
 	validStepped := validCfg
 	validStepped.Algo = "stepped"
 	validStepped.Step = 1000
-	assert.NoError(t, CheckScanConfig(validStepped))
+	assert.NoError(t, CheckScanConfig(&validStepped))
 	validLinear := validCfg
 	validLinear.Algo = "linear"
-	assert.NoError(t, CheckScanConfig(validLinear))
-
+	assert.NoError(t, CheckScanConfig(&validLinear))
 	validBoundary := validCfg
 	validBoundary.Algo = "boundary"
 	validBoundary.SeedStart = 50
 	validBoundary.SeedCount = 10
-	assert.NoError(t, CheckScanConfig(validBoundary))
+	assert.NoError(t, CheckScanConfig(&validBoundary))
 
 	// Boundary: requires seed-count 1..125
 	invalidCfg = validCfg
 	invalidCfg.Algo = "boundary"
 	invalidCfg.SeedCount = 0
-	assert.Error(t, CheckScanConfig(invalidCfg))
+	assert.Error(t, CheckScanConfig(&invalidCfg))
 	invalidCfg.SeedCount = 126
-	assert.Error(t, CheckScanConfig(invalidCfg))
+	assert.Error(t, CheckScanConfig(&invalidCfg))
 
 	// Boundary: full seed must lie inside [StartAddress, EndAddress]
 	invalidCfg = validCfg
@@ -139,23 +175,39 @@ func TestCheckScanConfig(t *testing.T) {
 	invalidCfg.SeedStart = 0
 	invalidCfg.SeedCount = 10
 	invalidCfg.StartAddress = 5 // seed start 0 < 5
-	assert.Error(t, CheckScanConfig(invalidCfg))
+	assert.Error(t, CheckScanConfig(&invalidCfg))
 	invalidCfg = validCfg
 	invalidCfg.Algo = "boundary"
 	invalidCfg.SeedStart = 95
 	invalidCfg.SeedCount = 10 // seed end 104 > EndAddress 100
-	assert.Error(t, CheckScanConfig(invalidCfg))
+	assert.Error(t, CheckScanConfig(&invalidCfg))
 
 	// Algo: invalid value
 	invalidCfg = validCfg
 	invalidCfg.Algo = "invalid"
-	assert.Error(t, CheckScanConfig(invalidCfg))
+	assert.Error(t, CheckScanConfig(&invalidCfg))
 
 	// Stepped: step must be 1..65535
 	invalidCfg = validCfg
 	invalidCfg.Algo = "stepped"
 	invalidCfg.Step = 0
-	assert.Error(t, CheckScanConfig(invalidCfg))
+	assert.Error(t, CheckScanConfig(&invalidCfg))
+
+	invalidCfg = validCfg
+	invalidCfg.Timeout = 50
+	assert.Error(t, CheckScanConfig(&invalidCfg))
+
+	sun := config.ScanConfig{
+		DeviceConfig: config.DeviceConfig{IP: "10.0.0.1", Port: 502, Unit: 2},
+		Function:     3,
+		Algo:         "sunspec",
+		OutputFile:   tmpFile.Name(),
+	}
+	assert.NoError(t, CheckScanConfig(&sun))
+	assert.Equal(t, config.ScanAlgoSunspec, sun.NormalizedAlgo)
+	badBases := sun
+	badBases.SunSpecBases = "not-a-number"
+	assert.Error(t, CheckScanConfig(&badBases))
 }
 
 func TestCheckRecordConfig(t *testing.T) {
@@ -177,7 +229,7 @@ func TestCheckRecordConfig(t *testing.T) {
 		Function:     4,
 		Interval:     5,
 		Duration:     30,
-		InputFile:    inputTmp.Name(),
+		BlocksFile:   inputTmp.Name(),
 		OutputFile:   outputTmp.Name(),
 	}
 	assert.NoError(t, CheckRecordConfig(validCfg))
@@ -187,7 +239,11 @@ func TestCheckRecordConfig(t *testing.T) {
 	assert.Error(t, CheckRecordConfig(invalidCfg))
 
 	invalidCfg = validCfg
-	invalidCfg.InputFile = ""
+	invalidCfg.BlocksFile = ""
+	assert.Error(t, CheckRecordConfig(invalidCfg))
+
+	invalidCfg = validCfg
+	invalidCfg.Timeout = 150
 	assert.Error(t, CheckRecordConfig(invalidCfg))
 }
 
@@ -205,11 +261,16 @@ func TestCheckConvertConfig(t *testing.T) {
 		FormatType: "json",
 		OutputFile: outputTmp.Name(),
 	}
-	assert.NoError(t, CheckConvertConfig(validCfg))
+	assert.NoError(t, CheckConvertConfig(&validCfg))
+
+	upper := validCfg
+	upper.FormatType = "CSV"
+	assert.NoError(t, CheckConvertConfig(&upper))
+	assert.Equal(t, "csv", upper.FormatType)
 
 	invalidCfg := validCfg
 	invalidCfg.FormatType = "unsupported"
-	assert.Error(t, CheckConvertConfig(invalidCfg))
+	assert.Error(t, CheckConvertConfig(&invalidCfg))
 }
 
 func TestCheckExtractConfig(t *testing.T) {
@@ -339,6 +400,10 @@ func TestCheckSunSpecDetectConfig(t *testing.T) {
 	invalidCfg = validCfg
 	invalidCfg.Bases = "abc"
 	assert.Error(t, CheckSunSpecDetectConfig(invalidCfg))
+
+	shortTimeout := validCfg
+	shortTimeout.Timeout = 100
+	assert.Error(t, CheckSunSpecDetectConfig(shortTimeout))
 }
 
 func TestCheckSunSpecModelsConfig(t *testing.T) {
@@ -370,6 +435,10 @@ func TestCheckSunSpecProbeConfig(t *testing.T) {
 		},
 	}
 	assert.NoError(t, CheckSunSpecProbeConfig(validCfg))
+
+	invalidCfg := validCfg
+	invalidCfg.Port = 0
+	assert.Error(t, CheckSunSpecProbeConfig(invalidCfg))
 }
 
 func TestCheckDiagnosticConfig(t *testing.T) {
@@ -396,8 +465,56 @@ func TestCheckDiagnosticConfig(t *testing.T) {
 	invalidCfg.Data = "ZZZ"
 	assert.Error(t, CheckDiagnosticConfig(invalidCfg))
 
-	// Timeout 0
+	// Timeout 0 = default budget
 	invalidCfg = validCfg
 	invalidCfg.Timeout = 0
+	assert.NoError(t, CheckDiagnosticConfig(invalidCfg))
+	invalidCfg.Timeout = 100
 	assert.Error(t, CheckDiagnosticConfig(invalidCfg))
+
+	invalidCfg = validCfg
+	invalidCfg.SubFunction = "returnbusmessagecount"
+	invalidCfg.Data = "01020304"
+	assert.Error(t, CheckDiagnosticConfig(invalidCfg))
+}
+
+func TestCheckDiscoverConfig_parallelBounds(t *testing.T) {
+	valid := config.DiscoverConfig{
+		Subnets:  []string{"192.168.1.0/24"},
+		Port:     502,
+		Parallel: 1,
+	}
+	assert.NoError(t, CheckDiscoverConfig(valid))
+
+	valid64 := valid
+	valid64.Parallel = 64
+	assert.NoError(t, CheckDiscoverConfig(valid64))
+
+	tooLow := valid
+	tooLow.Parallel = 0
+	assert.Error(t, CheckDiscoverConfig(tooLow))
+
+	tooHigh := valid
+	tooHigh.Parallel = 65
+	assert.Error(t, CheckDiscoverConfig(tooHigh))
+}
+
+func TestCheckDiscoverConfig_hostCap(t *testing.T) {
+	huge := config.DiscoverConfig{
+		Subnets:  []string{"10.0.0.0/15"},
+		Port:     502,
+		Parallel: 1,
+	}
+	err := CheckDiscoverConfig(huge)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "force-large-scan")
+
+	withForce := huge
+	withForce.ForceLargeScan = true
+	assert.NoError(t, CheckDiscoverConfig(withForce))
+}
+
+func TestValidateFile_outputTrailingSlash(t *testing.T) {
+	d := t.TempDir()
+	assert.NoError(t, validateFile(d+string(filepath.Separator), false))
 }

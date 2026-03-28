@@ -1,6 +1,7 @@
 package format
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ type TableMarshaler interface {
 // Write renders v to w according to f. JSON always uses encoding/json.
 // Text requires TextMarshaler; table requires TableMarshaler.
 // Text and table outputs get exactly one trailing newline after successful write.
+// JSON is encoded fully into memory first, then written in one Write (no partial JSON on encode failure).
 func Write(w io.Writer, f OutputFormat, v any) error {
 	switch f {
 	case FormatJSON:
@@ -51,9 +53,14 @@ func Write(w io.Writer, f OutputFormat, v any) error {
 }
 
 func writeJSON(w io.Writer, v any) error {
-	enc := json.NewEncoder(w)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		return err
+	}
+	_, err := w.Write(buf.Bytes())
+	return err
 }
 
 func writeTextWithTrailingNewline(w io.Writer, s string) error {

@@ -1,16 +1,13 @@
 package mcap
 
 import (
-	"fmt"
-	"os"
-
+	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
-	"github.com/otfabric/modbusctl/internal/format"
+	"github.com/otfabric/modbusctl/internal/errs"
+	mcapfile "github.com/otfabric/modbusctl/internal/mcap"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
-
-var infoCfg config.InfoConfig
 
 var infoCmd = &cobra.Command{
 	Use:   "info",
@@ -25,43 +22,31 @@ var infoCmd = &cobra.Command{
   # Use environment variables instead of CLI arguments
   MODBUSCTL_INPUT=data.mcap MODBUSCTL_OUTPUT=info.txt modbusctl mcap info
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := validate.CheckInfoConfig(infoCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
-		}
-
-		var out *os.File
-		if infoCfg.OutputFile != "" {
-			var err error
-			out, err = os.Create(infoCfg.OutputFile)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "❌ Failed to create output file: %v\n", err)
-				os.Exit(1)
-			}
-			defer func() { _ = out.Close() }()
-		} else {
-			out = os.Stdout
-		}
-
-		if err := format.ExportInfo(out, infoCfg.InputFile); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ ExportInfo failed: %v\n", err)
-			os.Exit(1)
-		}
-	},
 }
 
 func init() {
-	McapCmd.AddCommand(infoCmd)
-	infoCfg = config.InfoConfig{
+	cfg := config.InfoConfig{
 		InputFile:  "",
 		OutputFile: "",
 	}
-	config.LoadFromEnv(&infoCfg)
-	config.RegisterFlags(infoCmd, &infoCfg)
-	if infoCfg.InputFile == "" {
-		if err := infoCmd.MarkFlagRequired("input"); err != nil {
-			panic(err)
+	config.MustLoadFromEnv(&cfg)
+	config.RegisterFlags(infoCmd, &cfg)
+	cli.MustMarkFlagRequired(infoCmd, "input")
+	McapCmd.AddCommand(infoCmd)
+
+	infoCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := validate.CheckInfoConfig(cfg); err != nil {
+			return errs.WrapValidation(err)
 		}
+		w, cleanup, err := cli.OpenStdoutOrFile(cfg.OutputFile)
+		if err != nil {
+			return errs.Output(errs.CodeOutputFileCreateFailed, err)
+		}
+		defer cleanup()
+
+		if err := mcapfile.ExportInfo(w, cfg.InputFile); err != nil {
+			return errs.Output(errs.CodeMCAPLoadFailed, err)
+		}
+		return nil
 	}
 }

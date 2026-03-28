@@ -1,16 +1,13 @@
 package mcap
 
 import (
-	"fmt"
-	"os"
-
+	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/format"
 	"github.com/otfabric/modbusctl/internal/validate"
 	"github.com/spf13/cobra"
 )
-
-var stringsCfg config.StringsConfig
 
 var stringsCmd = &cobra.Command{
 	Use:   "strings",
@@ -25,43 +22,31 @@ var stringsCmd = &cobra.Command{
   # Use environment variables instead of CLI arguments
   MODBUSCTL_INPUT=file.mcap MODBUSCTL_OUTPUT=strings.txt modbusctl mcap strings
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := validate.CheckStringsConfig(stringsCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Invalid input: %v\n", err)
-			os.Exit(1)
-		}
-
-		var out *os.File
-		if stringsCfg.OutputFile != "" {
-			var err error
-			out, err = os.Create(stringsCfg.OutputFile)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "❌ Failed to create output file: %v\n", err)
-				os.Exit(1)
-			}
-			defer func() { _ = out.Close() }()
-		} else {
-			out = os.Stdout
-		}
-
-		if err := format.ExportStrings(out, stringsCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ ExportStrings failed: %v\n", err)
-			os.Exit(1)
-		}
-	},
 }
 
 func init() {
-	McapCmd.AddCommand(stringsCmd)
-	stringsCfg = config.StringsConfig{
+	cfg := config.StringsConfig{
 		InputFile:  "",
 		OutputFile: "",
 	}
-	config.LoadFromEnv(&stringsCfg)
-	config.RegisterFlags(stringsCmd, &stringsCfg)
-	if stringsCfg.InputFile == "" {
-		if err := stringsCmd.MarkFlagRequired("input"); err != nil {
-			panic(err)
+	config.MustLoadFromEnv(&cfg)
+	config.RegisterFlags(stringsCmd, &cfg)
+	cli.MustMarkFlagRequired(stringsCmd, "input")
+	McapCmd.AddCommand(stringsCmd)
+
+	stringsCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := validate.CheckStringsConfig(cfg); err != nil {
+			return errs.WrapValidation(err)
 		}
+		w, cleanup, err := cli.OpenStdoutOrFile(cfg.OutputFile)
+		if err != nil {
+			return errs.Output(errs.CodeOutputFileCreateFailed, err)
+		}
+		defer cleanup()
+
+		if err := format.ExportStrings(w, cfg); err != nil {
+			return errs.Output(errs.CodeMCAPLoadFailed, err)
+		}
+		return nil
 	}
 }

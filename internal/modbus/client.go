@@ -5,15 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/otfabric/go-modbus"
 	"github.com/otfabric/modbusctl/internal/config"
-	"github.com/otfabric/modbusctl/internal/format"
+	"github.com/otfabric/modbusctl/internal/errs"
+	"github.com/otfabric/modbusctl/internal/mcap"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
@@ -25,9 +29,12 @@ const modbusUnitIDMin, modbusUnitIDMax = 1, 255
 // defaultDialTimeout is used when building client config (TCP dial; TLS would use a longer value).
 const defaultDialTimeout = 5 * time.Second
 
+// Discovery uses a short Modbus op + dial budget so subnet sweeps do not wait 10s per host.
+const discoveryModbusTimeout = 800 * time.Millisecond
+const discoveryDialTimeout = 500 * time.Millisecond
+
 var (
 	ErrTCPConnection    = errors.New("TCP connection error")
-	ErrFC43Timeout      = errors.New("FC43 timeout")
 	ErrFC43NotSupported = errors.New("FC43 not supported or invalid response")
 )
 
@@ -44,6 +51,37 @@ func buildClientConfig(modbusURL string, timeout time.Duration, debug bool) modb
 		DialTimeout: defaultDialTimeout,
 		Logger:      logger,
 	}
+}
+
+// clientRequestTimeout maps CLI milliseconds to Modbus per-request timeout (0 = 10s).
+func clientRequestTimeout(ms uint16) time.Duration {
+	if ms == 0 {
+		return 10 * time.Second
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+// dialTimeoutForRequest caps TCP dial time by the Modbus request timeout and by defaultDialTimeout.
+func dialTimeoutForRequest(request time.Duration) time.Duration {
+	if request <= 0 {
+		return defaultDialTimeout
+	}
+	d := request
+	if d > defaultDialTimeout {
+		d = defaultDialTimeout
+	}
+	const minDial = 200 * time.Millisecond
+	if d < minDial {
+		d = minDial
+	}
+	return d
+}
+
+func buildDeviceClientConfig(modbusURL string, timeoutMS uint16, debug bool) modbus.Config {
+	req := clientRequestTimeout(timeoutMS)
+	c := buildClientConfig(modbusURL, req, debug)
+	c.DialTimeout = dialTimeoutForRequest(req)
+	return c
 }
 
 // validateAndConnect validates conf, creates a client, and opens the connection.
@@ -64,9 +102,19 @@ func validateAndConnect(conf modbus.Config) (*modbus.Client, func(), error) {
 	return client, cleanup, nil
 }
 
-func connect(modbusURL string, debug bool) (*modbus.Client, func(), error) {
-	conf := buildClientConfig(modbusURL, 10*time.Second, debug)
-	return validateAndConnect(conf)
+func connectDevice(modbusURL string, timeoutMS uint16, debug bool) (*modbus.Client, func(), error) {
+	return validateAndConnect(buildDeviceClientConfig(modbusURL, timeoutMS, debug))
+}
+
+func discoveryClientConfig(modbusURL string, debug bool) modbus.Config {
+	c := buildClientConfig(modbusURL, discoveryModbusTimeout, debug)
+	c.DialTimeout = discoveryDialTimeout
+	return c
+}
+
+// connectDiscovery opens one Modbus TCP client (dial + Open) with short timeouts for subnet discovery.
+func connectDiscovery(modbusURL string, debug bool) (*modbus.Client, func(), error) {
+	return validateAndConnect(discoveryClientConfig(modbusURL, debug))
 }
 
 // classifyOutcome returns outcome type and Modbus exception code (0 when not an exception).
@@ -79,7 +127,7 @@ func classifyOutcome(err error, _, _ int64) (ScanOutcomeType, uint8) {
 	if errors.As(err, &excErr) {
 		return ScanOutcomeException, uint8(excErr.ExceptionCode)
 	}
-	if errors.Is(err, modbus.ErrRequestTimedOut) {
+	if errors.Is(err, modbus.ErrRequestTimedOut) || errors.Is(err, context.DeadlineExceeded) {
 		return ScanOutcomeTimeout, 0
 	}
 	if errors.Is(err, modbus.ErrProtocolError) || errors.Is(err, modbus.ErrBadUnitID) ||
@@ -103,12 +151,32 @@ func shouldReconnect(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ENETRESET) {
+		return true
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		switch errno {
+		case syscall.EPIPE, syscall.ECONNRESET, syscall.ENETRESET:
+			return true
+		default:
+			// Other errno: fall through to string heuristics below.
+		}
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Err != nil {
+		if shouldReconnect(opErr.Err) {
+			return true
+		}
+	}
 	msg := err.Error()
 	return strings.Contains(msg, "broken pipe") || strings.Contains(msg, "EOF") || strings.Contains(msg, "connection reset")
 }
 
-func performRead(client *modbus.Client, unitID uint8, fc uint8, start, count uint16) ([]byte, error) {
-	ctx := context.Background()
+func performRead(ctx context.Context, client *modbus.Client, unitID uint8, fc uint8, start, count uint16) ([]byte, error) {
 	switch fc {
 	case 1:
 		bools, err := client.ReadCoils(ctx, unitID, start, count)
@@ -127,7 +195,7 @@ func performRead(client *modbus.Client, unitID uint8, fc uint8, start, count uin
 	case 4:
 		return client.ReadRegisterBytes(ctx, unitID, start, count*2, modbus.InputRegister)
 	default:
-		return nil, fmt.Errorf("unsupported function code: %d", fc)
+		return nil, errs.InvalidInput(errs.CodeInvalidInput, fmt.Sprintf("unsupported function code: %d", fc), nil)
 	}
 }
 
@@ -143,16 +211,21 @@ func packCoilsToBytes(bools []bool) []byte {
 	return out
 }
 
-func readRegisters(clientPtr **modbus.Client, fc uint8, start, count uint16, retries uint8, modbusURL string, unit uint8, cleanup *func(), delay uint16, debug bool) (data []byte, requestTS int64, responseTS int64, err error) {
+func readRegisters(ctx context.Context, clientPtr **modbus.Client, fc uint8, start, count uint16, retries uint8, modbusURL string, unit uint8, cleanup *func(), delay uint16, debug bool, requestTimeoutMS uint16, stderr io.Writer) (data []byte, requestTS int64, responseTS int64, err error) {
+	if stderr == nil {
+		stderr = io.Discard
+	}
 	for attempt := 1; attempt <= int(retries); attempt++ {
 		if delay > 0 {
 			if debug {
-				fmt.Fprintf(os.Stderr, "⏳ Waiting %d ms before retrying...\n", delay)
+				_, _ = fmt.Fprintf(stderr, "⏳ Waiting %d ms before retrying...\n", delay)
 			}
-			time.Sleep(time.Duration(delay) * time.Millisecond)
+			if err := sleepContext(ctx, time.Duration(delay)*time.Millisecond); err != nil {
+				return nil, 0, 0, err
+			}
 		}
 		requestTS = time.Now().UnixNano()
-		data, err = performRead(*clientPtr, unit, fc, start, count)
+		data, err = performRead(ctx, *clientPtr, unit, fc, start, count)
 		responseTS = time.Now().UnixNano()
 
 		if err == nil {
@@ -160,23 +233,29 @@ func readRegisters(clientPtr **modbus.Client, fc uint8, start, count uint16, ret
 		}
 
 		if shouldRetry(err) {
-			fmt.Fprintf(os.Stderr, "🔁 Retrying due to Modbus read exception on address %d with count %d (attempt %d): %v\n", start, count, attempt, err)
+			if debug {
+				_, _ = fmt.Fprintf(stderr, "🔁 Retrying due to Modbus read exception on address %d with count %d (attempt %d): %v\n", start, count, attempt, err)
+			}
 			if delay == 0 {
-				time.Sleep(20 * time.Millisecond)
+				if err := sleepContext(ctx, 20*time.Millisecond); err != nil {
+					return nil, 0, 0, err
+				}
 			}
 			continue
 		}
 
 		if shouldReconnect(err) {
-			fmt.Fprintf(os.Stderr, "🔁 Reconnecting due to connection error (attempt %d)...\n", attempt)
+			if debug {
+				_, _ = fmt.Fprintf(stderr, "🔁 Reconnecting due to connection error (attempt %d)...\n", attempt)
+			}
 			if cleanup != nil {
 				(*cleanup)()
 			}
 			var newClient *modbus.Client
 			var newCleanup func()
-			newClient, newCleanup, err = connect(modbusURL, debug)
+			newClient, newCleanup, err = connectDevice(modbusURL, requestTimeoutMS, debug)
 			if err != nil {
-				return nil, 0, 0, fmt.Errorf("reconnect failed: %w", err)
+				return nil, 0, 0, TCPConnectionError(err)
 			}
 			*clientPtr = newClient
 			*cleanup = newCleanup
@@ -189,8 +268,8 @@ func readRegisters(clientPtr **modbus.Client, fc uint8, start, count uint16, ret
 }
 
 // executeReadTask runs a single read and returns a ScanResult.
-func executeReadTask(clientPtr **modbus.Client, cfg config.ScanConfig, task ScanTask, cleanup *func(), modbusURL string) ScanResult {
-	data, reqTS, resTS, err := readRegisters(clientPtr, cfg.Function, task.Start, task.Count, 1, modbusURL, cfg.Unit, cleanup, cfg.Delay, cfg.Debug)
+func executeReadTask(ctx context.Context, clientPtr **modbus.Client, cfg config.ScanConfig, task ScanTask, cleanup *func(), modbusURL string, stderr io.Writer) ScanResult {
+	data, reqTS, resTS, err := readRegisters(ctx, clientPtr, cfg.Function, task.Start, task.Count, 1, modbusURL, cfg.Unit, cleanup, cfg.Delay, cfg.Debug, cfg.Timeout, stderr)
 	outcome, excCode := classifyOutcome(err, reqTS, resTS)
 	rtt := int64(0)
 	if resTS > reqTS {
@@ -210,33 +289,28 @@ func executeReadTask(clientPtr **modbus.Client, cfg config.ScanConfig, task Scan
 	}
 }
 
-func ReadAndWriteMCAP(cfg config.ReadConfig) error {
+// CollectRead performs the Modbus read, writes MCAP, and returns the stdout payload (no formatted stdout write).
+func CollectRead(ctx context.Context, cfg config.ReadConfig, progress io.Writer) (*types.ReadResult, error) {
+	if progress == nil {
+		progress = io.Discard
+	}
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connect(modbusURL, cfg.Debug)
+	client, cleanup, err := connectDevice(modbusURL, cfg.Timeout, cfg.Debug)
 	if err != nil {
-		return fmt.Errorf("connection error: %w", err)
+		return nil, TCPConnectionError(err)
 	}
 	defer cleanup()
 
-	out := cfg.OutputFile
-	if out == "" || strings.HasSuffix(out, "/") {
-		dir := out
-		if dir == "" {
-			dir = "./"
-		}
-		ts := time.Now().Format(time.RFC3339)
-		out = fmt.Sprintf("%smodbusctl_read_%s.mcap", dir, ts[:10]+"_"+ts[11:19])
-	}
-
-	f, err := os.Create(out)
+	mcapPath := readCaptureMcapPath(cfg)
+	f, err := os.Create(mcapPath)
 	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
+		return nil, errs.Output(errs.CodeOutputFileCreateFailed, err)
 	}
 	defer func() { _ = f.Close() }()
 
-	rawData, requestTimestamp, responseTimestamp, err := readRegisters(&client, cfg.Function, cfg.StartAddress, cfg.RegisterCount, 1, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug)
+	rawData, requestTimestamp, responseTimestamp, err := readRegisters(ctx, &client, cfg.Function, cfg.StartAddress, cfg.RegisterCount, 1, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug, cfg.Timeout, progress)
 	if err != nil {
-		return fmt.Errorf("read error: %w", err)
+		return nil, err
 	}
 
 	byteCount := len(rawData)
@@ -244,7 +318,7 @@ func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 	if cfg.SwapBytes {
 		preSwapHex = fmt.Sprintf("% X", rawData)
 		if len(rawData)%2 != 0 {
-			fmt.Fprintf(os.Stderr, "⚠️ ByteSwap requested but data length (%d) is not even; last byte will be left as-is\n", len(rawData))
+			_, _ = fmt.Fprintf(progress, "⚠️ ByteSwap requested but data length (%d) is not even; last byte will be left as-is\n", len(rawData))
 		}
 		for i := 0; i+1 < len(rawData); i += 2 {
 			rawData[i], rawData[i+1] = rawData[i+1], rawData[i]
@@ -265,61 +339,24 @@ func ReadAndWriteMCAP(cfg config.ReadConfig) error {
 		asciiDecoded = builder.String()
 	}
 
-	headerIP, headerPort := cfg.IP, cfg.Port
-	if strings.TrimSpace(cfg.URL) != "" {
-		headerIP, headerPort = config.ParseModbusURLHostPort(modbusURL)
-	}
-	header := types.CaptureHeader{
-		IP:        headerIP,
-		Port:      headerPort,
-		Unit:      cfg.Unit,
-		Function:  cfg.Function,
-		StartTime: time.Now().UnixNano(),
-	}
-	record := types.CaptureRecord{
-		Iteration:         0,
-		RequestTimestamp:  requestTimestamp,
-		ResponseTimestamp: responseTimestamp,
-		StartAddress:      cfg.StartAddress,
-		RegisterCount:     cfg.RegisterCount,
-		Data:              rawData,
+	if err := writeReadCaptureToMcap(f, cfg, modbusURL, rawData, requestTimestamp, responseTimestamp); err != nil {
+		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
 	}
 
-	if err := format.WriteHeader(f, header); err != nil {
-		return fmt.Errorf("failed to write header: %w", err)
-	}
-	if err := format.AppendRecord(f, record); err != nil {
-		return fmt.Errorf("failed to write record: %w", err)
-	}
-
-	readRes := &types.ReadResult{
-		Target:         modbusURL,
-		UnitID:         cfg.Unit,
-		Function:       cfg.Function,
-		StartAddress:   cfg.StartAddress,
-		RegisterCount:  cfg.RegisterCount,
-		RawByteCount:   byteCount,
-		PreSwapHex:     preSwapHex,
-		RawDataHex:     finalHex,
-		BytesSwapped:   cfg.SwapBytes,
-		AsciiDecoded:   asciiDecoded,
-		McapOutputPath: out,
-	}
-	outFmt, err := format.Parse(cfg.OutputFormat)
-	if err != nil {
-		return err
-	}
-	if err := format.Write(os.Stdout, outFmt, readRes); err != nil {
-		return err
-	}
-	return nil
+	return newReadResult(cfg, modbusURL, mcapPath, preSwapHex, finalHex, asciiDecoded, byteCount), nil
 }
 
-func ScanAndWriteMCAP(cfg config.ScanConfig) (*types.ScanSummaryResult, error) {
+func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Writer) (*types.ScanSummaryResult, error) {
+	if progress == nil {
+		progress = io.Discard
+	}
+	// Progress classification (written to progress, typically stderr): always-on = scan banner, worst-case
+	// hint, per-success block summary, and inter-request delay (silent when delay 0). Debug-only = executor
+	// next-task/result lines gated on cfg.Debug; strategy debug uses scanSettings.DebugWriter (same stream when debug).
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connect(modbusURL, cfg.Debug)
+	client, cleanup, err := connectDevice(modbusURL, cfg.Timeout, cfg.Debug)
 	if err != nil {
-		return nil, fmt.Errorf("connection error: %w", err)
+		return nil, TCPConnectionError(err)
 	}
 	defer cleanup()
 
@@ -329,13 +366,12 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) (*types.ScanSummaryResult, error) {
 		if dir == "" {
 			dir = "./"
 		}
-		ts := time.Now().Format(time.RFC3339)
-		out = fmt.Sprintf("%smodbusctl_scan_%s.mcap", dir, ts[:10]+"_"+ts[11:19])
+		out = AutoCaptureMcapPath(dir, "scan")
 	}
 
 	f, err := os.Create(out)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create output file: %w", err)
+		return nil, errs.Output(errs.CodeOutputFileCreateFailed, err)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -350,26 +386,27 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) (*types.ScanSummaryResult, error) {
 		Function:  cfg.Function,
 		StartTime: time.Now().UnixNano(),
 	}
-	if err := format.WriteHeader(f, header); err != nil {
-		return nil, fmt.Errorf("failed to write header: %w", err)
+	if err := mcap.WriteHeader(f, header); err != nil {
+		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
 	}
 
-	strategy, err := newScanStrategy(cfg)
+	ss := scanSettings{ScanConfig: cfg}
+	if cfg.Debug {
+		ss.DebugWriter = progress
+	}
+	strategy, err := newScanStrategy(ss)
 	if err != nil {
 		return nil, err
 	}
-	strategy.Init(cfg)
+	strategy.Init(ss)
 
-	algo := strings.ToLower(strings.TrimSpace(cfg.Algo))
-	if algo == "" {
-		algo = "safe"
-	}
+	algo := string(config.ScanAlgorithmForExecution(&cfg))
 	if algo == "sunspec" {
-		fmt.Fprintf(os.Stderr, "SunSpec discovery with function code %d (algo: sunspec)\n", cfg.Function)
+		_, _ = fmt.Fprintf(progress, "SunSpec discovery with function code %d (algo: sunspec)\n", cfg.Function)
 	} else {
-		fmt.Fprintf(os.Stderr, "Scanning registers from %d to %d with function code %d (algo: %s)\n", cfg.StartAddress, cfg.EndAddress, cfg.Function, algo)
+		_, _ = fmt.Fprintf(progress, "Scanning registers from %d to %d with function code %d (algo: %s)\n", cfg.StartAddress, cfg.EndAddress, cfg.Function, algo)
 	}
-	printScanWorstCaseHint(cfg, algo)
+	printScanWorstCaseHint(cfg, algo, progress)
 
 	var stats ScanStats
 	var iteration uint32
@@ -382,15 +419,21 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) (*types.ScanSummaryResult, error) {
 		}
 		if cfg.Debug && task.Count > 0 {
 			end := task.Start + task.Count - 1
-			fmt.Fprintf(os.Stderr, "DEBUG [exec] next task: start=%d count=%d end=%d\n", task.Start, task.Count, end)
+			_, _ = fmt.Fprintf(progress, "DEBUG [exec] next task: start=%d count=%d end=%d\n", task.Start, task.Count, end)
 		}
-		result := executeReadTask(&client, cfg, task, &cleanup, modbusURL)
+		result := executeReadTask(ctx, &client, cfg, task, &cleanup, modbusURL, progress)
 		// Milestone B: retry once on timeout/transport if configured
+		retryAppliedDelay := false
 		if !result.Success && cfg.RetryOnTimeoutTransport > 0 &&
 			(result.OutcomeType == ScanOutcomeTimeout || result.OutcomeType == ScanOutcomeTransport) {
 			stats.TotalRequests++
-			time.Sleep(time.Duration(cfg.Delay) * time.Millisecond)
-			result = executeReadTask(&client, cfg, task, &cleanup, modbusURL)
+			if cfg.Delay > 0 {
+				if err := sleepContext(ctx, time.Duration(cfg.Delay)*time.Millisecond); err != nil {
+					return nil, err
+				}
+				retryAppliedDelay = true
+			}
+			result = executeReadTask(ctx, &client, cfg, task, &cleanup, modbusURL, progress)
 		}
 		if cfg.Debug {
 			outcome := "success"
@@ -400,7 +443,7 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) (*types.ScanSummaryResult, error) {
 					outcome = fmt.Sprintf("%s code=0x%02x", result.OutcomeType, result.ExceptionCode)
 				}
 			}
-			fmt.Fprintf(os.Stderr, "DEBUG [exec] result: %s (start=%d count=%d)\n", outcome, result.Start, result.Count)
+			_, _ = fmt.Fprintf(progress, "DEBUG [exec] result: %s (start=%d count=%d)\n", outcome, result.Start, result.Count)
 		}
 		strategy.OnResult(task, result)
 
@@ -419,23 +462,31 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) (*types.ScanSummaryResult, error) {
 				RegisterCount:     result.Count,
 				Data:              result.Data,
 			}
-			if err := format.AppendRecord(f, rec); err != nil {
-				return nil, fmt.Errorf("failed to write record: %w", err)
+			if err := mcap.AppendRecord(f, rec); err != nil {
+				return nil, errs.Output(errs.CodeMcapWriteFailed, err)
 			}
-			fmt.Fprintf(os.Stderr, "Block: Start: %d, End: %d, Count: %d\n", rec.StartAddress, rec.StartAddress+rec.RegisterCount-1, rec.RegisterCount)
+			_, _ = fmt.Fprintf(progress, "Block: Start: %d, End: %d, Count: %d\n", rec.StartAddress, rec.StartAddress+rec.RegisterCount-1, rec.RegisterCount)
 		} else {
 			stats.FailCount++
 			switch result.OutcomeType {
+			case ScanOutcomeSuccess:
+				// Unreachable when !result.Success; kept for exhaustiveness.
 			case ScanOutcomeException:
 				stats.ExceptionCount++
 			case ScanOutcomeTimeout:
 				stats.TimeoutCount++
 			case ScanOutcomeTransport:
 				stats.TransportErrorCount++
+			case ScanOutcomeProtocol, ScanOutcomeUnknown:
+				// No separate counter; failure already reflected in FailCount.
 			}
 		}
 
-		time.Sleep(time.Duration(cfg.Delay) * time.Millisecond)
+		if !retryAppliedDelay {
+			if err := sleepContext(ctx, time.Duration(cfg.Delay)*time.Millisecond); err != nil {
+				return nil, err
+			}
+		}
 		iteration++
 	}
 
@@ -444,6 +495,7 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) (*types.ScanSummaryResult, error) {
 	durStr := time.Duration(stats.TotalDurationNanos).Round(time.Millisecond).String()
 	summary := &types.ScanSummaryResult{
 		Target:              modbusURL,
+		Summary:             types.NewResultSummary(stats.TotalRequests, stats.SuccessCount, stats.FailCount),
 		Algo:                algo,
 		TotalRequests:       stats.TotalRequests,
 		SuccessCount:        stats.SuccessCount,
@@ -462,22 +514,27 @@ func ScanAndWriteMCAP(cfg config.ScanConfig) (*types.ScanSummaryResult, error) {
 	return summary, nil
 }
 
-func RecordAndWriteMCAP(cfg config.RecordConfig) (*types.RecordSummaryResult, error) {
-	file, err := os.Open(cfg.InputFile)
+func RecordAndWriteMCAP(ctx context.Context, cfg config.RecordConfig, progress io.Writer) (*types.RecordSummaryResult, error) {
+	if progress == nil {
+		progress = io.Discard
+	}
+	// Progress classification: always-on = iteration start, per-block success/failure, read-retry chatter
+	// when cfg.Debug inside readRegisters; interval sleep has no line (delay 0 skips sleep).
+	file, err := os.Open(cfg.BlocksFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open input file: %w", err)
+		return nil, errs.Output(errs.CodeInputFileOpenFailed, err)
 	}
 	defer func() { _ = file.Close() }()
 
 	var blocks []types.AddressBlock
 	if err := json.NewDecoder(file).Decode(&blocks); err != nil {
-		return nil, fmt.Errorf("failed to decode input blocks: %w", err)
+		return nil, errs.Output(errs.CodeInputDecodeFailed, err)
 	}
 
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connect(modbusURL, cfg.Debug)
+	client, cleanup, err := connectDevice(modbusURL, cfg.Timeout, cfg.Debug)
 	if err != nil {
-		return nil, fmt.Errorf("connection error: %w", err)
+		return nil, TCPConnectionError(err)
 	}
 	defer cleanup()
 
@@ -487,13 +544,12 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) (*types.RecordSummaryResult, er
 		if dir == "" {
 			dir = "./"
 		}
-		ts := time.Now().Format(time.RFC3339)
-		out = fmt.Sprintf("%smodbusctl_record_%s.mcap", dir, ts[:10]+"_"+ts[11:19])
+		out = AutoCaptureMcapPath(dir, "record")
 	}
 
 	f, err := os.Create(out)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create output file: %w", err)
+		return nil, errs.Output(errs.CodeOutputFileCreateFailed, err)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -508,8 +564,8 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) (*types.RecordSummaryResult, er
 		Function:  cfg.Function,
 		StartTime: time.Now().UnixNano(),
 	}
-	if err := format.WriteHeader(f, header); err != nil {
-		return nil, fmt.Errorf("failed to write header: %w", err)
+	if err := mcap.WriteHeader(f, header); err != nil {
+		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
 	}
 
 	startTime := time.Now()
@@ -520,11 +576,11 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) (*types.RecordSummaryResult, er
 		if elapsed >= time.Duration(cfg.Duration)*time.Millisecond {
 			break
 		}
-		fmt.Fprintf(os.Stderr, "📟 Recording %d started...\n", i)
+		_, _ = fmt.Fprintf(progress, "📟 Recording %d started...\n", i)
 		for _, b := range blocks {
-			data, requestTimestamp, responseTimestamp, err := readRegisters(&client, cfg.Function, b.StartAddress, b.RegisterCount, 5, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug)
+			data, requestTimestamp, responseTimestamp, err := readRegisters(ctx, &client, cfg.Function, b.StartAddress, b.RegisterCount, 5, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug, cfg.Timeout, progress)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "⚠️ Failed to read block (start: %d, count: %d): %v\n", b.StartAddress, b.RegisterCount, err)
+				_, _ = fmt.Fprintf(progress, "⚠️ Failed to read block (start: %d, count: %d): %v\n", b.StartAddress, b.RegisterCount, err)
 				continue
 			}
 			rec := types.CaptureRecord{
@@ -535,15 +591,17 @@ func RecordAndWriteMCAP(cfg config.RecordConfig) (*types.RecordSummaryResult, er
 				RegisterCount:     b.RegisterCount,
 				Data:              data,
 			}
-			if err := format.AppendRecord(f, rec); err != nil {
-				return nil, fmt.Errorf("failed to write record: %w", err)
+			if err := mcap.AppendRecord(f, rec); err != nil {
+				return nil, errs.Output(errs.CodeMcapWriteFailed, err)
 			}
 			blockCount++
-			fmt.Fprintf(os.Stderr, "✓ Recorded block: Start %d, Count %d\n", b.StartAddress, b.RegisterCount)
+			_, _ = fmt.Fprintf(progress, "✓ Recorded block: Start %d, Count %d\n", b.StartAddress, b.RegisterCount)
 		}
 		i++
 		if cfg.Interval > 0 {
-			time.Sleep(time.Duration(cfg.Interval) * time.Millisecond)
+			if err := sleepContext(ctx, time.Duration(cfg.Interval)*time.Millisecond); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -588,7 +646,7 @@ func ObjectDescription(id modbus.DeviceIDObjectID) string {
 func ParseUnitIDs(unitID string) ([]uint8, error) {
 	s := strings.TrimSpace(strings.ToLower(unitID))
 	if s == "" {
-		return nil, fmt.Errorf("unit ID cannot be empty")
+		return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, "unit ID cannot be empty", nil)
 	}
 	if s == "all" {
 		ids := make([]uint8, 0, modbusUnitIDMax-modbusUnitIDMin+1)
@@ -602,27 +660,32 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 	for _, part := range strings.Split(s, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
-			continue
+			return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, "unit list has an empty segment (remove extra commas)", nil)
 		}
 		if strings.Contains(part, "-") {
 			// Range: N-M
 			rangeParts := strings.SplitN(part, "-", 2)
 			if len(rangeParts) != 2 {
-				return nil, fmt.Errorf("invalid unit range %q", part)
+				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit range %q", part), nil)
 			}
-			lo, err := strconv.ParseUint(strings.TrimSpace(rangeParts[0]), 10, 8)
-			if err != nil {
-				return nil, fmt.Errorf("invalid unit range %q: %w", part, err)
+			loStr := strings.TrimSpace(rangeParts[0])
+			hiStr := strings.TrimSpace(rangeParts[1])
+			if loStr == "" || hiStr == "" {
+				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit range %q (empty bound)", part), nil)
 			}
-			hi, err := strconv.ParseUint(strings.TrimSpace(rangeParts[1]), 10, 8)
+			lo, err := strconv.ParseUint(loStr, 10, 8)
 			if err != nil {
-				return nil, fmt.Errorf("invalid unit range %q: %w", part, err)
+				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit range %q: %v", part, err), err)
+			}
+			hi, err := strconv.ParseUint(hiStr, 10, 8)
+			if err != nil {
+				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit range %q: %v", part, err), err)
 			}
 			if lo < 1 || hi > 255 {
-				return nil, fmt.Errorf("unit IDs must be 1-255 in range %q", part)
+				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("unit IDs must be 1-255 in range %q", part), nil)
 			}
 			if lo > hi {
-				return nil, fmt.Errorf("invalid unit range %q: start > end", part)
+				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit range %q: start > end", part), nil)
 			}
 			for i := lo; i <= hi; i++ {
 				seen[uint8(i)] = struct{}{}
@@ -631,17 +694,17 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 			// Single number
 			n, err := strconv.ParseUint(part, 10, 8)
 			if err != nil {
-				return nil, fmt.Errorf("invalid unit ID %q: %w", part, err)
+				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit ID %q: %v", part, err), err)
 			}
 			if n < 1 || n > 255 {
-				return nil, fmt.Errorf("unit ID must be 1-255, got %d", n)
+				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("unit ID must be 1-255, got %d", n), nil)
 			}
 			seen[uint8(n)] = struct{}{}
 		}
 	}
 
 	if len(seen) == 0 {
-		return nil, fmt.Errorf("unit ID must be 1-255, \"all\", a range (e.g. 1-10), or a list (e.g. 1,5,25)")
+		return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, `unit ID must be 1-255, "all", a range (e.g. 1-10), or a list (e.g. 1,5,25)`, nil)
 	}
 	ids := make([]uint8, 0, len(seen))
 	for id := range seen {
