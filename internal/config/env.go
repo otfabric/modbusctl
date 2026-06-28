@@ -13,7 +13,7 @@ import (
 // Malformed numeric or boolean values produce errors (joined when multiple vars fail).
 func LoadFromEnv(cfg interface{}) error {
 	v := reflect.ValueOf(cfg)
-	if v.Kind() != reflect.Ptr || v.Elem().Kind() != reflect.Struct {
+	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct {
 		return nil
 	}
 	return loadFromEnvStruct(v.Elem())
