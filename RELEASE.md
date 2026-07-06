@@ -1,5 +1,36 @@
 # modbusctl Releases
 
+## v2.3.0
+
+**Date:** 2026-07-06  
+**Previous release:** v2.2.4
+
+### Summary
+
+Adds typed **codec decoding** to the client: a new **`client decode`** command reads holding/input registers and decodes them into typed values (integers, floats, strings, BCD, time, IP, MAC, …) using the **`github.com/otfabric/go-modbus/codec`** registry, plus a **`client codecs`** command to discover available codecs. As part of this, the ad-hoc **`--ascii`** and **`--byteswap`** flags are **removed** from **`client read`**, which now focuses on raw capture and MCAP output. This is a **breaking change** for anyone using those two read flags.
+
+### Highlights
+
+- **`client decode` (new):** Reads holding (**FC3**) or input (**FC4**) registers and decodes them with a single **`--codec`** (e.g. `float32/layout:1234`, `ascii/registers:8`, `uint32/layout:4321`, `ip_addr`, `datetime_iec870_utc`). The codec sets the per-value register width; omit **`--count`** to decode one value, or pass a multiple of the codec width to decode an **array** of values. Output honors **`--format text|json|table`**; JSON emits a typed **`values`** array. No MCAP side effect—decode is a read-and-interpret command.
+- **`client codecs` (new):** Lists every registered codec (**id**, **name**, **family**, **value kind**, **registers**, **bytes**), with optional **`--family`**, **`--value-kind`**, and **`--registers`** filters and **`--format text|json|table`**. Mirrors the codec catalog exposed by the Modbus simulator server.
+- **Codecs source:** The codec registry ships inside the already-depended-on **`github.com/otfabric/go-modbus`** (`v1.1.0`) under the **`codec`** subpackage—no new dependency and no version bump were required.
+- **Completion:** New **`--codec`** flag supports tab completion (registered codec IDs); **`--function`** completion is reused on `decode`.
+- **Config / env:** New **`MODBUSCTL_CODEC`** environment variable maps to **`--codec`**; **`MODBUSCTL_COUNT`** gains decode semantics (a multiple of the codec width; `0` = one value).
+- **`client read` (breaking):** Removed **`--ascii`** / **`MODBUSCTL_ASCII`** and **`--byteswap`** / **`MODBUSCTL_BYTESWAP`**. The `read` JSON DTO drops **`pre_swap_hex`**, **`bytes_swapped`**, and **`ascii_decoded`**; `read` still captures raw bytes (**`raw_data_hex`**) and writes MCAP.
+
+### Upgrading
+
+- **Replace `read --ascii`:** Use **`client decode --codec ascii/registers:N`** (or `ascii_fixed` / `ascii_reverse` / `utf16be` / `utf16le` variants) for text decoding.
+- **Replace `read --byteswap`:** Use a layout-aware numeric codec via **`client decode`** (e.g. **`--codec uint32/layout:2143`**) instead of swapping bytes on a raw read.
+- **Scripts parsing `read --format json`:** Stop relying on **`pre_swap_hex`**, **`bytes_swapped`**, and **`ascii_decoded`**; move typed interpretation to **`client decode`** and read its **`values`** array.
+- **Completion users:** Regenerate and re-source your shell completion script so the new **`decode`** / **`codecs`** commands and **`--codec`** candidates are available.
+
+### Release workflow
+
+- Unchanged from v2.2.4: reusable **`go-binary-release`** workflow and link-time version metadata.
+
+---
+
 ## v2.2.4
 
 **Date:** 2026-03-28  

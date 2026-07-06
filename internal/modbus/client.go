@@ -314,36 +314,13 @@ func CollectRead(ctx context.Context, cfg config.ReadConfig, progress io.Writer)
 	}
 
 	byteCount := len(rawData)
-	preSwapHex := ""
-	if cfg.SwapBytes {
-		preSwapHex = fmt.Sprintf("% X", rawData)
-		if len(rawData)%2 != 0 {
-			_, _ = fmt.Fprintf(progress, "⚠️ ByteSwap requested but data length (%d) is not even; last byte will be left as-is\n", len(rawData))
-		}
-		for i := 0; i+1 < len(rawData); i += 2 {
-			rawData[i], rawData[i+1] = rawData[i+1], rawData[i]
-		}
-	}
-
 	finalHex := fmt.Sprintf("% X", rawData)
-	asciiDecoded := ""
-	if cfg.Ascii {
-		var builder strings.Builder
-		for _, b := range rawData {
-			if strconv.IsPrint(rune(b)) {
-				builder.WriteByte(b)
-			} else {
-				builder.WriteByte('.')
-			}
-		}
-		asciiDecoded = builder.String()
-	}
 
 	if err := writeReadCaptureToMcap(f, cfg, modbusURL, rawData, requestTimestamp, responseTimestamp); err != nil {
 		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
 	}
 
-	return newReadResult(cfg, modbusURL, mcapPath, preSwapHex, finalHex, asciiDecoded, byteCount), nil
+	return newReadResult(cfg, modbusURL, mcapPath, finalHex, byteCount), nil
 }
 
 func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Writer) (*types.ScanSummaryResult, error) {

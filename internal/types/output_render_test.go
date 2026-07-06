@@ -14,14 +14,11 @@ func TestReadResult_textAndTable(t *testing.T) {
 		StartAddress:   40001,
 		RegisterCount:  2,
 		RawByteCount:   4,
-		PreSwapHex:     "aabb",
-		RawDataHex:     "bbaa",
-		BytesSwapped:   true,
-		AsciiDecoded:   "OK",
+		RawDataHex:     "AA BB CC DD",
 		McapOutputPath: "/tmp/x.mcap",
 	}
 	s, err := r.MarshalTextOutput()
-	if err != nil || !strings.Contains(s, "Byte-swapped") || !strings.Contains(s, "ASCII") {
+	if err != nil || !strings.Contains(s, "Read 4 bytes") || !strings.Contains(s, "AA BB CC DD") {
 		t.Fatalf("text: %v %q", err, s)
 	}
 	h := r.TableHeaders()

@@ -35,9 +35,20 @@ type ReadConfig struct {
 	Function      uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (3=holding, 4=input)" flag:"function"`
 	StartAddress  uint16 `env:"MODBUSCTL_ADDRESS" desc:"Starting register address" flag:"start"`
 	RegisterCount uint16 `env:"MODBUSCTL_COUNT" desc:"Number of registers to read" flag:"count"`
-	Ascii         bool   `env:"MODBUSCTL_ASCII" desc:"Attempt ASCII decoding for output" flag:"ascii"`
-	SwapBytes     bool   `env:"MODBUSCTL_BYTESWAP" desc:"Enable byte swapping for registers" flag:"byteswap"`
 	OutputFile    string `env:"MODBUSCTL_OUTPUT" desc:"Output MCAP file or directory" flag:"output"`
+	OutputFormat  string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	Debug         bool   // set from global --debug (root persistent flag)
+}
+
+// DecodeConfig drives `client decode`: read holding/input registers and decode
+// them into typed values using a go-modbus codec (see `client codecs`).
+type DecodeConfig struct {
+	DeviceConfig
+	Timeout       uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds per Modbus request and TCP dial cap (0 = 10000)" flag:"timeout"`
+	Function      uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (3=holding, 4=input)" flag:"function"`
+	StartAddress  uint16 `env:"MODBUSCTL_ADDRESS" desc:"Starting register address" flag:"start"`
+	Codec         string `env:"MODBUSCTL_CODEC" desc:"Codec ID (e.g. float32/layout:1234, ascii/registers:8, ip_addr); see 'client codecs'" flag:"codec"`
+	RegisterCount uint16 `env:"MODBUSCTL_COUNT" desc:"Registers to read (0 = one codec value; otherwise a multiple of the codec register width)" flag:"count"`
 	OutputFormat  string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Debug         bool   // set from global --debug (root persistent flag)
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/otfabric/go-modbus/codec"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/types"
@@ -92,6 +93,53 @@ func CheckReadConfig(cfg config.ReadConfig) error {
 		return err
 	}
 	return validateFile(cfg.OutputFile, false)
+}
+
+func CheckDecodeConfig(cfg config.DecodeConfig) error {
+	if err := validateDeviceConfig(cfg.DeviceConfig); err != nil {
+		return err
+	}
+	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
+		return err
+	}
+	if err := validateDecodeFunctionCode(cfg.Function); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(cfg.Codec)
+	if id == "" {
+		return fmt.Errorf("codec is required (use --codec; run 'modbusctl client codecs' to list available codecs)")
+	}
+	rc, ok, err := codec.RuntimeCodecByID(id)
+	if err != nil {
+		return fmt.Errorf("codec %q could not be constructed: %v", id, err)
+	}
+	if !ok {
+		return fmt.Errorf("unknown codec %q (run 'modbusctl client codecs' to list available codecs)", id)
+	}
+	per := rc.RegisterSpec().Count
+	if per == 0 {
+		return fmt.Errorf("codec %q has zero register width", id)
+	}
+	total := cfg.RegisterCount
+	if total == 0 {
+		total = per
+	} else if total%per != 0 {
+		return fmt.Errorf("register count %d must be a multiple of the codec register width %d for %q", total, per, id)
+	}
+	if total > maxModbusBlockSize {
+		return fmt.Errorf("register count must be between 1 and %d (codec %q has register width %d)", maxModbusBlockSize, id, per)
+	}
+	return validateExclusiveRegisterWindow(cfg.StartAddress, total)
+}
+
+// validateDecodeFunctionCode restricts decode to register reads (holding/input); codecs operate on registers.
+func validateDecodeFunctionCode(fc uint8) error {
+	switch fc {
+	case 3, 4:
+		return nil
+	default:
+		return fmt.Errorf("unsupported function code for decode: %d — supported: 3 (Read Holding Registers), 4 (Read Input Registers)", fc)
+	}
 }
 
 func CheckScanConfig(cfg *config.ScanConfig) error {

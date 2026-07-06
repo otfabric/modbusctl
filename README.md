@@ -37,7 +37,9 @@ The following features are available:
 | Fingerprint      | Probe supported read functions (FC08/FC43/FC03/FC04/FC01/FC02/FC11/FC18/FC20) per unit via HasUnitReadFunction.          |
 | Diagnostic       | Send FC08 Diagnostics requests (loopback, restart communications, diagnostic counters, etc.).                             |
 | ReportServerID   | Send FC17 Report Server ID and display server ID, run indicator, and additional device data.                              |
-| Read             | Retrieve data from specified Modbus registers.                                                                            |
+| Read             | Retrieve raw data from specified Modbus registers (arbitrary count, MCAP capture).                                        |
+| Decode (registers) | Read holding/input registers (FC03/FC04) and decode them into typed values (integers, floats, strings, BCD, time, IP, MAC, …) using a **codec** such as `float32/layout:1234` or `ascii/registers:8`. |
+| Codecs           | List available register codecs (id, family, value kind, register/byte width) with optional family / value-kind / register-width filters. |
 | Record           | Record Modbus responses into structured MCAP files for replay or analysis.                                                |
 | Static           | Serve previously scanned Modbus data to simulate device behavior (static hosting).                                        |
 | Replay           | Serve previously recorded Modbus data to simulate device behavior (dynamically updated).                                  |
@@ -50,7 +52,7 @@ The following features are available:
 | Discovery        | Discover Modbus devices within specified subnets.                                                                         |
 | SunSpec          | Transport-level SunSpec discovery: detect marker/base, enumerate model headers, print address map, or combined probe (no semantic decoding). |
 | Client `--format` | Many **`modbusctl client`** commands accept **`--format text|json|table`** (or **`MODBUSCTL_OUTPUT_FORMAT`**) for structured stdout; **`mcap convert`** uses a different **`--format`** (**csv** / **json**). |
-| Completion       | Generate shell completion scripts for bash, zsh, fish, or PowerShell; enum flags (**`--format`**, **`--algo`**, **`--function`**, **`--regtype`**, **`--sub-function`**, etc.) support tab completion. |
+| Completion       | Generate shell completion scripts for bash, zsh, fish, or PowerShell; enum flags (**`--format`**, **`--algo`**, **`--function`**, **`--codec`**, **`--regtype`**, **`--sub-function`**, etc.) support tab completion. |
 
 The following tree view gives the overiew of available commands.
 
@@ -62,6 +64,8 @@ modbusctl
 │   ├── diagnostic       FC08 Diagnostics (loopback, counters, restart, …)
 │   ├── reportserverid   FC17 Report Server ID
 │   ├── read             Read registers (FC01/FC02/FC03/FC04)
+│   ├── decode           Read and decode registers into typed values via a codec (FC03/FC04)
+│   ├── codecs           List available register codecs for 'client decode'
 │   ├── scan             Scan for valid register blocks (algo safe|smart|deep|stepped|linear|boundary|sunspec)
 │   ├── record           Record registers over time to MCAP
 │   └── sunspec           SunSpec marker detection and model header discovery
@@ -177,6 +181,8 @@ modbusctl client fingerprint
 modbusctl client diagnostic
 modbusctl client reportserverid
 modbusctl client read
+modbusctl client decode
+modbusctl client codecs
 modbusctl client scan
 modbusctl client record
 modbusctl client sunspec detect
@@ -364,8 +370,35 @@ Use **`--format`** for stdout (after any MCAP write). **`--output`** still write
 modbusctl client read --ip 192.168.1.10 --start 30001 --count 2
 modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --output data.mcap
 modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --format json
-modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --ascii
-modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --ascii --swap-bytes
+```
+
+> **Note:** `read` is the raw-capture command (arbitrary register count, MCAP output). Typed
+> interpretation of register values now lives in `client decode`. The former `--ascii` and
+> `--byteswap` flags have been removed; use the corresponding codecs instead
+> (e.g. `--codec ascii/registers:N`, or a layout-aware numeric codec such as `uint32/layout:2143`).
+
+#### Decode registers (typed values via codecs)
+
+`client decode` reads holding (FC3) or input (FC4) registers and decodes them into typed
+values using a [go-modbus codec](https://github.com/otfabric/go-modbus/tree/main/codec). The
+codec determines how many registers each value spans. Omit `--count` to decode a single value;
+set `--count` to a multiple of the codec register width to decode an array of values. Run
+`modbusctl client codecs` to list every available codec ID.
+
+```console
+modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:1234
+modbusctl client decode --ip 192.168.1.10 --function 4 --start 0 --codec ascii/registers:8
+modbusctl client decode --ip 192.168.1.10 --start 100 --codec uint32/layout:4321 --count 8 --format json
+modbusctl client decode --ip 192.168.1.10 --start 200 --codec ip_addr
+```
+
+#### List codecs
+
+```console
+modbusctl client codecs
+modbusctl client codecs --family float
+modbusctl client codecs --registers 2 --format table
+modbusctl client codecs --value-kind string --format json
 ```
 
 #### Scan registers (discover valid address blocks)
@@ -596,7 +629,8 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | Variable               | Type     | Description                                                 | Flag            | Default    |
 |------------------------|----------|-------------------------------------------------------------|-----------------|------------|
 | **MODBUSCTL_ALGO**        | string   | Scan algorithm: safe, smart, deep, stepped, linear, boundary, or sunspec | `--algo`        | safe       |
-| **MODBUSCTL_COUNT**       | uint16   | Number of registers to read                              | `--count`       | 1          |
+| **MODBUSCTL_CODEC**       | string   | Codec ID for **`client decode`** (e.g. float32/layout:1234, ascii/registers:8, ip_addr) | `--codec`       |            |
+| **MODBUSCTL_COUNT**       | uint16   | Number of registers to read (**`client decode`**: a multiple of the codec width; 0 = one value) | `--count`       | 1          |
 | **MODBUSCTL_DELAY**       | uint16   | Delay in ms between client scan requests                 | `--delay`       | 0          |
 | **MODBUSCTL_DURATION**    | uint32   | Total duration to record in ms                           | `--duration`    | 60000      |
 | **MODBUSCTL_END**         | uint16   | End register address                                     | `--end`         | 65535      |

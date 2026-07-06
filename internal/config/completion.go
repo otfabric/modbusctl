@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 
+	"github.com/otfabric/go-modbus/codec"
 	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/spf13/cobra"
 )
@@ -70,6 +71,21 @@ func RegisterConvertFormatCompletion(cmd *cobra.Command) {
 // RegisterFunctionCompletion registers shell completion for the --function flag (read/record/scan/static/replay).
 func RegisterFunctionCompletion(cmd *cobra.Command) {
 	_ = cli.RegisterEnumFlagCompletion(cmd, "function", FunctionCodes())
+}
+
+// CodecIDs returns all registered codec IDs (sorted) from the go-modbus codec registry.
+func CodecIDs() []string {
+	descs := codec.AvailableCodecDescriptors()
+	ids := make([]string, len(descs))
+	for i, d := range descs {
+		ids[i] = d.ID
+	}
+	return ids
+}
+
+// RegisterCodecCompletion registers shell completion for the --codec flag (decode command).
+func RegisterCodecCompletion(cmd *cobra.Command) {
+	_ = cli.RegisterEnumFlagCompletion(cmd, "codec", CodecIDs())
 }
 
 // RegisterDiagnosticSubFunctionCompletion registers shell completion for the --sub-function flag (diagnostic command).

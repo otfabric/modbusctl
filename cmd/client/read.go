@@ -43,8 +43,6 @@ func init() {
 		Function:      3,
 		StartAddress:  1,
 		RegisterCount: 1,
-		Ascii:         false,
-		SwapBytes:     false,
 		OutputFile:    "",
 		OutputFormat:  string(format.FormatText),
 		Debug:         false,

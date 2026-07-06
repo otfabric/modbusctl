@@ -50,8 +50,8 @@ func writeReadCaptureToMcap(f *os.File, cfg config.ReadConfig, modbusURL string,
 	return mcap.AppendRecord(f, record)
 }
 
-// newReadResult builds the stdout DTO from raw capture bytes (after optional swap) and paths.
-func newReadResult(cfg config.ReadConfig, modbusURL, mcapPath, preSwapHex, finalHex, asciiDecoded string, byteCount int) *types.ReadResult {
+// newReadResult builds the stdout DTO from raw capture bytes and paths.
+func newReadResult(cfg config.ReadConfig, modbusURL, mcapPath, finalHex string, byteCount int) *types.ReadResult {
 	return &types.ReadResult{
 		Target:         modbusURL,
 		UnitID:         cfg.Unit,
@@ -59,10 +59,7 @@ func newReadResult(cfg config.ReadConfig, modbusURL, mcapPath, preSwapHex, final
 		StartAddress:   cfg.StartAddress,
 		RegisterCount:  cfg.RegisterCount,
 		RawByteCount:   byteCount,
-		PreSwapHex:     preSwapHex,
 		RawDataHex:     finalHex,
-		BytesSwapped:   cfg.SwapBytes,
-		AsciiDecoded:   asciiDecoded,
 		McapOutputPath: mcapPath,
 	}
 }
