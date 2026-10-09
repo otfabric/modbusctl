@@ -34,7 +34,8 @@ const discoveryModbusTimeout = 800 * time.Millisecond
 const discoveryDialTimeout = 500 * time.Millisecond
 
 var (
-	ErrTCPConnection    = errors.New("TCP connection error")
+	// ErrTCPConnection marks a failure to open the transport: TCP/UDP dial or serial port open.
+	ErrTCPConnection    = errors.New("connection error")
 	ErrFC43NotSupported = errors.New("FC43 not supported or invalid response")
 )
 
@@ -77,10 +78,32 @@ func dialTimeoutForRequest(request time.Duration) time.Duration {
 	return d
 }
 
-func buildDeviceClientConfig(modbusURL string, timeoutMS uint16, debug bool) modbus.Config {
+// applySerialConfig copies the serial-line settings onto conf when conf.URL is a serial URL
+// (rtu:// or ascii://); they are ignored for network URLs. go-modbus fills in defaults for
+// zero values. An unknown parity is left as none; [config.ValidateSerialConfig] rejects it
+// before a command gets this far.
+func applySerialConfig(conf *modbus.Config, serial config.SerialConfig) {
+	if !config.IsSerialURL(conf.URL) {
+		return
+	}
+	conf.Speed = serial.Baud
+	conf.DataBits = serial.DataBits
+	conf.StopBits = serial.StopBits
+	switch parity, _ := config.NormalizeParity(serial.Parity); parity {
+	case "even":
+		conf.Parity = modbus.ParityEven
+	case "odd":
+		conf.Parity = modbus.ParityOdd
+	default:
+		conf.Parity = modbus.ParityNone
+	}
+}
+
+func buildDeviceClientConfig(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig) modbus.Config {
 	req := clientRequestTimeout(timeoutMS)
 	c := buildClientConfig(modbusURL, req, debug)
 	c.DialTimeout = dialTimeoutForRequest(req)
+	applySerialConfig(&c, serial)
 	return c
 }
 
@@ -102,8 +125,45 @@ func validateAndConnect(conf modbus.Config) (*modbus.Client, func(), error) {
 	return client, cleanup, nil
 }
 
-func connectDevice(modbusURL string, timeoutMS uint16, debug bool) (*modbus.Client, func(), error) {
-	return validateAndConnect(buildDeviceClientConfig(modbusURL, timeoutMS, debug))
+// deviceLink is an open client together with the configuration needed to re-dial it
+// after a connection error.
+type deviceLink struct {
+	client *modbus.Client
+	conf   modbus.Config
+	url    string
+	debug  bool
+}
+
+// openDeviceLink connects to modbusURL. The caller must Close the returned link.
+func openDeviceLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig) (*deviceLink, error) {
+	link := &deviceLink{
+		conf:  buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial),
+		url:   modbusURL,
+		debug: debug,
+	}
+	if err := link.reconnect(); err != nil {
+		return nil, err
+	}
+	return link, nil
+}
+
+// reconnect closes the current client, if any, and dials a new one.
+func (l *deviceLink) reconnect() error {
+	l.Close()
+	client, _, err := validateAndConnect(l.conf)
+	if err != nil {
+		return TCPConnectionError(err)
+	}
+	l.client = client
+	return nil
+}
+
+// Close closes the underlying client. It is safe to call more than once.
+func (l *deviceLink) Close() {
+	if l.client != nil {
+		_ = l.client.Close()
+		l.client = nil
+	}
 }
 
 func discoveryClientConfig(modbusURL string, debug bool) modbus.Config {
@@ -211,10 +271,14 @@ func packCoilsToBytes(bools []bool) []byte {
 	return out
 }
 
-func readRegisters(ctx context.Context, clientPtr **modbus.Client, fc uint8, start, count uint16, retries uint8, modbusURL string, unit uint8, cleanup *func(), delay uint16, debug bool, requestTimeoutMS uint16, stderr io.Writer) (data []byte, requestTS int64, responseTS int64, err error) {
+// readRegisters reads count coils/registers with fc, making up to retries attempts. A busy or
+// gateway-timeout exception is retried as is; a connection error re-dials the link first.
+// delay (ms) is slept before every attempt.
+func readRegisters(ctx context.Context, link *deviceLink, fc uint8, start, count uint16, retries uint8, unit uint8, delay uint16, stderr io.Writer) (data []byte, requestTS int64, responseTS int64, err error) {
 	if stderr == nil {
 		stderr = io.Discard
 	}
+	debug := link.debug
 	for attempt := 1; attempt <= int(retries); attempt++ {
 		if delay > 0 {
 			if debug {
@@ -224,8 +288,14 @@ func readRegisters(ctx context.Context, clientPtr **modbus.Client, fc uint8, sta
 				return nil, 0, 0, err
 			}
 		}
+		// A previous re-dial may have failed and left the link closed.
+		if link.client == nil {
+			if rerr := link.reconnect(); rerr != nil {
+				return nil, 0, 0, rerr
+			}
+		}
 		requestTS = time.Now().UnixNano()
-		data, err = performRead(ctx, *clientPtr, unit, fc, start, count)
+		data, err = performRead(ctx, link.client, unit, fc, start, count)
 		responseTS = time.Now().UnixNano()
 
 		if err == nil {
@@ -248,17 +318,11 @@ func readRegisters(ctx context.Context, clientPtr **modbus.Client, fc uint8, sta
 			if debug {
 				_, _ = fmt.Fprintf(stderr, "🔁 Reconnecting due to connection error (attempt %d)...\n", attempt)
 			}
-			if cleanup != nil {
-				(*cleanup)()
+			// Keep err as the read failure: if this was the last attempt it is what the
+			// caller must see, not the outcome of the re-dial.
+			if rerr := link.reconnect(); rerr != nil {
+				return nil, 0, 0, rerr
 			}
-			var newClient *modbus.Client
-			var newCleanup func()
-			newClient, newCleanup, err = connectDevice(modbusURL, requestTimeoutMS, debug)
-			if err != nil {
-				return nil, 0, 0, TCPConnectionError(err)
-			}
-			*clientPtr = newClient
-			*cleanup = newCleanup
 			continue
 		}
 
@@ -268,8 +332,8 @@ func readRegisters(ctx context.Context, clientPtr **modbus.Client, fc uint8, sta
 }
 
 // executeReadTask runs a single read and returns a ScanResult.
-func executeReadTask(ctx context.Context, clientPtr **modbus.Client, cfg config.ScanConfig, task ScanTask, cleanup *func(), modbusURL string, stderr io.Writer) ScanResult {
-	data, reqTS, resTS, err := readRegisters(ctx, clientPtr, cfg.Function, task.Start, task.Count, 1, modbusURL, cfg.Unit, cleanup, cfg.Delay, cfg.Debug, cfg.Timeout, stderr)
+func executeReadTask(ctx context.Context, link *deviceLink, cfg config.ScanConfig, task ScanTask, stderr io.Writer) ScanResult {
+	data, reqTS, resTS, err := readRegisters(ctx, link, cfg.Function, task.Start, task.Count, 1, cfg.Unit, cfg.Delay, stderr)
 	outcome, excCode := classifyOutcome(err, reqTS, resTS)
 	rtt := int64(0)
 	if resTS > reqTS {
@@ -295,11 +359,11 @@ func CollectRead(ctx context.Context, cfg config.ReadConfig, progress io.Writer)
 		progress = io.Discard
 	}
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connectDevice(modbusURL, cfg.Timeout, cfg.Debug)
+	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
 	if err != nil {
-		return nil, TCPConnectionError(err)
+		return nil, err
 	}
-	defer cleanup()
+	defer link.Close()
 
 	mcapPath := readCaptureMcapPath(cfg)
 	f, err := os.Create(mcapPath)
@@ -308,7 +372,7 @@ func CollectRead(ctx context.Context, cfg config.ReadConfig, progress io.Writer)
 	}
 	defer func() { _ = f.Close() }()
 
-	rawData, requestTimestamp, responseTimestamp, err := readRegisters(ctx, &client, cfg.Function, cfg.StartAddress, cfg.RegisterCount, 1, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug, cfg.Timeout, progress)
+	rawData, requestTimestamp, responseTimestamp, err := readRegisters(ctx, link, cfg.Function, cfg.StartAddress, cfg.RegisterCount, 1, cfg.Unit, 0, progress)
 	if err != nil {
 		return nil, err
 	}
@@ -331,11 +395,11 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 	// hint, per-success block summary, and inter-request delay (silent when delay 0). Debug-only = executor
 	// next-task/result lines gated on cfg.Debug; strategy debug uses scanSettings.DebugWriter (same stream when debug).
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connectDevice(modbusURL, cfg.Timeout, cfg.Debug)
+	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
 	if err != nil {
-		return nil, TCPConnectionError(err)
+		return nil, err
 	}
-	defer cleanup()
+	defer link.Close()
 
 	out := cfg.OutputFile
 	if out == "" || strings.HasSuffix(out, "/") {
@@ -352,10 +416,7 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 	}
 	defer func() { _ = f.Close() }()
 
-	headerIP, headerPort := cfg.IP, cfg.Port
-	if strings.TrimSpace(cfg.URL) != "" {
-		headerIP, headerPort = config.ParseModbusURLHostPort(modbusURL)
-	}
+	headerIP, headerPort := config.CaptureEndpoint(modbusURL)
 	header := types.CaptureHeader{
 		IP:        headerIP,
 		Port:      headerPort,
@@ -398,7 +459,7 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 			end := task.Start + task.Count - 1
 			_, _ = fmt.Fprintf(progress, "DEBUG [exec] next task: start=%d count=%d end=%d\n", task.Start, task.Count, end)
 		}
-		result := executeReadTask(ctx, &client, cfg, task, &cleanup, modbusURL, progress)
+		result := executeReadTask(ctx, link, cfg, task, progress)
 		// Milestone B: retry once on timeout/transport if configured
 		retryAppliedDelay := false
 		if !result.Success && cfg.RetryOnTimeoutTransport > 0 &&
@@ -410,7 +471,7 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 				}
 				retryAppliedDelay = true
 			}
-			result = executeReadTask(ctx, &client, cfg, task, &cleanup, modbusURL, progress)
+			result = executeReadTask(ctx, link, cfg, task, progress)
 		}
 		if cfg.Debug {
 			outcome := "success"
@@ -509,11 +570,11 @@ func RecordAndWriteMCAP(ctx context.Context, cfg config.RecordConfig, progress i
 	}
 
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connectDevice(modbusURL, cfg.Timeout, cfg.Debug)
+	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
 	if err != nil {
-		return nil, TCPConnectionError(err)
+		return nil, err
 	}
-	defer cleanup()
+	defer link.Close()
 
 	out := cfg.OutputFile
 	if out == "" || strings.HasSuffix(out, "/") {
@@ -530,10 +591,7 @@ func RecordAndWriteMCAP(ctx context.Context, cfg config.RecordConfig, progress i
 	}
 	defer func() { _ = f.Close() }()
 
-	headerIP, headerPort := cfg.IP, cfg.Port
-	if strings.TrimSpace(cfg.URL) != "" {
-		headerIP, headerPort = config.ParseModbusURLHostPort(modbusURL)
-	}
+	headerIP, headerPort := config.CaptureEndpoint(modbusURL)
 	header := types.CaptureHeader{
 		IP:        headerIP,
 		Port:      headerPort,
@@ -555,7 +613,7 @@ func RecordAndWriteMCAP(ctx context.Context, cfg config.RecordConfig, progress i
 		}
 		_, _ = fmt.Fprintf(progress, "📟 Recording %d started...\n", i)
 		for _, b := range blocks {
-			data, requestTimestamp, responseTimestamp, err := readRegisters(ctx, &client, cfg.Function, b.StartAddress, b.RegisterCount, 5, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug, cfg.Timeout, progress)
+			data, requestTimestamp, responseTimestamp, err := readRegisters(ctx, link, cfg.Function, b.StartAddress, b.RegisterCount, 5, cfg.Unit, 0, progress)
 			if err != nil {
 				_, _ = fmt.Fprintf(progress, "⚠️ Failed to read block (start: %d, count: %d): %v\n", b.StartAddress, b.RegisterCount, err)
 				continue

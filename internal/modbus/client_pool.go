@@ -4,7 +4,7 @@ import (
 	"github.com/otfabric/go-modbus"
 )
 
-// openModbusClientPool opens n TCP clients using the same validated config (for parallel per-unit work).
+// openModbusClientPool opens n network clients using the same validated config (for parallel per-unit work).
 // cleanup closes all successfully opened clients. Config must already be valid for [modbus.ValidateConfig].
 func openModbusClientPool(n int, conf modbus.Config) ([]*modbus.Client, func(), error) {
 	if n < 1 {

@@ -20,11 +20,12 @@ func CollectDiagnostics(ctx context.Context, cfg config.DiagnosticConfig) (*type
 	}
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 
-	mc, cleanup, err := connectDevice(modbusURL, cfg.Timeout, cfg.Debug)
+	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
 	if err != nil {
 		return nil, err
 	}
-	defer cleanup()
+	defer link.Close()
+	mc := link.client
 
 	var data []byte
 	if cfg.Data != "" {

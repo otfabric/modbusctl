@@ -191,6 +191,16 @@ func newModbusServer(ctx context.Context, store RegisterStore, cfg ServerConfig,
 	return ctx.Err()
 }
 
+// storedBitsToBools converts [MemoryStore.get] output for coils and discrete inputs, which is
+// one byte (0 or 1) per point, into one bool per point.
+func storedBitsToBools(data []byte) []bool {
+	out := make([]bool, len(data))
+	for i, b := range data {
+		out[i] = b != 0
+	}
+	return out
+}
+
 func (h *StaticHandler) HandleCoils(ctx context.Context, req *modbus.CoilsRequest) ([]bool, error) {
 	if h.Cfg.Function != 1 {
 		return nil, modbus.ErrIllegalFunction
@@ -205,13 +215,7 @@ func (h *StaticHandler) HandleCoils(ctx context.Context, req *modbus.CoilsReques
 		}
 		return nil, modbus.ErrIllegalDataAddress
 	}
-	out := make([]bool, 0, req.Quantity)
-	for _, b := range data {
-		for i := 0; i < 8 && len(out) < int(req.Quantity); i++ {
-			out = append(out, (b&(1<<i)) != 0)
-		}
-	}
-	return out, nil
+	return storedBitsToBools(data), nil
 }
 
 func (h *StaticHandler) HandleDiscreteInputs(ctx context.Context, req *modbus.DiscreteInputsRequest) ([]bool, error) {
@@ -228,13 +232,7 @@ func (h *StaticHandler) HandleDiscreteInputs(ctx context.Context, req *modbus.Di
 		}
 		return nil, modbus.ErrIllegalDataAddress
 	}
-	out := make([]bool, 0, req.Quantity)
-	for _, b := range data {
-		for i := 0; i < 8 && len(out) < int(req.Quantity); i++ {
-			out = append(out, (b&(1<<i)) != 0)
-		}
-	}
-	return out, nil
+	return storedBitsToBools(data), nil
 }
 
 func (h *StaticHandler) HandleHoldingRegisters(ctx context.Context, req *modbus.HoldingRegistersRequest) ([]uint16, error) {
@@ -342,11 +340,11 @@ func LoadMCAPAndServeReplay(ctx context.Context, cfg config.ReplayServerConfig, 
 		loop:    int(cfg.Loops),
 	}
 
+	// Count the entries before the replay goroutine starts updating the store.
+	entries := len(store.registers) + len(store.coils) + len(store.discrete)
+
 	go func() {
 		w := progress
-		if w == nil {
-			w = io.Discard
-		}
 		grouped := make(map[uint32][]types.CaptureRecord)
 		var iterations []uint32
 		for _, rec := range controller.records {
@@ -393,8 +391,7 @@ func LoadMCAPAndServeReplay(ctx context.Context, cfg config.ReplayServerConfig, 
 	}()
 
 	_, _ = fmt.Fprintf(progress, "✅ Replay server ready on port %d for unit %d and function %d\n", cfg.Port, cfg.Unit, replayFC)
-	_, _ = fmt.Fprintf(progress, "🧱 Loaded %d address entries from MCAP (per-point coil/discrete or per-register map)\n",
-		len(store.registers)+len(store.coils)+len(store.discrete))
+	_, _ = fmt.Fprintf(progress, "🧱 Loaded %d address entries from MCAP (per-point coil/discrete or per-register map)\n", entries)
 	return newModbusServer(ctx, store, ServerConfig{
 		Port:     cfg.Port,
 		Unit:     cfg.Unit,

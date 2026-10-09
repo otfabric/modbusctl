@@ -40,13 +40,13 @@ func CollectDecode(ctx context.Context, cfg config.DecodeConfig, progress io.Wri
 	}
 
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	client, cleanup, err := connectDevice(modbusURL, cfg.Timeout, cfg.Debug)
+	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
 	if err != nil {
-		return nil, TCPConnectionError(err)
+		return nil, err
 	}
-	defer cleanup()
+	defer link.Close()
 
-	rawData, _, _, err := readRegisters(ctx, &client, cfg.Function, cfg.StartAddress, uint16(total), 1, modbusURL, cfg.Unit, &cleanup, 0, cfg.Debug, cfg.Timeout, progress)
+	rawData, _, _, err := readRegisters(ctx, link, cfg.Function, cfg.StartAddress, uint16(total), 1, cfg.Unit, 0, progress)
 	if err != nil {
 		return nil, err
 	}

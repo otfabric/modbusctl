@@ -14,7 +14,7 @@ import (
 
 var fingerprintCmd = &cobra.Command{
 	Use:   "fingerprint",
-	Short: "Probe supported read functions (FC08/FC43/FC03/FC04/FC01/FC02/FC11/FC18/FC20) per unit via SupportsFunction",
+	Short: "Probe supported read functions (FC08/FC43/FC03/FC04/FC01/FC02/FC11/FC18/FC20) per unit",
 	Example: `
   # Fingerprint unit 1 (default)
   modbusctl client fingerprint --ip 192.168.1.10

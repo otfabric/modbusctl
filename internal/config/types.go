@@ -2,8 +2,19 @@ package config
 
 import "strings"
 
+// SerialConfig holds the serial-line settings used with rtu:// and ascii:// URLs.
+// Zero values select the defaults documented on each flag; the settings are ignored
+// for network URLs.
+type SerialConfig struct {
+	Baud     uint   `env:"MODBUSCTL_BAUD" desc:"Serial baud rate for rtu:// and ascii:// URLs (0 = 19200)" flag:"baud"`
+	DataBits uint   `env:"MODBUSCTL_DATA_BITS" desc:"Serial data bits, 5-8 (0 = 8 for rtu://, 7 for ascii://)" flag:"data-bits"`
+	Parity   string `env:"MODBUSCTL_PARITY" desc:"Serial parity: none, even, or odd (default none)" flag:"parity"`
+	StopBits uint   `env:"MODBUSCTL_STOP_BITS" desc:"Serial stop bits, 1 or 2 (0 = 2 without parity, 1 with parity)" flag:"stop-bits"`
+}
+
 type DeviceConfig struct {
-	URL  string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	SerialConfig
+	URL  string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP   string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	Unit uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID of the Modbus device" flag:"unit"`
@@ -11,7 +22,8 @@ type DeviceConfig struct {
 
 // UnitClientConfig is used by commands that support a single unit ID or "all" (1–255).
 type UnitClientConfig struct {
-	URL      string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	SerialConfig
+	URL      string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP       string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port     uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	UnitID   string `env:"MODBUSCTL_UNIT" desc:"Unit ID: single (1), range (1-10), list (1,5,25), mixed (1-10,255), or 'all' (1-255)" flag:"unit"`
@@ -47,9 +59,35 @@ type DecodeConfig struct {
 	Timeout       uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds per Modbus request and TCP dial cap (0 = 10000)" flag:"timeout"`
 	Function      uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (3=holding, 4=input)" flag:"function"`
 	StartAddress  uint16 `env:"MODBUSCTL_ADDRESS" desc:"Starting register address" flag:"start"`
-	Codec         string `env:"MODBUSCTL_CODEC" desc:"Codec ID (e.g. float32/layout:1234, ascii/registers:8, ip_addr); see 'client codecs'" flag:"codec"`
+	Codec         string `env:"MODBUSCTL_CODEC" desc:"Codec ID (e.g. float32/layout:4321, ascii/registers:8, ip_addr); see 'client codecs'" flag:"codec"`
 	RegisterCount uint16 `env:"MODBUSCTL_COUNT" desc:"Registers to read (0 = one codec value; otherwise a multiple of the codec register width)" flag:"count"`
 	OutputFormat  string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	Debug         bool   // set from global --debug (root persistent flag)
+}
+
+// WriteConfig drives `client write`: write coils (FC5/FC15) or holding registers (FC6/FC16).
+type WriteConfig struct {
+	DeviceConfig
+	Timeout      uint16   `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds per Modbus request and dial cap (0 = 10000)" flag:"timeout"`
+	Function     uint8    `env:"MODBUSCTL_FUNCTION" desc:"Function code: 5 (single coil), 6 (single register), 15 (multiple coils), 16 (multiple registers); 0 = 6 for one register value, otherwise 16" flag:"function"`
+	StartAddress uint16   `env:"MODBUSCTL_ADDRESS" desc:"Address of the first coil or register to write" flag:"start"`
+	Values       []string `env:"MODBUSCTL_VALUES" desc:"Comma-separated values to write: registers 0-65535, 0x hex or -32768..-1; coils 1/0, true/false or on/off; with --codec one typed value per entry" flag:"values"`
+	Codec        string   `env:"MODBUSCTL_CODEC" desc:"Encode each value with this codec before writing (e.g. float32/layout:4321); see 'client codecs'" flag:"codec"`
+	OutputFormat string   `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	Debug        bool     // set from global --debug (root persistent flag)
+}
+
+// PollConfig drives `client poll`: read the same block repeatedly and print every sample.
+type PollConfig struct {
+	DeviceConfig
+	Timeout       uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds per Modbus request and dial cap (0 = 10000)" flag:"timeout"`
+	Function      uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (1=coils, 2=discrete inputs, 3=holding, 4=input)" flag:"function"`
+	StartAddress  uint16 `env:"MODBUSCTL_ADDRESS" desc:"Address of the first coil or register to poll" flag:"start"`
+	RegisterCount uint16 `env:"MODBUSCTL_COUNT" desc:"Coils or registers per poll (with --codec: 0 = one value, otherwise a multiple of the codec register width)" flag:"count"`
+	Codec         string `env:"MODBUSCTL_CODEC" desc:"Decode registers with this codec (functions 3 and 4 only); see 'client codecs'" flag:"codec"`
+	Interval      uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between the start of consecutive polls" flag:"interval"`
+	Polls         uint32 `env:"MODBUSCTL_POLLS" desc:"Number of polls before exiting (0 = until interrupted)" flag:"polls"`
+	OutputFormat  string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json (one object per line), or table" flag:"format"`
 	Debug         bool   // set from global --debug (root persistent flag)
 }
 
@@ -170,9 +208,10 @@ type DiscoverConfig struct {
 	Debug            bool     // set from global --debug (root persistent flag)
 }
 
-// FingerprintConfig is used by the fingerprint command (probe supported read FCs per unit via HasUnitReadFunction).
+// FingerprintConfig is used by the fingerprint command (probe supported read FCs per unit via go-modbus SupportsFunction).
 type FingerprintConfig struct {
-	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	SerialConfig
+	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	UnitID       string `env:"MODBUSCTL_UNIT" desc:"Unit ID: single, range (1-10), list (1,5,25), mixed (1-10,255), or 'all'" flag:"unit"`
@@ -184,7 +223,8 @@ type FingerprintConfig struct {
 
 // DiagnosticConfig is used by the diagnostic command (FC08 Diagnostics).
 type DiagnosticConfig struct {
-	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); mutually exclusive with --ip/--port" flag:"url"`
+	SerialConfig
+	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	UnitID       uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID of the Modbus device" flag:"unit"`
@@ -210,7 +250,8 @@ type DeviceProfileDecodeConfig struct {
 
 // SunSpecBaseConfig is shared by all client sunspec commands (URL or IP/Port, unit, regtype, output).
 type SunSpecBaseConfig struct {
-	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL (e.g. tcp://192.168.1.10:502); overrides --ip/--port when set" flag:"url"`
+	SerialConfig
+	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	Unit         uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID (0-255, full Modbus range)" flag:"unit"`

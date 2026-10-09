@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 
 	"github.com/otfabric/modbusctl/internal/types"
@@ -51,6 +52,10 @@ func WriteHeader(f *os.File, header types.CaptureHeader) error {
 // AppendRecord appends a CaptureRecord to the end of the MCAP file.
 // Each record includes a timestamp, start address, register count, and raw data payload.
 func AppendRecord(f *os.File, rec types.CaptureRecord) error {
+	// Checked before anything is written: the length field is 16 bits wide.
+	if len(rec.Data) > math.MaxUint16 {
+		return fmt.Errorf("record data too large: %d bytes (maximum %d)", len(rec.Data), math.MaxUint16)
+	}
 	if _, err := f.Seek(0, io.SeekEnd); err != nil {
 		return fmt.Errorf("failed to seek to end: %w", err)
 	}
@@ -116,33 +121,33 @@ func ReadHeader(r io.Reader) (types.CaptureHeader, error) {
 }
 
 // ReadRecord reads a single CaptureRecord from the given reader.
-// It returns the iteration, timestamp, register address range, and raw data block.
+// It returns io.EOF only at a clean end of file, before the first byte of a record. A file
+// that ends anywhere inside a record, including exactly between two fields, yields
+// io.ErrUnexpectedEOF so that a truncated capture is not mistaken for a complete one.
 func ReadRecord(r io.Reader) (*types.CaptureRecord, error) {
 	var rec types.CaptureRecord
 
 	if err := binary.Read(r, binary.BigEndian, &rec.Iteration); err != nil {
 		return nil, err
 	}
-	if err := binary.Read(r, binary.BigEndian, &rec.RequestTimestamp); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &rec.ResponseTimestamp); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &rec.StartAddress); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(r, binary.BigEndian, &rec.RegisterCount); err != nil {
-		return nil, err
-	}
 	var dataLen uint16
-	if err := binary.Read(r, binary.BigEndian, &dataLen); err != nil {
-		return nil, err
+	for _, field := range []any{&rec.RequestTimestamp, &rec.ResponseTimestamp, &rec.StartAddress, &rec.RegisterCount, &dataLen} {
+		if err := binary.Read(r, binary.BigEndian, field); err != nil {
+			return nil, truncatedRecordErr(err)
+		}
 	}
 	rec.Data = make([]byte, dataLen)
 	if _, err := io.ReadFull(r, rec.Data); err != nil {
-		return nil, err
+		return nil, truncatedRecordErr(err)
 	}
 
 	return &rec, nil
+}
+
+// truncatedRecordErr maps an end of file inside a record to io.ErrUnexpectedEOF.
+func truncatedRecordErr(err error) error {
+	if errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }

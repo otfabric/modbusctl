@@ -1,0 +1,12 @@
+# Codecov configuration for modbusctl.
+# CI uploads one whole-module profile (see .github/workflows/ci.yml: coverpkg ./...),
+# the same metric `make coverage` gates locally with COVERAGE_MIN.
+coverage:
+  status:
+    project:
+      default:
+        target: 85%
+        threshold: 1%
+    patch:
+      default:
+        target: 70%

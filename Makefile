@@ -1,9 +1,19 @@
-.PHONY: help all run test coverage cover compile lint lint-ci fmt vet build build-nocheck build-all release-all install clean check-legacy
+.PHONY: help all run test coverage cover compile lint lint-ci fmt fmt-check vet build build-nocheck build-all release-all install clean check-legacy
 
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .DEFAULT_GOAL := help
+
+# Parent otfabric/go.work does not list this module; isolate toolchain commands.
+export GOWORK := off
+
+# CI formats and lints with the Go version from go.mod, not with the toolchain installed here.
+# gofmt's output changes between Go releases (comment alignment, for one), so formatting is
+# done with that version, and `fmt-check` also requires the local gofmt to agree: a file that
+# two versions format differently fails CI on one side or the other.
+GO_MOD_VERSION := $(shell sed -nE 's/^go ([0-9]+\.[0-9]+).*/\1/p' go.mod | head -n1)
+GOFMT_CI = $(shell GOTOOLCHAIN=go$(GO_MOD_VERSION).0 go env GOROOT)/bin/gofmt
 
 APP_NAME       = modbusctl
 APP_SRC	= main.go
@@ -20,21 +30,28 @@ BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -ldflags "-s -w -X 'main.version=$(VERSION)' -X 'main.tag=$(TAG)' -X 'main.commit=$(COMMIT)' -X 'main.buildDate=$(BUILD_DATE)'"
 RELEASE_DIR   := release
 
+# Minimum total statement coverage (percent) enforced by `make coverage`.
+COVERAGE_MIN ?= 85
+
 all: test build build-all ## Test and build the application
 
 run: ## Run the application
 	@echo "Running $(APP_NAME)"
 	@go run $(APP_SRC)
 
-check: fmt lint lint-ci vet test coverage ## Run all checks (format, lint, vet, test, coverage)
+check: fmt fmt-check lint lint-ci vet test coverage ## Run all checks (format, lint, vet, test, coverage)
 
 test: ## Run unit tests with race detector
 	@echo "Running unit tests (race detector)"
 	@go test -count=1 -race ./...
 
-coverage: ## Run tests with coverage (writes coverage.out)
+coverage: ## Run tests with whole-module coverage (writes coverage.out); fails below COVERAGE_MIN percent
 	@echo "Running tests with coverage"
-	@go test -count=1 -race -coverprofile=coverage.out -covermode=atomic ./...
+	@go test -count=1 -race -coverprofile=coverage.out -covermode=atomic -coverpkg=./... ./...
+	@total=$$(go tool cover -func=coverage.out | awk '/^total:/ { sub("%", "", $$3); print $$3 }'); \
+	echo "Total coverage: $$total% (minimum $(COVERAGE_MIN)%)"; \
+	awk -v t="$$total" -v m="$(COVERAGE_MIN)" 'BEGIN { exit (t + 0 < m + 0) ? 1 : 0 }' || \
+		{ echo "Coverage $$total% is below the required $(COVERAGE_MIN)%"; exit 1; }
 
 cover: coverage ## Open coverage report in browser (run coverage first)
 	@echo "Opening coverage report in browser"
@@ -54,9 +71,20 @@ lint-ci: compile ## go vet + golangci-lint (typecheck + configured linters; see 
 	@echo "Running golangci-lint"
 	@golangci-lint run ./...
 
-fmt: ## Format Go code with gofmt
-	@echo "Running gofmt"
-	@gofmt -w .
+fmt: ## Format Go code with the gofmt of the Go version in go.mod (what CI uses)
+	@echo "Running gofmt (go$(GO_MOD_VERSION))"
+	@$(GOFMT_CI) -w .
+
+fmt-check: ## Fail if the go.mod-version gofmt or the local gofmt would change any file
+	@echo "Checking formatting (gofmt go$(GO_MOD_VERSION) and local $$(go env GOVERSION))"
+	@ci="$$($(GOFMT_CI) -l .)"; loc="$$(gofmt -l .)"; \
+	if [ -n "$$ci$$loc" ]; then \
+		[ -z "$$ci" ] || { echo "Not formatted for gofmt go$(GO_MOD_VERSION) (CI):"; echo "$$ci"; }; \
+		[ -z "$$loc" ] || { echo "Not formatted for the local gofmt:"; echo "$$loc"; }; \
+		echo "Files must be stable under both. Run 'make fmt'; if the two versions still disagree,"; \
+		echo "restructure the code they format differently (e.g. move trailing comments onto their own lines)."; \
+		exit 1; \
+	fi
 
 vet: ## Run go vet on project packages
 	@echo "Running go vet"

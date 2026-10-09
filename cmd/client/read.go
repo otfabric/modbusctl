@@ -28,7 +28,7 @@ var readCmd = &cobra.Command{
   modbusctl client read --url tcp://192.168.1.10:502 --start 40001
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_IP=192.168.1.10 MODBUSCTL_START=40001 MODBUSCTL_COUNT=5 modbusctl client read
+  MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ADDRESS=40001 MODBUSCTL_COUNT=5 modbusctl client read
 `,
 }
 
