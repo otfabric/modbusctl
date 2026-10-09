@@ -1,32 +1,136 @@
-# modbusctl
+# modbusctl — Modbus TCP Command-Line Tool: Scanner, Device Identification, SunSpec, Recorder & Simulator
 
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/otfabric/modbusctl)](https://goreportcard.com/report/github.com/otfabric/modbusctl)
-[![CI](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/otfabric/modbusctl?label=release)](https://github.com/otfabric/modbusctl/releases)
+[![CI Status](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml)
+[![Latest Release](https://img.shields.io/github/v/release/otfabric/modbusctl?label=release)](https://github.com/otfabric/modbusctl/releases)
 
-Modbusctl is a versatile command-line utility for Modbus TCP: communication, scanning, recording, replay, decode, and analysis. It supports environment-driven configuration, **MCAP** capture, **mcap convert** exports (**CSV** / **JSON** files), and **client** commands with a shared stdout **`--format`** (**text**, **json**, **table**) for scripting and tables—separate from **`mcap convert --format`** (**csv** / **json**). See [docs/json-output.md](docs/json-output.md) for JSON field conventions on client commands.
+**modbusctl is a command-line toolkit for exploring, testing and simulating Modbus TCP devices.** Identify a device, fingerprint which function codes it supports, scan its register map to find readable blocks, decode registers into typed values, discover Modbus devices on a subnet, record sessions to a compact capture file (MCAP) and replay them as a simulated device.
 
-## 📖 Table of Contents
+It is built for commissioning and site surveys, troubleshooting, reverse-engineering undocumented register maps, SunSpec inverter and meter discovery, and building hardware-free test setups. Output can be plain text, a table or JSON with stable exit codes, so it works in scripts and CI. It is written in Go on top of [go-modbus](https://github.com/otfabric/go-modbus).
 
-- [🚀 Features](#-features)
-- [💾 MCAP Format](#-mcap-format)
-  - [Why MCAP?](#why-mcap)
-  - [MCAP File Structure](#mcap-file-structure)
-- [🔧 Installation](#-installation)
-- [📦 GitHub Releases](#-github-releases)
-- [🖥️ Usage](#️-usage)
-  - [General CLI Usage](#general-cli-usage)
-  - [Common Commands](#common-commands)
-- [🌍 Environment Variable Configuration](#-environment-variable-configuration)
-- [📂 Project Structure](#-project-structure)
-- [⚙️ Development](#️-development)
-  - [Building](#building)
-  - [Running Tests](#running-tests)
-- [🗒️ Version History](#️-version-history)
+**Quick links:** [Quick start](#quick-start) · [Comparison](#modbusctl-vs-mbpoll-and-modpoll) · [Features](#features) · [Scan algorithms](#scan-algorithms-detailed) · [MCAP format](#mcap-format) · [FAQ](#faq)
 
-## 🚀 Features
+> **Responsible use:** modbusctl sends real Modbus requests. Only use it on devices and networks you own or are authorized to test. Some devices react badly to scanning, so start with `--algo safe` and a `--delay`. FC08 diagnostic sub-functions can change device state (for example restart communications, clear counters or force listen-only mode).
+
+---
+
+## Why modbusctl?
+
+- **Understand an unknown device** — `identify` (FC43/FC17), `fingerprint` (supported read functions per unit) and `client sunspec` tell you what you are talking to.
+- **Find the register map** — `scan` discovers readable address blocks with seven strategies, from the gentle `safe` to the adaptive `smart` and evidence-driven `deep`.
+- **Typed decoding** — `decode` turns registers into integers, floats, strings, BCD, timestamps, IP and MAC addresses with explicit byte and word layouts.
+- **Record, replay, simulate** — Capture sessions to MCAP, then serve them with `server static` or `server replay` to develop and test without hardware.
+- **Find devices** — `discover` sweeps subnets for Modbus devices, with a safety cap on large ranges.
+- **Script-friendly** — `--format text|json|table`, a single JSON error object on failure, stable exit codes and `MODBUSCTL_*` environment variables.
+- **Offline analysis** — Convert, decode, extract, summarize and string-search recorded data with the `mcap` commands.
+- **Pre-built binaries** — Linux, macOS and Windows (x86-64 and ARM) from [GitHub Releases](https://github.com/otfabric/modbusctl/releases), with SHA-256 checksums; no runtime to install.
+
+---
+
+## Quick start
+
+Download a binary from [GitHub Releases](https://github.com/otfabric/modbusctl/releases) (see [Installation](#installation) for copy-paste commands for Linux, macOS and Windows, or build from source), then point it at a device:
+
+```console
+# What is this device? (FC43 Device Identification + FC17 Report Server ID)
+modbusctl client identify --ip 192.168.1.10 --server-id
+
+# Which read function codes does each unit support?
+modbusctl client fingerprint --ip 192.168.1.10 --unit 1-10
+
+# Which register blocks are readable? (adaptive scan, saved to MCAP)
+modbusctl client scan --ip 192.168.1.10 --algo smart --start 0 --end 5000 --output scan.mcap
+
+# Read and decode a 32-bit float, as JSON
+modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:1234 --format json
+
+# Serve the scan results as a simulated Modbus TCP device on port 1502
+modbusctl server static --input scan.mcap --port 1502
+```
+
+SunSpec device? Run `modbusctl client sunspec probe --url tcp://192.168.1.10:502 --unit 1`.
+
+Addresses are **raw Modbus PDU addresses** (0–65535), not "4xxxx" register labels. See [Read registers](#read-registers-single-or-block).
+
+---
+
+## modbusctl vs mbpoll and modpoll
+
+[mbpoll](https://github.com/epsilonrt/mbpoll) and [modpoll](https://pypi.org/project/modpoll/) are well-known Modbus command-line tools focused on polling and writing registers. modbusctl overlaps with them on reading registers, but adds device exploration, scanning and simulation. This table shows where each tool fits.
+
+| Capability | modbusctl | mbpoll | modpoll |
+|---|:---:|:---:|:---:|
+| Modbus TCP master | ✅ | ✅ | ✅ |
+| Modbus RTU (serial) | — | ✅ | ✅ |
+| Modbus ASCII and UDP | — | — | ✅ |
+| Read coils, discrete inputs, input and holding registers | ✅ | ✅ | ✅ |
+| Write coils and holding registers | — | ✅ | ✅ |
+| Continuous polling at an interval | via `record` | ✅ | ✅ |
+| Typed values (ints, floats, strings, word/byte order) | ✅ | ✅ | ✅ |
+| BCD, timestamp, IP and MAC decoders | ✅ | — | — |
+| **Register-map scanning** (find readable blocks) | ✅ | — | — |
+| **Device identification** (FC43) and Report Server ID (FC17) | ✅ | partial (RTU only) | — |
+| **Diagnostics** (FC08 sub-functions) | ✅ | — | — |
+| **Supported-function fingerprinting** | ✅ | — | — |
+| **SunSpec discovery** | ✅ | — | — |
+| **Subnet device discovery** | ✅ | — | — |
+| **Record and replay** sessions | ✅ | — | — |
+| **Simulate a device** from recorded data | ✅ | — | — |
+| Export data to CSV / JSON | ✅ | — | CSV |
+| JSON output and stable exit codes for scripting | ✅ | — | — |
+| MQTT publishing | — | — | ✅ |
+| Docker image | — | — | ✅ |
+| Shell completion | ✅ | — | — |
+| Install | release binaries | apt, brew, source | pip, pipx, Docker |
+| Language / runtime | Go | C++ (libmodbus) | Python 3.10+ |
+| License | MIT | GPL-3.0 | MIT |
+
+✅ = documented feature · — = not documented / not available. Based on each project's public documentation as of October 2026. If you spot an inaccuracy, please [open an issue](https://github.com/otfabric/modbusctl/issues) and we will correct it.
+
+**Choose modbusctl if** you need to explore or map an unfamiliar Modbus TCP device, inventory devices, work with SunSpec, capture traffic for analysis, simulate a device from a recording, or script Modbus checks with JSON output.
+
+**Choose mbpoll if** you need a classic poll-and-write tool that also speaks Modbus RTU over serial and is available from your package manager.
+
+**Choose modpoll if** you want config-file-driven polling with MQTT publishing, Modbus ASCII or UDP, or a ready-made Docker setup.
+
+They combine well: use modbusctl to discover and document a device's register map, then poll it long-term with the tool that fits your deployment.
+
+---
+
+## Use cases
+
+- **Commissioning and site surveys** — Identify devices, check supported functions and read decoded values in seconds.
+- **Reverse-engineering register maps** — Scan for readable blocks, then use `mcap strings` and `mcap frequencies` to locate device names and measurements.
+- **Hardware-free testing** — Record a real device once, then replay it in CI or on a laptop with `server replay`.
+- **Solar and energy equipment** — Detect SunSpec markers, walk model chains and print address maps for inverters and meters.
+- **Network inventory** — Sweep subnets for Modbus TCP devices and export the results as JSON.
+- **Automation and CI** — Use `--format json`, exit codes and environment variables in scripts and pipelines.
+
+---
+
+## Table of Contents
+
+- [Why modbusctl?](#why-modbusctl)
+- [Quick start](#quick-start)
+- [modbusctl vs mbpoll and modpoll](#modbusctl-vs-mbpoll-and-modpoll)
+- [Use cases](#use-cases)
+- [Features](#features)
+- [Installation](#installation)
+- [MCAP format](#mcap-format)
+- [Usage](#usage)
+- [Environment variable configuration](#environment-variable-configuration)
+- [FAQ](#faq)
+- [Project structure](#project-structure)
+- [Development](#development)
+- [Version history](#version-history)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Features
 
 The following features are available:
 
@@ -51,10 +155,10 @@ The following features are available:
 | Frequencies      | Extract potential frequency readings around 50Hz from MCAP files to help finding the correct data ranges                  |
 | Discovery        | Discover Modbus devices within specified subnets.                                                                         |
 | SunSpec          | Transport-level SunSpec discovery: detect marker/base, enumerate model headers, print address map, or combined probe (no semantic decoding). |
-| Client `--format` | Many **`modbusctl client`** commands accept **`--format text|json|table`** (or **`MODBUSCTL_OUTPUT_FORMAT`**) for structured stdout; **`mcap convert`** uses a different **`--format`** (**csv** / **json**). |
+| Client `--format` | Many **`modbusctl client`** commands accept **`--format text\|json\|table`** (or **`MODBUSCTL_OUTPUT_FORMAT`**) for structured stdout; **`mcap convert`** uses a different **`--format`** (**csv** / **json**). |
 | Completion       | Generate shell completion scripts for bash, zsh, fish, or PowerShell; enum flags (**`--format`**, **`--algo`**, **`--function`**, **`--codec`**, **`--regtype`**, **`--sub-function`**, etc.) support tab completion. |
 
-The following tree view gives the overiew of available commands.
+The following tree view gives the overview of available commands.
 
 ```
 modbusctl
@@ -88,7 +192,142 @@ modbusctl
 └── version              Print version
 ```
 
-## 💾 MCAP Format
+## Installation
+
+The easiest way to install modbusctl is to download a pre-built binary from the [GitHub Releases page](https://github.com/otfabric/modbusctl/releases). No Go toolchain is required.
+
+| Platform | CPU | Download |
+|---|---|---|
+| Linux | x86-64 | `modbusctl-<version>-linux-amd64.tar.gz` |
+| Linux | 64-bit ARM (Raspberry Pi 4/5 with a 64-bit OS, AWS Graviton) | `modbusctl-<version>-linux-arm64.tar.gz` |
+| Linux | 32-bit ARM (Raspberry Pi with a 32-bit OS) | `modbusctl-<version>-linux-armv7.tar.gz` |
+| macOS | Apple Silicon (M1 and later) | `modbusctl-<version>-darwin-arm64.tar.gz` |
+| macOS | Intel | `modbusctl-<version>-darwin-amd64.tar.gz` |
+| Windows | x86-64 | `modbusctl-<version>-windows-amd64.zip` |
+| Windows | ARM64 | `modbusctl-<version>-windows-arm64.zip` |
+
+Each release also contains `modbusctl-<version>-checksums.txt` (SHA-256) so you can verify your download. The commands below fetch the **latest** release, verify its checksum and install it. Afterwards, check that it works:
+
+```console
+modbusctl version
+```
+
+### Linux
+
+```bash
+# 1. Find the latest version and your CPU architecture
+VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/otfabric/modbusctl/releases/latest | sed 's|.*/v||')
+case "$(uname -m)" in
+  x86_64)         ARCH=amd64 ;;
+  aarch64|arm64)  ARCH=arm64 ;;
+  armv7l)         ARCH=armv7 ;;
+  *) echo "Unsupported architecture: $(uname -m)" ;;
+esac
+
+# 2. Download the archive and the checksum file
+FILE="modbusctl-${VERSION}-linux-${ARCH}.tar.gz"
+BASE="https://github.com/otfabric/modbusctl/releases/download/v${VERSION}"
+curl -fsSLO "${BASE}/${FILE}"
+curl -fsSLO "${BASE}/modbusctl-${VERSION}-checksums.txt"
+
+# 3. Verify the download (should print "OK")
+grep "${FILE}" "modbusctl-${VERSION}-checksums.txt" | sha256sum -c -
+
+# 4. Extract and install
+mkdir -p modbusctl-dl && tar -xzf "${FILE}" -C modbusctl-dl
+sudo install -m 0755 "$(find modbusctl-dl -type f -name modbusctl | head -n1)" /usr/local/bin/modbusctl
+```
+
+No `sudo`? Install into your home directory instead (and make sure `~/.local/bin` is in your `PATH`):
+
+```bash
+mkdir -p ~/.local/bin
+install -m 0755 "$(find modbusctl-dl -type f -name modbusctl | head -n1)" ~/.local/bin/modbusctl
+```
+
+### macOS
+
+```bash
+# 1. Find the latest version and your CPU architecture (arm64 = Apple Silicon, x86_64 = Intel)
+VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/otfabric/modbusctl/releases/latest | sed 's|.*/v||')
+case "$(uname -m)" in
+  arm64)   ARCH=arm64 ;;
+  x86_64)  ARCH=amd64 ;;
+esac
+
+# 2. Download the archive and the checksum file
+FILE="modbusctl-${VERSION}-darwin-${ARCH}.tar.gz"
+BASE="https://github.com/otfabric/modbusctl/releases/download/v${VERSION}"
+curl -fsSLO "${BASE}/${FILE}"
+curl -fsSLO "${BASE}/modbusctl-${VERSION}-checksums.txt"
+
+# 3. Verify the download (should print "OK")
+grep "${FILE}" "modbusctl-${VERSION}-checksums.txt" | shasum -a 256 -c -
+
+# 4. Extract and install
+mkdir -p modbusctl-dl && tar -xzf "${FILE}" -C modbusctl-dl
+sudo install -m 0755 "$(find modbusctl-dl -type f -name modbusctl | head -n1)" /usr/local/bin/modbusctl
+```
+
+If you downloaded the archive with a web browser instead of `curl` and macOS refuses to run the binary ("cannot be verified"), remove the quarantine flag: `xattr -d com.apple.quarantine /usr/local/bin/modbusctl`.
+
+### Windows (PowerShell)
+
+```powershell
+# 1. Find the latest version and your CPU architecture
+$version = (Invoke-RestMethod https://api.github.com/repos/otfabric/modbusctl/releases/latest).tag_name.TrimStart('v')
+$arch    = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+
+# 2. Download the archive and the checksum file
+$file = "modbusctl-$version-windows-$arch.zip"
+$base = "https://github.com/otfabric/modbusctl/releases/download/v$version"
+Invoke-WebRequest "$base/$file" -OutFile "$env:TEMP\$file"
+Invoke-WebRequest "$base/modbusctl-$version-checksums.txt" -OutFile "$env:TEMP\modbusctl-checksums.txt"
+
+# 3. Verify the download (throws an error on mismatch)
+$expected = ((Select-String -Path "$env:TEMP\modbusctl-checksums.txt" -Pattern $file).Line -split '\s+')[0]
+$actual   = (Get-FileHash "$env:TEMP\$file" -Algorithm SHA256).Hash
+if ($expected -ne $actual) { throw "Checksum mismatch for $file" }
+
+# 4. Extract to a per-user folder
+$dir = "$env:LOCALAPPDATA\Programs\modbusctl"
+Expand-Archive "$env:TEMP\$file" -DestinationPath $dir -Force
+
+# 5. Add modbusctl to your user PATH (then open a new terminal)
+$bin      = (Get-ChildItem $dir -Recurse -Filter modbusctl.exe | Select-Object -First 1).DirectoryName
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($userPath -notlike "*$bin*") {
+  [Environment]::SetEnvironmentVariable('Path', "$userPath;$bin", 'User')
+}
+```
+
+If Windows SmartScreen warns about an unrecognised app, choose **More info → Run anyway**.
+
+### Manual download
+
+1. Open the [latest release](https://github.com/otfabric/modbusctl/releases/latest).
+2. Download the archive for your platform from the table above.
+3. Extract it and move the `modbusctl` binary (`modbusctl.exe` on Windows) to a folder on your `PATH`.
+
+### Update
+
+Run the same commands again. They always fetch the latest release and overwrite the previous binary.
+
+### Build from source
+
+Requires Go 1.25 or later:
+
+```console
+git clone https://github.com/otfabric/modbusctl.git
+cd modbusctl
+make build
+```
+
+`make build` writes the binary to **`bin/modbusctl`** (see [Building](#building)).
+
+---
+
+## MCAP Format
 
 The `MCAP` (Modbus Capture) format is a specialized binary format designed for efficiently recording and replaying Modbus TCP communications, inspired by the well-known `PCAP` (Packet Capture) format used by tools such as Wireshark.
 
@@ -142,24 +381,9 @@ The following is an example of a JSON converted MCAP file:
 
 More examples and test files can be found in the [results](./results) folder for quick exploration and verification.
 
+---
 
-## 🔧 Installation
-
-Build from source (requires Go):
-
-```console
-git clone git@github.com:otfabric/modbusctl.git
-cd modbusctl
-make build build-all
-```
-
-`make build` writes the binary to **`bin/modbusctl`** (see [Building](#building)).
-
-## 📦 GitHub Releases
-
-Pre-built binaries for various platforms are available for download on the [GitHub Releases page](https://github.com/otfabric/modbusctl/releases). You can download the latest stable version without building from source.
-
-## 🖥️ Usage
+## Usage
 
 ### General CLI Usage
 
@@ -296,6 +520,9 @@ Example output:
 #### Diagnostics (FC08)
 Send an FC08 Diagnostics request. Use `--sub-function` with the sub-function **name** (lowercase, e.g. `returnquerydata`, `clearcountersanddiagnosticreg`). Default is **returnquerydata** (loopback). Tab completion is available for `--sub-function`.
 
+<details>
+<summary>FC08 sub-function names and codes</summary>
+
 | CLI name (--sub-function)        | Code   |
 |----------------------------------|--------|
 | returnquerydata                  | 0x0000 |
@@ -313,6 +540,8 @@ Send an FC08 Diagnostics request. Use `--sub-function` with the sub-function **n
 | returnserverbusycount            | 0x0011 |
 | returnbuscharacteroverruncount   | 0x0012 |
 | clearoverruncounterandflag       | 0x0014 |
+
+</details>
 
 ```console
 # Loopback test (default: returnquerydata, data 0000)
@@ -491,6 +720,9 @@ When non-zero, the summary also reports **Exception**, **Timeout**, and **Transp
 
 Failures are classified (success, Modbus exception, timeout, transport error) so strategies can avoid retrying on strong exception evidence (e.g. Illegal Data Address). For a full specification of each algorithm (state, transitions, worst-case counts, and examples suitable for re-implementation), see **[ALGOS.md](ALGOS.md)**. For the optional improvement roadmap (priority queue, stepped offsets, coalesce-smart, etc.), see **[REFACTOR.md](REFACTOR.md)**.
 
+<details>
+<summary>Scan algorithm internals (full descriptions of each algorithm)</summary>
+
 - **safe** — Linear scan from `--start` to `--end`. At each address the scanner tries the largest allowed block first (up to 125 registers), then smaller sizes in a fixed descending order (125, 64, 32, 16, 8, 4, 2, 1). On success it records the block and jumps past it; if there were failures at this address before success, it emits one **left-boundary probe** (start−1, 1) to help find the exact edge (one-off; does not alter scan position). On total failure it advances by one register. No retry storms. If `--start` > `--end`, the strategy is done immediately. Best when you want predictable load and full coverage.
 
 - **smart** — Divide-and-conquer over the same range using a **priority queue** (smaller intervals first; tie-break by start address). It starts with aligned 125-register chunks. If a chunk read fails and the chunk is larger than one register, it splits that chunk in half and re-queues both halves; if it succeeds, the chunk is recorded and not split further. This discovers readable regions and boundaries efficiently without sliding one address at a time. Best default for unknown devices.
@@ -505,6 +737,8 @@ Failures are classified (success, Modbus exception, timeout, transport error) so
 
 - **sunspec** — SunSpec protocol-aware scan. **Phase 1** probes candidate base addresses (default: 0, 40000, 50000, …) for the SunS marker (`0x5375`, `0x6E53`). **Phase 2** walks the model chain: reads each header (2 regs for model ID + length), then reads the full model body in chunks of ≤125 registers, until the end model (`0xFFFF`, 0), a read failure, or a configured limit (`--sunspec-max-models`, `--sunspec-max-span`). When `--sunspec-base` is set, detection is skipped. Does not require `--start`/`--end`. Worst case: B base probes + M × (1 + ⌈length/125⌉) reads. Use for SunSpec-compliant inverters, meters, and energy devices.
 
+</details>
+
 #### Record registers over time (interval, duration based)
 
 Progress messages (e.g. each iteration and recorded block) go to **stderr**; **stdout** is a **single** final summary (**`--format text|json|table`**).
@@ -514,13 +748,13 @@ modbusctl client record --ip 192.168.1.10 --blocks-file register-ranges.json --i
 modbusctl client record --ip 192.168.1.10 --blocks-file register-ranges.json --interval 1000 --duration 60000 --output session.mcap --format json
 ```
 
-####  Statically host data (no changes in data)
+#### Statically host data (no changes in data)
 
 ```console
 modbusctl server static --input session.mcap --port 1502
 ```
 
-####  Replay recorded data (looped)
+#### Replay recorded data (looped)
 
 ```console
 modbusctl server replay --input session.mcap --port 1502 --loops 0
@@ -622,9 +856,12 @@ source <(modbusctl completion zsh)
 modbusctl completion fish | source
 ```
 
-## 🌍 Environment Variable Configuration
+## Environment Variable Configuration
 
 Modbusctl supports environment variables for easy automation. The global flag `--debug` (print debug information) is available on all commands and has no environment variable; use it to enable per-command debug output (e.g. scan: read ranges; read/record: retry wait messages). The environment variables supported (depending on the command) are:
+
+<details>
+<summary>All <code>MODBUSCTL_*</code> environment variables</summary>
 
 | Variable               | Type     | Description                                                 | Flag            | Default    |
 |------------------------|----------|-------------------------------------------------------------|-----------------|------------|
@@ -672,6 +909,9 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_VERBOSE**     | bool     | Show probe attempts or extra detail (e.g. sunspec detect) | `--verbose` | false |
 | **MODBUSCTL_OUTPUT_FORMAT** | string | Client stdout format: **text**, **json**, or **table** (identify, read, scan, record, reportserverid, fingerprint, diagnostic, sunspec, …). Empty/unset defaults to **text**. Not used by `mcap convert` (see **MODBUSCTL_FORMAT**). | `--format` | text |
 
+</details>
+
+
 Example usage:
 
 ```console
@@ -679,7 +919,53 @@ MODBUSCTL_IP=192.168.1.10 MODBUSCTL_START=40001 MODBUSCTL_COUNT=10 modbusctl cli
 MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ALGO=smart MODBUSCTL_START=0 MODBUSCTL_END=1000 MODBUSCTL_OUTPUT=scan.mcap modbusctl client scan
 ```
 
-## 📂 Project Structure
+---
+
+## FAQ
+
+### What is modbusctl?
+
+modbusctl is a command-line tool for Modbus TCP. It identifies devices, fingerprints supported function codes, scans register maps, decodes registers into typed values, discovers devices on a network, and records and replays sessions to simulate devices.
+
+### How do I find which Modbus registers a device exposes?
+
+Run a scan, for example `modbusctl client scan --ip 192.168.1.10 --algo smart --start 0 --end 5000 --output scan.mcap`. Use `--algo safe` with `--delay` for fragile devices and `--algo deep` for precise block edges. See [Scan registers](#scan-registers-discover-valid-address-blocks).
+
+### How do I read a float or string from Modbus registers on the command line?
+
+Use `client decode` with a codec, for example `modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:1234`. List all codecs with `modbusctl client codecs`. See [Decode registers](#decode-registers-typed-values-via-codecs).
+
+### How do I simulate a Modbus device without hardware?
+
+Record or scan a real device to an MCAP file, then serve it with `modbusctl server static --input session.mcap --port 1502` (fixed values) or `modbusctl server replay --input session.mcap` (values replayed over time).
+
+### Does modbusctl support Modbus RTU (serial)?
+
+modbusctl targets Modbus TCP. For serial RTU use a tool such as [mbpoll](https://github.com/epsilonrt/mbpoll) or the `modbus-cli` that ships with [go-modbus](https://github.com/otfabric/go-modbus).
+
+### Can modbusctl write registers or coils?
+
+The documented commands focus on reading, scanning, diagnostics and simulation. They do not include register or coil writes. See the [comparison](#modbusctl-vs-mbpoll-and-modpoll) for tools that do.
+
+### What is MCAP?
+
+MCAP (Modbus Capture) is a compact capture format, inspired by PCAP, that stores Modbus transactions with timestamps for replay and analysis. See [MCAP format](#mcap-format).
+
+### How do I use modbusctl in scripts and CI?
+
+Pass `--format json` (or set `MODBUSCTL_OUTPUT_FORMAT=json`). Progress goes to stderr, a single result goes to stdout, and failures return one JSON error object with a stable exit code. See [General CLI usage](#general-cli-usage) and [docs/exitcodes.md](docs/exitcodes.md).
+
+### How is modbusctl different from mbpoll and modpoll?
+
+mbpoll and modpoll are polling and writing tools. modbusctl adds register-map scanning, device identification, SunSpec discovery, subnet discovery and record/replay simulation. See the [comparison](#modbusctl-vs-mbpoll-and-modpoll).
+
+---
+
+
+## Project structure
+
+<details>
+<summary>Repository layout</summary>
 
 ```console
 modbusctl/
@@ -702,7 +988,9 @@ modbusctl/
 └── go.mod (Dependencies)
 ```
 
-## ⚙️ Development
+</details>
+
+## Development
 
 A toplevel `Makefile` is provided for convenience. Run **`make`** (or **`make help`**) for the full list. Common targets:
 
@@ -732,7 +1020,21 @@ make build-all
 make test
 ```
 
-## 🗒️ Version History
+## Version History
 
 Release notes for each version are maintained in **[RELEASE.md](RELEASE.md)** (e.g. migration notes and breaking changes).
 
+
+---
+
+## Contributing
+
+Bug reports, device-compatibility notes and pull requests are welcome. Please [open an issue](https://github.com/otfabric/modbusctl/issues) to discuss larger changes first, and run `make check` before submitting.
+
+If modbusctl is useful to you, a star on GitHub helps other engineers find it.
+
+---
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE.txt](LICENSE.txt).
