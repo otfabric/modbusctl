@@ -3,6 +3,7 @@ package modbus
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"syscall"
 
@@ -36,6 +37,10 @@ func classifyUnwrappedCollect(err error) (kind errs.Kind, code string, ok bool) 
 	var ex *gm.ExceptionError
 	if errors.As(err, &ex) {
 		return errs.KindModbus, errs.CodeModbusException, true
+	}
+	// The peer closed the connection before or while answering.
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return errs.KindTransport, errs.CodeTransportConnectFailed, true
 	}
 	var ne *net.OpError
 	if errors.As(err, &ne) {

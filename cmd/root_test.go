@@ -1,0 +1,345 @@
+package cmd
+
+import (
+	"context"
+	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/otfabric/modbusctl/internal/errs"
+	"github.com/otfabric/modbusctl/internal/mbtest"
+	"github.com/otfabric/modbusctl/internal/types"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+)
+
+// walkCommands calls fn for c and every command below it.
+func walkCommands(c *cobra.Command, fn func(*cobra.Command)) {
+	fn(c)
+	for _, sub := range c.Commands() {
+		walkCommands(sub, fn)
+	}
+}
+
+// resetFlag restores a flag to its default value and clears its Changed state.
+func resetFlag(f *pflag.Flag) {
+	if sv, ok := f.Value.(pflag.SliceValue); ok {
+		def := strings.Trim(f.DefValue, "[]")
+		var vals []string
+		if def != "" {
+			vals = strings.Split(def, ",")
+		}
+		_ = sv.Replace(vals)
+	} else {
+		_ = f.Value.Set(f.DefValue)
+	}
+	f.Changed = false
+}
+
+// resetRoot restores every flag of the real command tree and detaches captured state.
+func resetRoot() {
+	walkCommands(rootCmd, func(c *cobra.Command) {
+		c.Flags().VisitAll(resetFlag)
+		c.PersistentFlags().VisitAll(resetFlag)
+		// Drop the context of the previous invocation: cobra only hands a command the
+		// context of the new run when it has none.
+		var none context.Context
+		c.SetContext(none)
+		c.SetOut(nil)
+		c.SetErr(nil)
+	})
+}
+
+// execute runs the real modbusctl command line through Execute, as main does, and returns
+// the exit code with everything written to the process stdout and stderr.
+func execute(t *testing.T, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
+	dir := t.TempDir()
+	outFile, err := os.Create(filepath.Join(dir, "stdout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	errFile, err := os.Create(filepath.Join(dir, "stderr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = outFile, errFile
+	restore := func() { os.Stdout, os.Stderr = origOut, origErr }
+	defer restore()
+
+	resetRoot()
+	defer resetRoot()
+	rootCmd.SetArgs(args)
+	code = Execute()
+	restore()
+
+	read := func(f *os.File) string {
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	return code, read(outFile), read(errFile)
+}
+
+// wantContains fails the test unless s contains every one of subs.
+func wantContains(t *testing.T, s string, subs ...string) {
+	t.Helper()
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			t.Fatalf("output does not contain %q:\n%s", sub, s)
+		}
+	}
+}
+
+// decodeJSON unmarshals s into v and fails the test when s is not valid JSON.
+func decodeJSON(t *testing.T, s string, v any) {
+	t.Helper()
+	if err := json.Unmarshal([]byte(s), v); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, s)
+	}
+}
+
+// refusedURL is a Modbus TCP URL on which nothing listens.
+func refusedURL(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := l.Addr().String()
+	if err := l.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return "tcp://" + addr
+}
+
+func TestRootCommandTree(t *testing.T) {
+	var got []string
+	for _, c := range rootCmd.Commands() {
+		got = append(got, c.Name())
+	}
+	want := []string{"client", "completion", "discover", "mcap", "server", "version"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("root subcommands %v, want %v", got, want)
+	}
+	if f := rootCmd.PersistentFlags().Lookup("debug"); f == nil || f.DefValue != "false" {
+		t.Fatalf("root --debug flag: %+v", f)
+	}
+	if !rootCmd.SilenceUsage || !rootCmd.SilenceErrors {
+		t.Fatal("root must silence cobra usage and errors: fatals are rendered by Execute")
+	}
+}
+
+func TestVersion(t *testing.T) {
+	defer SetBuildMeta(buildMeta.version, buildMeta.tag, buildMeta.commit, buildMeta.buildDate)
+
+	SetBuildMeta(" v9.8.7 ", "v9.8.7", "abc1234", "2026-01-02T03:04:05Z")
+	code, stdout, stderr := execute(t, "version")
+	if code != errs.ExitOK || stderr != "" {
+		t.Fatalf("version: exit %d, stderr %q", code, stderr)
+	}
+	want := "modbusctl version: v9.8.7\ntag:         v9.8.7\ncommit:      abc1234\nbuild date:  2026-01-02T03:04:05Z\n"
+	if stdout != want {
+		t.Fatalf("version output:\n%q\nwant:\n%q", stdout, want)
+	}
+
+	// Without link-time metadata only the version line is printed.
+	SetBuildMeta("", "", " ", "")
+	code, stdout, _ = execute(t, "version")
+	if code != errs.ExitOK || stdout != "modbusctl version: (unknown)\n" {
+		t.Fatalf("version without metadata: exit %d, output %q", code, stdout)
+	}
+}
+
+func TestCompletion(t *testing.T) {
+	markers := map[string]string{
+		completionBash:       "__start_modbusctl",
+		completionZsh:        "#compdef modbusctl",
+		completionFish:       "complete -c modbusctl",
+		completionPowerShell: "Register-ArgumentCompleter",
+	}
+	if len(markers) != len(completionShells) {
+		t.Fatalf("test covers %d shells, command offers %v", len(markers), completionShells)
+	}
+	for _, shell := range completionShells {
+		code, stdout, stderr := execute(t, "completion", shell)
+		if code != errs.ExitOK || stderr != "" {
+			t.Fatalf("completion %s: exit %d, stderr %q", shell, code, stderr)
+		}
+		wantContains(t, stdout, markers[shell], "modbusctl")
+	}
+
+	for _, args := range [][]string{{"completion"}, {"completion", "tcsh"}, {"completion", "bash", "zsh"}} {
+		code, stdout, stderr := execute(t, args...)
+		if code == errs.ExitOK {
+			t.Fatalf("%v: expected a failure", args)
+		}
+		if stdout != "" {
+			t.Fatalf("%v: stdout must stay empty, got %q", args, stdout)
+		}
+		wantContains(t, stderr, "error:")
+	}
+
+	// The shell argument itself completes to the supported shells.
+	code, stdout, _ := execute(t, cobra.ShellCompNoDescRequestCmd, "completion", "")
+	if code != errs.ExitOK {
+		t.Fatalf("shell completion request: exit %d", code)
+	}
+	wantContains(t, stdout, completionShells...)
+}
+
+func TestExecute_endToEnd(t *testing.T) {
+	d := mbtest.NewDevice().SetHolding(100, 1, 2, 3)
+	url := "tcp://" + d.ServeTCP(t)
+	tmp := t.TempDir()
+
+	code, stdout, stderr := execute(t, "client", "write", "--url", url, "--start", "100", "--values", "10,20,30", "--format", "json")
+	if code != errs.ExitOK {
+		t.Fatalf("write: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	var wr types.WriteResult
+	decodeJSON(t, stdout, &wr)
+	if wr.Function != 16 || wr.Count != 3 {
+		t.Fatalf("unexpected write result: %+v", wr)
+	}
+	if got := d.Holding(100, 3); !reflect.DeepEqual(got, []uint16{10, 20, 30}) {
+		t.Fatalf("holding = %v", got)
+	}
+
+	capture := filepath.Join(tmp, "read.mcap")
+	code, stdout, stderr = execute(t, "client", "read", "--url", url, "--start", "100", "--count", "3", "--output", capture, "--format", "json")
+	if code != errs.ExitOK {
+		t.Fatalf("read: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	var rd types.ReadResult
+	decodeJSON(t, stdout, &rd)
+	if rd.RawDataHex != "00 0A 00 14 00 1E" || rd.McapOutputPath != capture {
+		t.Fatalf("unexpected read result: %+v", rd)
+	}
+
+	// The capture written by "client read" is readable by the mcap commands.
+	code, stdout, stderr = execute(t, "mcap", "info", "--input", capture)
+	if code != errs.ExitOK {
+		t.Fatalf("mcap info: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	wantContains(t, stdout, "Function:  3", "Total Registers: 3", "Address Range: 100 → 102")
+	code, stdout, _ = execute(t, "mcap", "convert", "--input", capture, "--format", "csv")
+	if code != errs.ExitOK {
+		t.Fatalf("mcap convert: exit %d", code)
+	}
+	wantContains(t, stdout, "start_address,register_count,data_hex", "100,3,000a0014001e")
+
+	code, stdout, stderr = execute(t, "client", "poll", "--url", url, "--start", "100", "--polls", "2", "--interval", "1", "--format", "json")
+	if code != errs.ExitOK {
+		t.Fatalf("poll: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if lines := strings.Split(strings.TrimSpace(stdout), "\n"); len(lines) != 2 {
+		t.Fatalf("expected 2 JSON lines, got:\n%s", stdout)
+	}
+	wantContains(t, stderr, "2 succeeded, 0 failed")
+
+	code, stdout, _ = execute(t, "discover", "--subnets", "127.0.0.1/32", "--port", strings.TrimPrefix(url, "tcp://127.0.0.1:"))
+	if code != errs.ExitOK {
+		t.Fatalf("discover: exit %d", code)
+	}
+	wantContains(t, stdout, "Modbus device found at 127.0.0.1:")
+}
+
+func TestExecute_partialExit(t *testing.T) {
+	d := mbtest.NewDevice().SetHolding(100, 1)
+	d.Identification = map[uint8]string{0: "Acme", 1: "P1", 2: "1.0"}
+	d.Units = []uint8{1}
+	url := "tcp://" + d.ServeTCP(t)
+
+	code, stdout, stderr := execute(t, "client", "identify", "--url", url, "--unit", "1-2", "--format", "json")
+	if code != errs.ExitPartial {
+		t.Fatalf("identify with a failing unit: exit %d, want %d\n%s", code, errs.ExitPartial, stderr)
+	}
+	var res types.IdentifyResult
+	decodeJSON(t, stdout, &res)
+	if len(res.Units) != 2 || res.Units[0].Error != nil || res.Units[1].Error == nil {
+		t.Fatalf("unexpected identify result: %+v", res.Units)
+	}
+
+	// A poll with failed samples exits 7 as well, with the samples on stdout.
+	code, stdout, stderr = execute(t, "client", "poll", "--url", url, "--start", "9000", "--polls", "2", "--interval", "1")
+	if code != errs.ExitPartial {
+		t.Fatalf("poll with failed samples: exit %d, want %d", code, errs.ExitPartial)
+	}
+	wantContains(t, stdout, "#1", "#2", "error:")
+	wantContains(t, stderr, "0 succeeded, 2 failed")
+}
+
+func TestExecute_fatal(t *testing.T) {
+	d := mbtest.NewDevice().SetHolding(100, 1)
+	url := "tcp://" + d.ServeTCP(t)
+	out := filepath.Join(t.TempDir(), "x.mcap")
+
+	// Text mode: the error goes to stderr, stdout stays empty.
+	code, stdout, stderr := execute(t, "client", "read", "--start", "100", "--output", out)
+	if code != errs.ExitInvalidInput || stdout != "" {
+		t.Fatalf("invalid input: exit %d, stdout %q", code, stdout)
+	}
+	if !strings.HasPrefix(stderr, "error: ") || strings.Contains(stderr, "Usage:") {
+		t.Fatalf("unexpected stderr: %q", stderr)
+	}
+
+	// JSON mode: one error envelope on stdout, nothing on stderr.
+	code, stdout, stderr = execute(t, "client", "read", "--url", refusedURL(t), "--start", "100", "--output", out, "--format", "json")
+	if code != errs.ExitTransport || stderr != "" {
+		t.Fatalf("connection refused: exit %d, stderr %q", code, stderr)
+	}
+	var env types.ErrorEnvelope
+	decodeJSON(t, stdout, &env)
+	if env.Error.Kind != string(errs.KindTransport) || env.Error.Code == "" || env.Error.Message == "" {
+		t.Fatalf("unexpected error envelope: %+v", env)
+	}
+
+	// --debug adds the cause chain on stderr.
+	code, stdout, stderr = execute(t, "--debug", "client", "read", "--url", refusedURL(t), "--start", "100", "--output", out, "--format", "json")
+	if code != errs.ExitTransport {
+		t.Fatalf("connection refused with --debug: exit %d", code)
+	}
+	decodeJSON(t, stdout, &env)
+	wantContains(t, stderr, "cause:")
+
+	// A Modbus exception maps to the protocol exit code.
+	code, _, stderr = execute(t, "client", "read", "--url", url, "--start", "9000", "--output", out)
+	if code != errs.ExitProtocol {
+		t.Fatalf("modbus exception: exit %d", code)
+	}
+	wantContains(t, stderr, "error:", "Illegal Data Address")
+
+	// Errors cobra raises itself (unknown command or flag) are internal failures.
+	for _, args := range [][]string{{"no-such-command"}, {"client", "read", "--no-such-flag"}} {
+		code, stdout, stderr = execute(t, args...)
+		if code != errs.ExitInternal || stdout != "" {
+			t.Fatalf("%v: exit %d, stdout %q", args, code, stdout)
+		}
+		wantContains(t, stderr, "error:")
+	}
+}
+
+func TestExecute_help(t *testing.T) {
+	code, stdout, stderr := execute(t, "--help")
+	if code != errs.ExitOK || stderr != "" {
+		t.Fatalf("--help: exit %d, stderr %q", code, stderr)
+	}
+	wantContains(t, stdout, "Modbusctl CLI application", "client", "discover", "mcap", "server", "version", "completion", "--debug")
+
+	code, stdout, _ = execute(t)
+	if code != errs.ExitOK {
+		t.Fatalf("no arguments: exit %d", code)
+	}
+	wantContains(t, stdout, "Available Commands:")
+}

@@ -21,10 +21,11 @@ func CollectReportServerID(ctx context.Context, cfg config.ReportServerIDConfig)
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	res := &types.ReportServerIDResult{Target: modbusURL}
 
-	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug)
+	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
 	reqBudget := clientRequestTimeout(cfg.Timeout)
 
-	useParallel := len(units) > 1 && cfg.Parallel > 1
+	// A serial line carries one request at a time: never open it more than once.
+	useParallel := len(units) > 1 && cfg.Parallel > 1 && !config.IsSerialURL(modbusURL)
 	if !useParallel {
 		if err := modbus.ValidateConfig(conf); err != nil {
 			return nil, ClientConfigInvalid(err)
@@ -39,6 +40,9 @@ func CollectReportServerID(ctx context.Context, cfg config.ReportServerIDConfig)
 		defer func() { _ = mc.Close() }()
 
 		for _, unit := range units {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			reqCtx, cancel := context.WithTimeout(ctx, reqBudget)
 			rs, rerr := mc.ReportServerID(reqCtx, unit)
 			cancel()
@@ -83,6 +87,10 @@ func CollectReportServerID(ctx context.Context, cfg config.ReportServerIDConfig)
 		go func() {
 			defer wg.Done()
 			for unit := range unitsCh {
+				// Once cancelled, drain the remaining units without querying them.
+				if ctx.Err() != nil {
+					continue
+				}
 				reqCtx, cancel := context.WithTimeout(ctx, reqBudget)
 				rs, rerr := mc.ReportServerID(reqCtx, unit)
 				cancel()
@@ -103,6 +111,9 @@ func CollectReportServerID(ctx context.Context, cfg config.ReportServerIDConfig)
 
 	for j := range outCh {
 		res.Units = append(res.Units, j.ur)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	sortReportServerUnits(res.Units)
 	types.FillReportServerIDSummary(res, len(units))

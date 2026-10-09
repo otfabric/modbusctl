@@ -13,9 +13,23 @@ import (
 )
 
 // readerAdapter adapts *modbus.Client to sunspec.Reader (sunspec expects ReadRawBytes; Client has ReadRegisterBytes).
-type readerAdapter struct{ client *modbus.Client }
+// Every read is bounded by timeout, the per-request budget from --timeout: the context the SunSpec
+// walkers pass down only carries the much longer budget of the whole operation.
+type readerAdapter struct {
+	client  *modbus.Client
+	timeout time.Duration
+}
+
+func newReaderAdapter(mc *modbus.Client, cfg *config.SunSpecBaseConfig) *readerAdapter {
+	return &readerAdapter{client: mc, timeout: clientRequestTimeout(cfg.Timeout)}
+}
 
 func (r *readerAdapter) ReadRawBytes(ctx context.Context, unitID uint8, addr uint16, byteCount uint16, regType sunspec.RegType) ([]byte, error) {
+	if r.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.timeout)
+		defer cancel()
+	}
 	return r.client.ReadRegisterBytes(ctx, unitID, addr, byteCount, regType)
 }
 
@@ -78,7 +92,7 @@ func sunspecOperationContext(parent context.Context, cfg *config.SunSpecBaseConf
 }
 
 func openSunSpecModbusClient(modbusURL string, cfg *config.SunSpecBaseConfig) (*modbus.Client, func(), error) {
-	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug)
+	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
 	if err := modbus.ValidateConfig(conf); err != nil {
 		return nil, nil, ClientConfigInvalid(err)
 	}
@@ -120,7 +134,7 @@ func CollectSunSpecDetect(ctx context.Context, cfg config.SunSpecDetectConfig) (
 	opCtx, cancel := sunspecOperationContext(ctx, &cfg.SunSpecBaseConfig)
 	defer cancel()
 
-	res, err := sunspec.Detect(opCtx, &readerAdapter{mc}, opts)
+	res, err := sunspec.Detect(opCtx, newReaderAdapter(mc, &cfg.SunSpecBaseConfig), opts)
 	if err != nil {
 		return nil, errs.New(errs.KindProtocol, errs.CodeSunSpecDetectFailed, "SunSpec detect failed", err)
 	}
@@ -138,8 +152,6 @@ func CollectSunSpecDetect(ctx context.Context, cfg config.SunSpecDetectConfig) (
 		if !a.Matched {
 			if a.ErrorString != "" {
 				result = a.ErrorString
-			} else if len(a.Registers) != 2 {
-				result = "no marker"
 			} else {
 				result = "no marker"
 			}
@@ -183,12 +195,12 @@ func CollectSunSpecModels(ctx context.Context, cfg config.SunSpecModelsConfig) (
 	if cfg.Base != 0 {
 		baseAddr = cfg.Base
 		var readErr error
-		models, readErr = sunspec.ReadModelHeaders(opCtx, &readerAdapter{mc}, opts, baseAddr)
+		models, readErr = sunspec.ReadModelHeaders(opCtx, newReaderAdapter(mc, &cfg.SunSpecBaseConfig), opts, baseAddr)
 		if readErr != nil {
 			return nil, errs.New(errs.KindProtocol, errs.CodeSunSpecModelHeadersFailed, "SunSpec model header read failed", readErr)
 		}
 	} else {
-		det, derr := sunspec.Detect(opCtx, &readerAdapter{mc}, opts)
+		det, derr := sunspec.Detect(opCtx, newReaderAdapter(mc, &cfg.SunSpecBaseConfig), opts)
 		if derr != nil {
 			return nil, errs.New(errs.KindProtocol, errs.CodeSunSpecDetectFailed, "SunSpec detect failed", derr)
 		}
@@ -197,7 +209,7 @@ func CollectSunSpecModels(ctx context.Context, cfg config.SunSpecModelsConfig) (
 		}
 		baseAddr = det.BaseAddress
 		var readErr error
-		models, readErr = sunspec.ReadModelHeaders(opCtx, &readerAdapter{mc}, opts, baseAddr)
+		models, readErr = sunspec.ReadModelHeaders(opCtx, newReaderAdapter(mc, &cfg.SunSpecBaseConfig), opts, baseAddr)
 		if readErr != nil {
 			return nil, errs.New(errs.KindProtocol, errs.CodeSunSpecModelHeadersFailed, "SunSpec model header read failed", readErr)
 		}
@@ -234,12 +246,12 @@ func CollectSunSpecMap(ctx context.Context, cfg config.SunSpecMapConfig) (*types
 	if cfg.Base != 0 {
 		baseAddr = cfg.Base
 		var readErr error
-		models, readErr = sunspec.ReadModelHeaders(opCtx, &readerAdapter{mc}, opts, baseAddr)
+		models, readErr = sunspec.ReadModelHeaders(opCtx, newReaderAdapter(mc, &cfg.SunSpecBaseConfig), opts, baseAddr)
 		if readErr != nil {
 			return nil, errs.New(errs.KindProtocol, errs.CodeSunSpecModelHeadersFailed, "SunSpec model header read failed", readErr)
 		}
 	} else {
-		det, derr := sunspec.Detect(opCtx, &readerAdapter{mc}, opts)
+		det, derr := sunspec.Detect(opCtx, newReaderAdapter(mc, &cfg.SunSpecBaseConfig), opts)
 		if derr != nil {
 			return nil, errs.New(errs.KindProtocol, errs.CodeSunSpecDetectFailed, "SunSpec detect failed", derr)
 		}
@@ -248,7 +260,7 @@ func CollectSunSpecMap(ctx context.Context, cfg config.SunSpecMapConfig) (*types
 		}
 		baseAddr = det.BaseAddress
 		var readErr error
-		models, readErr = sunspec.ReadModelHeaders(opCtx, &readerAdapter{mc}, opts, baseAddr)
+		models, readErr = sunspec.ReadModelHeaders(opCtx, newReaderAdapter(mc, &cfg.SunSpecBaseConfig), opts, baseAddr)
 		if readErr != nil {
 			return nil, errs.New(errs.KindProtocol, errs.CodeSunSpecModelHeadersFailed, "SunSpec model header read failed", readErr)
 		}
@@ -303,6 +315,8 @@ func CollectSunSpecProbe(ctx context.Context, cfg config.SunSpecProbeConfig) (*t
 				out.Modbus.FC04Error = info
 			case modbus.FCEncapsulatedInterface:
 				out.Modbus.FC43Error = info
+			default:
+				// Only the three function codes listed above are probed.
 			}
 			continue
 		}
@@ -313,6 +327,8 @@ func CollectSunSpecProbe(ctx context.Context, cfg config.SunSpecProbeConfig) (*t
 			out.Modbus.FC04 = ok
 		case modbus.FCEncapsulatedInterface:
 			out.Modbus.FC43 = ok
+		default:
+			// Only the three function codes listed above are probed.
 		}
 	}
 
@@ -320,7 +336,7 @@ func CollectSunSpecProbe(ctx context.Context, cfg config.SunSpecProbeConfig) (*t
 	defer cancel()
 
 	opts := sunSpecOptionsFromBase(&cfg.SunSpecBaseConfig, nil)
-	det, err := sunspec.Detect(opCtx, &readerAdapter{mc}, opts)
+	det, err := sunspec.Detect(opCtx, newReaderAdapter(mc, &cfg.SunSpecBaseConfig), opts)
 	if err != nil {
 		out.SunSpecDetail.DetectionError = EmbeddedErrorInfo(err)
 		det = &sunspec.DetectionResult{UnitID: cfg.Unit}
@@ -331,7 +347,7 @@ func CollectSunSpecProbe(ctx context.Context, cfg config.SunSpecProbeConfig) (*t
 	if det != nil && det.Detected {
 		out.SunSpecDetail.Detected = true
 		out.SunSpecDetail.BaseAddress = det.BaseAddress
-		models, rerr := sunspec.ReadModelHeaders(opCtx, &readerAdapter{mc}, opts, det.BaseAddress)
+		models, rerr := sunspec.ReadModelHeaders(opCtx, newReaderAdapter(mc, &cfg.SunSpecBaseConfig), opts, det.BaseAddress)
 		if rerr != nil {
 			out.SunSpecDetail.ModelHeadersError = EmbeddedErrorInfo(rerr)
 		} else {

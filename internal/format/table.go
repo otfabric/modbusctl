@@ -16,7 +16,11 @@ func RenderTable(m TableMarshaler) (string, error) {
 	var b strings.Builder
 	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, strings.Join(headers, "\t"))
-	_, _ = fmt.Fprintln(tw, strings.Repeat("-\t", len(headers)))
+	rule := make([]string, len(headers))
+	for i := range rule {
+		rule[i] = "-"
+	}
+	_, _ = fmt.Fprintln(tw, strings.Join(rule, "\t"))
 	for _, row := range rows {
 		if len(row) != len(headers) {
 			return "", fmt.Errorf("table row has %d columns, want %d", len(row), len(headers))

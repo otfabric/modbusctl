@@ -1,18 +1,18 @@
-# modbusctl — Modbus TCP Command-Line Tool: Scanner, Device Identification, SunSpec, Recorder & Simulator
+# modbusctl — Modbus Command-Line Tool for TCP, RTU & ASCII: Poll, Write, Scan, Identify, SunSpec, Record & Simulate
 
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://go.dev/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
-[![Go Report Card](https://goreportcard.com/badge/github.com/otfabric/modbusctl)](https://goreportcard.com/report/github.com/otfabric/modbusctl)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI Status](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/modbusctl/actions/workflows/ci.yml)
+[![Code Coverage](https://codecov.io/gh/otfabric/modbusctl/graph/badge.svg)](https://codecov.io/gh/otfabric/modbusctl)
 [![Latest Release](https://img.shields.io/github/v/release/otfabric/modbusctl?label=release)](https://github.com/otfabric/modbusctl/releases)
 
-**modbusctl is a command-line toolkit for exploring, testing and simulating Modbus TCP devices.** Identify a device, fingerprint which function codes it supports, scan its register map to find readable blocks, decode registers into typed values, discover Modbus devices on a subnet, record sessions to a compact capture file (MCAP) and replay them as a simulated device.
+**modbusctl is a command-line toolkit for exploring, operating, testing and simulating Modbus devices over TCP, UDP and serial lines (RTU and ASCII).** Read, poll and write coils and registers, identify a device, fingerprint which function codes it supports, scan its register map to find readable blocks, decode registers into typed values, discover Modbus devices on a subnet, record sessions to a compact capture file (MCAP) and replay them as a simulated device.
 
 It is built for commissioning and site surveys, troubleshooting, reverse-engineering undocumented register maps, SunSpec inverter and meter discovery, and building hardware-free test setups. Output can be plain text, a table or JSON with stable exit codes, so it works in scripts and CI. It is written in Go on top of [go-modbus](https://github.com/otfabric/go-modbus).
 
-**Quick links:** [Quick start](#quick-start) · [Comparison](#modbusctl-vs-mbpoll-and-modpoll) · [Features](#features) · [Scan algorithms](#scan-algorithms-detailed) · [MCAP format](#mcap-format) · [FAQ](#faq)
+**Quick links:** [Quick start](#quick-start) · [Comparison](#modbusctl-vs-mbpoll-and-modpoll) · [Features](#features) · [Transports](#transports-and-serial-settings) · [Scan algorithms](#scan-algorithms-detailed) · [MCAP format](#mcap-format) · [FAQ](#faq)
 
-> **Responsible use:** modbusctl sends real Modbus requests. Only use it on devices and networks you own or are authorized to test. Some devices react badly to scanning, so start with `--algo safe` and a `--delay`. FC08 diagnostic sub-functions can change device state (for example restart communications, clear counters or force listen-only mode).
+> **Responsible use:** modbusctl sends real Modbus requests. Only use it on devices and networks you own or are authorized to test. Some devices react badly to scanning, so start with `--algo safe` and a `--delay`. `client write` changes coils and registers, and FC08 diagnostic sub-functions can change device state (for example restart communications, clear counters or force listen-only mode): know what an address controls before you write to it.
 
 ---
 
@@ -21,6 +21,8 @@ It is built for commissioning and site surveys, troubleshooting, reverse-enginee
 - **Understand an unknown device** — `identify` (FC43/FC17), `fingerprint` (supported read functions per unit) and `client sunspec` tell you what you are talking to.
 - **Find the register map** — `scan` discovers readable address blocks with seven strategies, from the gentle `safe` to the adaptive `smart` and evidence-driven `deep`.
 - **Typed decoding** — `decode` turns registers into integers, floats, strings, BCD, timestamps, IP and MAC addresses with explicit byte and word layouts.
+- **Poll and write** — `poll` reads a block at an interval and streams every sample; `write` sets coils and holding registers, with the same codecs for typed values.
+- **Every common transport** — Modbus TCP, Modbus UDP, serial RTU and ASCII (RS-232/RS-485), and RTU or ASCII framing through a serial-to-Ethernet bridge, all selected with `--url`.
 - **Record, replay, simulate** — Capture sessions to MCAP, then serve them with `server static` or `server replay` to develop and test without hardware.
 - **Find devices** — `discover` sweeps subnets for Modbus devices, with a safety cap on large ranges.
 - **Script-friendly** — `--format text|json|table`, a single JSON error object on failure, stable exit codes and `MODBUSCTL_*` environment variables.
@@ -44,7 +46,13 @@ modbusctl client fingerprint --ip 192.168.1.10 --unit 1-10
 modbusctl client scan --ip 192.168.1.10 --algo smart --start 0 --end 5000 --output scan.mcap
 
 # Read and decode a 32-bit float, as JSON
-modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:1234 --format json
+modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:4321 --format json
+
+# Poll four holding registers every second until Ctrl-C
+modbusctl client poll --ip 192.168.1.10 --start 100 --count 4
+
+# Write a holding register on a serial RTU device
+modbusctl client write --url rtu:///dev/ttyUSB0 --baud 9600 --unit 3 --start 100 --values 1234
 
 # Serve the scan results as a simulated Modbus TCP device on port 1502
 modbusctl server static --input scan.mcap --port 1502
@@ -58,16 +66,17 @@ Addresses are **raw Modbus PDU addresses** (0–65535), not "4xxxx" register lab
 
 ## modbusctl vs mbpoll and modpoll
 
-[mbpoll](https://github.com/epsilonrt/mbpoll) and [modpoll](https://pypi.org/project/modpoll/) are well-known Modbus command-line tools focused on polling and writing registers. modbusctl overlaps with them on reading registers, but adds device exploration, scanning and simulation. This table shows where each tool fits.
+[mbpoll](https://github.com/epsilonrt/mbpoll) and [modpoll](https://pypi.org/project/modpoll/) are well-known Modbus command-line tools focused on polling and writing registers. modbusctl covers the same ground — polling and writing over TCP, UDP, RTU and ASCII — and adds device exploration, scanning and simulation. This table shows where each tool fits.
 
 | Capability | modbusctl | mbpoll | modpoll |
 |---|:---:|:---:|:---:|
 | Modbus TCP master | ✅ | ✅ | ✅ |
-| Modbus RTU (serial) | — | ✅ | ✅ |
-| Modbus ASCII and UDP | — | — | ✅ |
+| Modbus RTU (serial) | ✅ | ✅ | ✅ |
+| Modbus ASCII and UDP | ✅ | — | ✅ |
+| RTU / ASCII framing over TCP (serial bridges) | ✅ | — | ✅ |
 | Read coils, discrete inputs, input and holding registers | ✅ | ✅ | ✅ |
-| Write coils and holding registers | — | ✅ | ✅ |
-| Continuous polling at an interval | via `record` | ✅ | ✅ |
+| Write coils and holding registers | ✅ | ✅ | ✅ |
+| Continuous polling at an interval | ✅ | ✅ | ✅ |
 | Typed values (ints, floats, strings, word/byte order) | ✅ | ✅ | ✅ |
 | BCD, timestamp, IP and MAC decoders | ✅ | — | — |
 | **Register-map scanning** (find readable blocks) | ✅ | — | — |
@@ -89,19 +98,20 @@ Addresses are **raw Modbus PDU addresses** (0–65535), not "4xxxx" register lab
 
 ✅ = documented feature · — = not documented / not available. Based on each project's public documentation as of October 2026. If you spot an inaccuracy, please [open an issue](https://github.com/otfabric/modbusctl/issues) and we will correct it.
 
-**Choose modbusctl if** you need to explore or map an unfamiliar Modbus TCP device, inventory devices, work with SunSpec, capture traffic for analysis, simulate a device from a recording, or script Modbus checks with JSON output.
+**Choose modbusctl if** you want one tool to poll and write over TCP, UDP, RTU or ASCII and also explore or map an unfamiliar device, inventory devices, work with SunSpec, capture traffic for analysis, simulate a device from a recording, or script Modbus checks with JSON output.
 
-**Choose mbpoll if** you need a classic poll-and-write tool that also speaks Modbus RTU over serial and is available from your package manager.
+**Choose mbpoll if** you want a small, classic poll-and-write tool that is available from your package manager.
 
-**Choose modpoll if** you want config-file-driven polling with MQTT publishing, Modbus ASCII or UDP, or a ready-made Docker setup.
+**Choose modpoll if** you want config-file-driven polling with MQTT publishing, or a ready-made Docker setup.
 
-They combine well: use modbusctl to discover and document a device's register map, then poll it long-term with the tool that fits your deployment.
+They combine well: use modbusctl to discover and document a device's register map, then feed it into the long-running collector that fits your deployment.
 
 ---
 
 ## Use cases
 
-- **Commissioning and site surveys** — Identify devices, check supported functions and read decoded values in seconds.
+- **Commissioning and site surveys** — Identify devices, check supported functions, read decoded values and set a coil or setpoint in seconds, on Ethernet or an RS-485 bus.
+- **Live monitoring while you work** — Poll a few registers at an interval and watch them change, or pipe JSON Lines into a script.
 - **Reverse-engineering register maps** — Scan for readable blocks, then use `mcap strings` and `mcap frequencies` to locate device names and measurements.
 - **Hardware-free testing** — Record a real device once, then replay it in CI or on a laptop with `server replay`.
 - **Solar and energy equipment** — Detect SunSpec markers, walk model chains and print address maps for inverters and meters.
@@ -120,6 +130,9 @@ They combine well: use modbusctl to discover and document a device's register ma
 - [Installation](#installation)
 - [MCAP format](#mcap-format)
 - [Usage](#usage)
+  - [Transports and serial settings](#transports-and-serial-settings)
+  - [Poll registers continuously](#poll-registers-continuously)
+  - [Write coils and registers](#write-coils-and-registers)
 - [Environment variable configuration](#environment-variable-configuration)
 - [FAQ](#faq)
 - [Project structure](#project-structure)
@@ -138,11 +151,14 @@ The following features are available:
 |------------------|---------------------------------------------------------------------------------------------------------------------------|
 | Scan             | Identify available Modbus register blocks with pluggable algorithms: **safe**, **smart**, **deep**, **stepped**, **linear**, **boundary**, **sunspec**. See [Scan algorithms](#scan-algorithms-detailed) and [ALGOS.md](ALGOS.md) for details. |
 | Identify         | Read Device Identification (FC43) from a Modbus device.                                                                   |
-| Fingerprint      | Probe supported read functions (FC08/FC43/FC03/FC04/FC01/FC02/FC11/FC18/FC20) per unit via HasUnitReadFunction.          |
+| Fingerprint      | Probe supported read functions (FC08/FC43/FC03/FC04/FC01/FC02/FC11/FC18/FC20) per unit: functions the device answers or recognises, not ones it rejects as illegal.          |
 | Diagnostic       | Send FC08 Diagnostics requests (loopback, restart communications, diagnostic counters, etc.).                             |
 | ReportServerID   | Send FC17 Report Server ID and display server ID, run indicator, and additional device data.                              |
 | Read             | Retrieve raw data from specified Modbus registers (arbitrary count, MCAP capture).                                        |
-| Decode (registers) | Read holding/input registers (FC03/FC04) and decode them into typed values (integers, floats, strings, BCD, time, IP, MAC, …) using a **codec** such as `float32/layout:1234` or `ascii/registers:8`. |
+| Poll             | Read the same block of coils or registers at an interval and print every sample as it arrives (text, JSON Lines or table), optionally decoded with a codec. Nothing is written to disk. |
+| Write            | Write coils (FC05/FC15) and holding registers (FC06/FC16). Integer values, or typed values (floats, 32/64-bit integers, strings, …) encoded with a **codec**. |
+| Transports       | Modbus TCP, Modbus UDP, serial RTU and ASCII, and RTU or ASCII framing over TCP, selected with **`--url`**. See [Transports and serial settings](#transports-and-serial-settings). |
+| Decode (registers) | Read holding/input registers (FC03/FC04) and decode them into typed values (integers, floats, strings, BCD, time, IP, MAC, …) using a **codec** such as `float32/layout:4321` or `ascii/registers:8`. |
 | Codecs           | List available register codecs (id, family, value kind, register/byte width) with optional family / value-kind / register-width filters. |
 | Record           | Record Modbus responses into structured MCAP files for replay or analysis.                                                |
 | Static           | Serve previously scanned Modbus data to simulate device behavior (static hosting).                                        |
@@ -164,12 +180,14 @@ The following tree view gives the overview of available commands.
 modbusctl
 ├── client
 │   ├── identify         FC43 Read Device Identification (+ optional FC17 Report Server ID)
-│   ├── fingerprint      Probe supported read functions per unit (HasUnitReadFunction)
+│   ├── fingerprint      Probe supported read functions per unit
 │   ├── diagnostic       FC08 Diagnostics (loopback, counters, restart, …)
 │   ├── reportserverid   FC17 Report Server ID
 │   ├── read             Read registers (FC01/FC02/FC03/FC04)
 │   ├── decode           Read and decode registers into typed values via a codec (FC03/FC04)
-│   ├── codecs           List available register codecs for 'client decode'
+│   ├── codecs           List available register codecs for decode, poll and write
+│   ├── poll             Poll coils/registers at an interval and print every sample
+│   ├── write            Write coils (FC05/FC15) or holding registers (FC06/FC16)
 │   ├── scan             Scan for valid register blocks (algo safe|smart|deep|stepped|linear|boundary|sunspec)
 │   ├── record           Record registers over time to MCAP
 │   └── sunspec           SunSpec marker detection and model header discovery
@@ -233,16 +251,16 @@ curl -fsSLO "${BASE}/modbusctl-${VERSION}-checksums.txt"
 # 3. Verify the download (should print "OK")
 grep "${FILE}" "modbusctl-${VERSION}-checksums.txt" | sha256sum -c -
 
-# 4. Extract and install
+# 4. Extract and install (the binary in the archive carries the version and platform in its name)
 mkdir -p modbusctl-dl && tar -xzf "${FILE}" -C modbusctl-dl
-sudo install -m 0755 "$(find modbusctl-dl -type f -name modbusctl | head -n1)" /usr/local/bin/modbusctl
+sudo install -m 0755 "$(find modbusctl-dl -type f -name 'modbusctl*' | head -n1)" /usr/local/bin/modbusctl
 ```
 
 No `sudo`? Install into your home directory instead (and make sure `~/.local/bin` is in your `PATH`):
 
 ```bash
 mkdir -p ~/.local/bin
-install -m 0755 "$(find modbusctl-dl -type f -name modbusctl | head -n1)" ~/.local/bin/modbusctl
+install -m 0755 "$(find modbusctl-dl -type f -name 'modbusctl*' | head -n1)" ~/.local/bin/modbusctl
 ```
 
 ### macOS
@@ -264,9 +282,9 @@ curl -fsSLO "${BASE}/modbusctl-${VERSION}-checksums.txt"
 # 3. Verify the download (should print "OK")
 grep "${FILE}" "modbusctl-${VERSION}-checksums.txt" | shasum -a 256 -c -
 
-# 4. Extract and install
+# 4. Extract and install (the binary in the archive carries the version and platform in its name)
 mkdir -p modbusctl-dl && tar -xzf "${FILE}" -C modbusctl-dl
-sudo install -m 0755 "$(find modbusctl-dl -type f -name modbusctl | head -n1)" /usr/local/bin/modbusctl
+sudo install -m 0755 "$(find modbusctl-dl -type f -name 'modbusctl*' | head -n1)" /usr/local/bin/modbusctl
 ```
 
 If you downloaded the archive with a web browser instead of `curl` and macOS refuses to run the binary ("cannot be verified"), remove the quarantine flag: `xattr -d com.apple.quarantine /usr/local/bin/modbusctl`.
@@ -289,15 +307,18 @@ $expected = ((Select-String -Path "$env:TEMP\modbusctl-checksums.txt" -Pattern $
 $actual   = (Get-FileHash "$env:TEMP\$file" -Algorithm SHA256).Hash
 if ($expected -ne $actual) { throw "Checksum mismatch for $file" }
 
-# 4. Extract to a per-user folder
+# 4. Extract to a per-user folder and name the program modbusctl.exe
+#    (the .exe in the archive carries the version and platform in its name)
 $dir = "$env:LOCALAPPDATA\Programs\modbusctl"
-Expand-Archive "$env:TEMP\$file" -DestinationPath $dir -Force
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Expand-Archive "$env:TEMP\$file" -DestinationPath "$env:TEMP\modbusctl-dl" -Force
+$exe = Get-ChildItem "$env:TEMP\modbusctl-dl" -Recurse -Filter 'modbusctl*.exe' | Select-Object -First 1
+Copy-Item $exe.FullName "$dir\modbusctl.exe" -Force
 
 # 5. Add modbusctl to your user PATH (then open a new terminal)
-$bin      = (Get-ChildItem $dir -Recurse -Filter modbusctl.exe | Select-Object -First 1).DirectoryName
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($userPath -notlike "*$bin*") {
-  [Environment]::SetEnvironmentVariable('Path', "$userPath;$bin", 'User')
+if ($userPath -notlike "*$dir*") {
+  [Environment]::SetEnvironmentVariable('Path', "$userPath;$dir", 'User')
 }
 ```
 
@@ -307,7 +328,7 @@ If Windows SmartScreen warns about an unrecognised app, choose **More info → R
 
 1. Open the [latest release](https://github.com/otfabric/modbusctl/releases/latest).
 2. Download the archive for your platform from the table above.
-3. Extract it and move the `modbusctl` binary (`modbusctl.exe` on Windows) to a folder on your `PATH`.
+3. Extract it, rename the binary to `modbusctl` (`modbusctl.exe` on Windows) and move it to a folder on your `PATH`.
 
 ### Update
 
@@ -389,9 +410,9 @@ More examples and test files can be found in the [results](./results) folder for
 
 **Global flag:** `--debug` — print debug information (available for all commands; per-command debug behavior is documented where applicable).
 
-**Client address:** All client commands accept either `--url` (e.g. `tcp://192.168.1.10:502`) or `--ip` and optionally `--port`; the two styles are **mutually exclusive** (you must set one and cannot set both).
+**Client address:** All client commands accept either `--url` (e.g. `tcp://192.168.1.10:502` or `rtu:///dev/ttyUSB0`) or `--ip` and optionally `--port` (Modbus TCP); the two styles are **mutually exclusive** (you must set one and cannot set both). See [Transports and serial settings](#transports-and-serial-settings).
 
-**Client stdout format (`--format`):** Commands **identify**, **read**, **scan**, **record**, **reportserverid**, **fingerprint**, **diagnostic**, and **client sunspec** (detect, models, map, probe) accept **`--format text`** (default), **`json`**, or **`table`**, or set **`MODBUSCTL_OUTPUT_FORMAT`**. This controls **only** the final human- or machine-readable **result on stdout**. It is **not** the same as **`modbusctl mcap convert --format`**, which chooses **csv** or **json** export for MCAP files (env **`MODBUSCTL_FORMAT`**).
+**Client stdout format (`--format`):** Commands **identify**, **read**, **decode**, **write**, **poll**, **scan**, **record**, **reportserverid**, **fingerprint**, **diagnostic**, and **client sunspec** (detect, models, map, probe) accept **`--format text`** (default), **`json`**, or **`table`**, or set **`MODBUSCTL_OUTPUT_FORMAT`**. This controls **only** the final human- or machine-readable **result on stdout**. It is **not** the same as **`modbusctl mcap convert --format`**, which chooses **csv** or **json** export for MCAP files (env **`MODBUSCTL_FORMAT`**).
 
 **Scan and record:** Live progress (scan lines, per-block lines, worst-case hints, **`--debug`** traces, record iteration messages) goes to **stderr**; **stdout** is a **single** formatted result after the run (summary for scan/record). When using **`--format json`**, redirect or separate streams if scripts must not mix progress with JSON.
 
@@ -407,6 +428,8 @@ modbusctl client reportserverid
 modbusctl client read
 modbusctl client decode
 modbusctl client codecs
+modbusctl client poll
+modbusctl client write
 modbusctl client scan
 modbusctl client record
 modbusctl client sunspec detect
@@ -428,7 +451,55 @@ modbusctl discover
 modbusctl version
 ```
 
-**Shell completion:** Enum-style flags support tab completion, including **`--format`** (client: text/json/table; **`mcap convert`**: csv/json), **`--algo`**, **`--function`**, **`--regtype`**, and **`--sub-function`**. To enable completion, generate and source the script (see [Cobra’s shell completion guide](https://github.com/spf13/cobra/blob/main/shell_completions.md)); for example, `modbusctl completion bash` (or `zsh` / `fish` / `powershell`).
+**Shell completion:** Enum-style flags support tab completion, including **`--format`** (client: text/json/table; **`mcap convert`**: csv/json), **`--algo`**, **`--function`**, **`--codec`**, **`--parity`**, **`--regtype`**, and **`--sub-function`**. To enable completion, generate and source the script (see [Cobra’s shell completion guide](https://github.com/spf13/cobra/blob/main/shell_completions.md)); for example, `modbusctl completion bash` (or `zsh` / `fish` / `powershell`).
+
+### Transports and serial settings
+
+Every `modbusctl client` command talks to the device named by `--url`. The scheme selects the transport:
+
+| URL | Transport |
+|---|---|
+| `tcp://host:port` | Modbus TCP (same as `--ip host --port port`) |
+| `udp://host:port` | Modbus TCP framing over UDP |
+| `rtu://<device>` | Modbus RTU on a serial line (RS-232 / RS-485) |
+| `ascii://<device>` | Modbus ASCII on a serial line |
+| `rtuovertcp://host:port` | RTU framing over TCP (serial-to-Ethernet bridge) |
+| `rtuoverudp://host:port` | RTU framing over UDP |
+| `asciiovertcp://host:port` | ASCII framing over TCP (serial-to-Ethernet bridge) |
+
+`<device>` is the serial port: `rtu:///dev/ttyUSB0` on Linux, `rtu:///dev/cu.usbserial-1420` on macOS, `rtu://COM3` on Windows.
+
+The serial line is configured with four flags, available on every client command and ignored for network URLs:
+
+| Flag | Values | Default |
+|---|---|---|
+| `--baud` | any rate the adapter supports | 19200 |
+| `--data-bits` | 5, 6, 7, 8 | 8 for `rtu://`, 7 for `ascii://` |
+| `--parity` | `none`, `even`, `odd` | `none` |
+| `--stop-bits` | 1, 2 | 2 without parity, 1 with parity |
+
+```console
+# RTU at 9600 8E1, unit 3
+modbusctl client read --url rtu:///dev/ttyUSB0 --baud 9600 --parity even --unit 3 --start 0 --count 4
+
+# ASCII at 9600 7E1
+modbusctl client identify --url ascii:///dev/ttyUSB0 --baud 9600 --parity even --unit 1
+
+# Modbus UDP
+modbusctl client decode --url udp://192.168.1.10:502 --start 100 --codec uint32/layout:4321
+
+# An RTU device behind a serial-to-Ethernet bridge
+modbusctl client scan --url rtuovertcp://192.168.1.50:4001 --unit 7 --start 0 --end 200 --output scan.mcap
+```
+
+Good to know:
+
+- **Defaults differ between tools.** Many devices ship as 9600 8N1; the Modbus specification default is 19200 8E1. If a serial device does not answer, check `--baud`, `--parity` and `--stop-bits` against its manual first.
+- **One request at a time on a serial line.** With `rtu://` and `ascii://`, `--parallel` is ignored and units are queried one after the other.
+- **Unit IDs matter on a bus.** A unit that is not present does not answer, so each missing unit costs one `--timeout`. Use a short timeout (for example `--timeout 300`) when sweeping units with `--unit 1-32`.
+- **MCAP captures** made over a serial line store the device path in the header's `ip` field and port 0.
+- **`server` and `discover` are Modbus TCP only.**
+- UDP transports are not part of the Modbus specification; vendors use either `udp://` (MBAP framing) or `rtuoverudp://`. Try both if unsure.
 
 ### Common Commands
 
@@ -489,7 +560,9 @@ Example result (object names are looked up when known; reserved/extended IDs are
 ```
 
 #### Fingerprint Device (fingerprint)
-Probe each requested unit with the library’s single-probe API `HasUnitReadFunction(ctx, unitId, fc)` for the supported read-style function codes (FC08, FC43, FC03, FC04, FC01, FC02, FC11, FC18, FC20). Output is the list of supported read functions per unit. Use `--interval` (ms) to add a delay between probes to avoid overloading the device.
+Probe each requested unit with one request per read-style function code (FC08, FC43, FC03, FC04, FC01, FC02, FC11, FC18, FC20), using go-modbus `SupportsFunction`. Output is the list of supported read functions per unit. Use `--interval` (ms) to add a delay between probes to avoid overloading the device.
+
+A function counts as **supported** when the unit answers it normally, or with an exception that shows it recognised the function (for example *Illegal Data Address* for a register that does not exist). *Illegal Function*, a gateway exception for a unit that is not there, and no answer at all count as not supported.
 
 ```console
 # Fingerprint unit 1 (default)
@@ -615,7 +688,7 @@ set `--count` to a multiple of the codec register width to decode an array of va
 `modbusctl client codecs` to list every available codec ID.
 
 ```console
-modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:1234
+modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:4321
 modbusctl client decode --ip 192.168.1.10 --function 4 --start 0 --codec ascii/registers:8
 modbusctl client decode --ip 192.168.1.10 --start 100 --codec uint32/layout:4321 --count 8 --format json
 modbusctl client decode --ip 192.168.1.10 --start 200 --codec ip_addr
@@ -629,6 +702,96 @@ modbusctl client codecs --family float
 modbusctl client codecs --registers 2 --format table
 modbusctl client codecs --value-kind string --format json
 ```
+
+#### Poll registers continuously
+
+`client poll` reads the same block every `--interval` milliseconds and prints each sample as soon as it is read. It does not write a file; use [`client record`](#record-registers-over-time-interval-duration-based) to capture to MCAP.
+
+It runs until `--polls` samples were taken, or until you press Ctrl-C when `--polls` is 0 (the default). `--function` selects coils (1), discrete inputs (2), holding registers (3, default) or input registers (4). With `--codec`, registers are decoded into typed values exactly as `client decode` does.
+
+```console
+# Four holding registers, once a second, until Ctrl-C
+modbusctl client poll --ip 192.168.1.10 --start 100 --count 4
+
+# A big-endian float32 from input registers, every 500 ms, 20 times
+modbusctl client poll --ip 192.168.1.10 --function 4 --start 0 --codec float32/layout:4321 --interval 500 --polls 20
+
+# Eight coils as JSON Lines
+modbusctl client poll --ip 192.168.1.10 --function 1 --start 0 --count 8 --format json
+
+# A serial RTU device
+modbusctl client poll --url rtu:///dev/ttyUSB0 --baud 9600 --unit 3 --start 0 --count 2
+```
+
+Samples go to **stdout**, one per poll; a one-line summary goes to **stderr** when polling ends:
+
+```console
+# --format text (default): timestamp, poll number, address=value
+2026-10-09T12:00:00.004Z  #1  100=1234 101=0 102=0 103=0
+2026-10-09T12:00:01.004Z  #2  100=1235 101=0 102=0 103=0
+
+# --format json: one object per line
+{"poll":1,"timestamp":"2026-10-09T12:00:00.004Z","unit_id":1,"function":3,"start_address":200,"count":2,"address_step":2,"codec":"float32/layout:4321","rtt_ms":0.4,"raw_data_hex":"41 AC 00 00","values":[21.5]}
+
+# --format table: header once, then one row per poll
+poll      timestamp                 rtt_ms    8         9         10        11        error
+-         -                         -         -         -         -         -         -
+1         2026-10-09T12:00:00.004Z  0.4       1         0         1         1
+
+# stderr, at the end
+2 poll(s) of tcp://192.168.1.10:502 in 1.004s: 2 succeeded, 0 failed
+```
+
+A poll that fails — timeout, Modbus exception, lost connection — is printed as a sample with an error (`error` object in JSON) and polling continues, reconnecting when needed. The exit code is **0** when every poll succeeded and **7** (partial) when at least one failed; stopping with Ctrl-C is not an error. Polls start on a fixed cadence: if a read takes longer than `--interval`, the next one starts immediately.
+
+#### Write coils and registers
+
+`client write` writes coils (FC05, FC15) or holding registers (FC06, FC16). `--values` takes one value or a comma-separated list, written to consecutive addresses starting at `--start`.
+
+| `--function` | Writes | Values |
+|---|---|---|
+| *(omitted)* | holding registers: FC06 for one register, FC16 for several | integers, or typed values with `--codec` |
+| `6` | one holding register | one integer |
+| `16` | 1–123 holding registers | integers, or typed values with `--codec` |
+| `5` | one coil | `1`/`0`, `true`/`false`, `on`/`off` |
+| `15` | 1–1968 coils | list of coil values |
+
+Register values are `0`–`65535`, `0x`-prefixed hex, or `-32768`–`-1` (written as two's complement). With `--codec`, each value is encoded into as many registers as the codec needs, so floats, 32/64-bit integers, strings, IP addresses and timestamps can be written directly; `modbusctl client codecs` lists the codec IDs.
+
+```console
+# One holding register (FC06)
+modbusctl client write --ip 192.168.1.10 --start 100 --values 1234
+
+# Three holding registers (FC16)
+modbusctl client write --ip 192.168.1.10 --start 100 --values 10,0x00FF,-1
+
+# Switch coil 8 on (FC05)
+modbusctl client write --ip 192.168.1.10 --function 5 --start 8 --values on
+
+# Four coils (FC15)
+modbusctl client write --ip 192.168.1.10 --function 15 --start 8 --values 1,0,1,1
+
+# A big-endian float32 setpoint: two registers, FC16
+modbusctl client write --ip 192.168.1.10 --start 200 --codec float32/layout:4321 --values 21.5
+
+# Modbus RTU on a serial line
+modbusctl client write --url rtu:///dev/ttyUSB0 --baud 9600 --parity even --unit 3 --start 100 --values 1234
+```
+
+```console
+Writing 3 register(s) starting at address 100 using function code 16
+  [100] 10 (0x000A)
+  [101] 255 (0x00FF)
+  [102] 65535 (0xFFFF)
+✅ Wrote 3 register(s) to unit 1
+```
+
+Safeguards:
+
+- **`--start` is required.** There is no default address for a write.
+- **Everything is validated before anything is sent** — values, codec, quantity limits and the address range. A rejected command (exit code 3) has sent nothing.
+- **A write is sent exactly once.** It is never retried, because a retry after a lost response could apply the write twice. If a write times out, read the value back before sending it again.
+- A Modbus exception from the device (for example *Illegal Data Address* for a read-only register) is reported as an error with exit code 6.
 
 #### Scan registers (discover valid address blocks)
 
@@ -865,29 +1028,35 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 
 | Variable               | Type     | Description                                                 | Flag            | Default    |
 |------------------------|----------|-------------------------------------------------------------|-----------------|------------|
+| **MODBUSCTL_ADDRESS**     | uint16   | Start address for **`client read`**, **`decode`**, **`poll`** and **`write`** (`write` has no default) | `--start`       | 1          |
 | **MODBUSCTL_ALGO**        | string   | Scan algorithm: safe, smart, deep, stepped, linear, boundary, or sunspec | `--algo`        | safe       |
-| **MODBUSCTL_CODEC**       | string   | Codec ID for **`client decode`** (e.g. float32/layout:1234, ascii/registers:8, ip_addr) | `--codec`       |            |
-| **MODBUSCTL_COUNT**       | uint16   | Number of registers to read (**`client decode`**: a multiple of the codec width; 0 = one value) | `--count`       | 1          |
+| **MODBUSCTL_BAUD**        | uint     | Serial baud rate for `rtu://` and `ascii://` URLs (0 = 19200) | `--baud`        | 0          |
+| **MODBUSCTL_CODEC**       | string   | Codec ID for **`client decode`**, **`poll`** and **`write`** (e.g. float32/layout:4321, ascii/registers:8, ip_addr) | `--codec`       |            |
+| **MODBUSCTL_COUNT**       | uint16   | Number of coils/registers to read (with a codec: a multiple of the codec width; 0 = one value) | `--count`       | 1          |
+| **MODBUSCTL_DATA_BITS**   | uint     | Serial data bits, 5–8 (0 = 8 for `rtu://`, 7 for `ascii://`) | `--data-bits`   | 0          |
 | **MODBUSCTL_DELAY**       | uint16   | Delay in ms between client scan requests                 | `--delay`       | 0          |
 | **MODBUSCTL_DURATION**    | uint32   | Total duration to record in ms                           | `--duration`    | 60000      |
 | **MODBUSCTL_END**         | uint16   | End register address                                     | `--end`         | 65535      |
 | **MODBUSCTL_FORMAT**      | string   | **`mcap convert`** output type: **csv** or **json** (not client stdout) | `--format`      |            |
-| **MODBUSCTL_FUNCTION**    | uint8    | Function code (1=coil, 2=discrete, 3=holding, 4=input)   | `--function`    | 3          |
+| **MODBUSCTL_FUNCTION**    | uint8    | Function code (1=coil, 2=discrete, 3=holding, 4=input); **`client write`**: 5, 6, 15 or 16 (0 = FC06 for one register, otherwise FC16) | `--function`    | 3 (write: 0) |
 | **MODBUSCTL_INPUT**       | string   | Input MCAP file (`mcap` subcommands; `server static` / `server replay`) | `--input`       |            |
 | **MODBUSCTL_BLOCKS_FILE** | string   | JSON address blocks for **`client record`** only         | `--blocks-file` |            |
 | **MODBUSCTL_INTERFACE**   | string   | Network interface to use for discovery                   | `--interface`   | eth0       |
-| **MODBUSCTL_INTERVAL**    | uint32   | Interval in ms (record/replay iterations or fingerprint probes) | `--interval`    | 0 (fingerprint), 5000 (record/replay) |
+| **MODBUSCTL_INTERVAL**    | uint32   | Interval in ms (poll/record/replay iterations or fingerprint probes) | `--interval`    | 0 (fingerprint), 1000 (poll), 5000 (record/replay) |
 | **MODBUSCTL_IP**          | string   | Modbus TCP device IP address                             | `--ip`          |            |
 | **MODBUSCTL_LOOPS**       | uint16   | Number of times to loop the replay                       | `--loops`       | 0          |
 | **MODBUSCTL_OUTPUT**      | string   | Output MCAP file or directory                            | `--output`      |            |
 | **MODBUSCTL_DATA**            | string   | Hex-encoded request data for FC08 Diagnostics        | `--data`        |            |
-| **MODBUSCTL_PARALLEL**        | uint16   | Concurrent probes when using `identify --unit all` (1-64) | `--parallel`    | 10         |
+| **MODBUSCTL_PARALLEL**        | uint16   | Concurrent probes when using `identify --unit all` (1-64); ignored on serial lines | `--parallel`    | 10         |
+| **MODBUSCTL_PARITY**      | string   | Serial parity: none, even or odd                         | `--parity`      | none       |
+| **MODBUSCTL_POLLS**       | uint32   | **`client poll`**: number of polls before exiting (0 = until interrupted) | `--polls`       | 0          |
 | **MODBUSCTL_PORT**        | uint16   | Modbus TCP port or server port                           | `--port`        | 502        |
 | **MODBUSCTL_PROFILE**     | string   | Device profile to decode                                 | `--profile`     |            |
 | **MODBUSCTL_RESOLVE_MAC** | bool     | Resolve MAC addresses of discovered devices              | `--resolve-mac` | false      |
 | **MODBUSCTL_DISCOVER_FORCE_LARGE** | bool | Allow **discover** when unique host count exceeds the built-in safety cap | `--force-large-scan` | false |
 | **MODBUSCTL_SUB_FUNCTION**| string   | FC08 Diagnostics sub-function name, lowercase (e.g. returnquerydata, clearcountersanddiagnosticreg) | `--sub-function`| returnquerydata |
-| **MODBUSCTL_START**       | uint16   | Start register address                                   | `--start`       | 1          |
+| **MODBUSCTL_START**       | uint16   | Start register address (**`client scan`**)               | `--start`       | 1          |
+| **MODBUSCTL_STOP_BITS**   | uint     | Serial stop bits, 1 or 2 (0 = 2 without parity, 1 with parity) | `--stop-bits`   | 0          |
 | **MODBUSCTL_STEP**        | uint16   | Stepped algo: step size (e.g. 100, 1000, 2000)           | `--step`        | 1000       |
 | **MODBUSCTL_STEP_HALF_OFFSET** | bool | Stepped algo: also probe at step/2 positions            | `--step-half-offset` | false |
 | **MODBUSCTL_RETRY_TIMEOUT**    | uint8  | Retry once on timeout/transport (0=no, 1=yes)           | `--retry-timeout`   | 0    |
@@ -898,16 +1067,17 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Sunspec algo: max model headers to read (0=256)         | `--sunspec-max-models` | 0   |
 | **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Sunspec algo: max address span from base (0=no limit)  | `--sunspec-max-span` | 0     |
 | **MODBUSCTL_SUBNETS**     | string   | Subnets to scan for Modbus devices (comma-separated)     | `--subnets`     |            |
-| **MODBUSCTL_TIMEOUT**     | uint16   | Request timeout in ms and TCP dial cap; **0 = 10000** ms default | `--timeout`     | 0 (most client commands) |
+| **MODBUSCTL_TIMEOUT**     | uint16   | Request timeout in ms and dial cap; **0 = 10000** ms default | `--timeout`     | 0 (most client commands) |
 | **MODBUSCTL_UNIT**        | string   | Unit ID (1-255); for multi-unit commands: single, range (1-10), list (1,5,25), mixed (1-10,255), or `all` | `--unit` | 1       |
-| **MODBUSCTL_URL**         | string   | Modbus URL for client commands (e.g. tcp://192.168.1.10:502); overrides --ip/--port when set (e.g. sunspec) | `--url`  |         |
+| **MODBUSCTL_URL**         | string   | Modbus URL for client commands: `tcp://`, `udp://`, `rtu://`, `ascii://`, `rtuovertcp://`, `rtuoverudp://` or `asciiovertcp://` (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port | `--url`  |         |
+| **MODBUSCTL_VALUES**      | string   | **`client write`**: comma-separated values to write       | `--values`      |            |
 | **MODBUSCTL_REGTYPE**     | string   | Register type for sunspec: holding or input | `--regtype` | holding |
 | **MODBUSCTL_SUNSPEC_BASES** | string | Comma-separated base addresses to probe (sunspec detect) | `--bases` | 0,40000,50000,… |
 | **MODBUSCTL_SUNSPEC_BASE** | uint16  | Known SunSpec base address; skip detection when set (sunspec models/map) | `--base` | 0 |
 | **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Maximum model headers to read; 0 = 256 (sunspec models) | `--max-models` | 0 |
 | **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Maximum address span from base; 0 = no limit (sunspec models) | `--max-address-span` | 0 |
 | **MODBUSCTL_VERBOSE**     | bool     | Show probe attempts or extra detail (e.g. sunspec detect) | `--verbose` | false |
-| **MODBUSCTL_OUTPUT_FORMAT** | string | Client stdout format: **text**, **json**, or **table** (identify, read, scan, record, reportserverid, fingerprint, diagnostic, sunspec, …). Empty/unset defaults to **text**. Not used by `mcap convert` (see **MODBUSCTL_FORMAT**). | `--format` | text |
+| **MODBUSCTL_OUTPUT_FORMAT** | string | Client stdout format: **text**, **json**, or **table** (identify, read, decode, write, poll, scan, record, reportserverid, fingerprint, diagnostic, sunspec, …). Empty/unset defaults to **text**. Not used by `mcap convert` (see **MODBUSCTL_FORMAT**). | `--format` | text |
 
 </details>
 
@@ -915,7 +1085,8 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 Example usage:
 
 ```console
-MODBUSCTL_IP=192.168.1.10 MODBUSCTL_START=40001 MODBUSCTL_COUNT=10 modbusctl client read
+MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ADDRESS=40001 MODBUSCTL_COUNT=10 modbusctl client read
+MODBUSCTL_URL=rtu:///dev/ttyUSB0 MODBUSCTL_BAUD=9600 MODBUSCTL_PARITY=even MODBUSCTL_UNIT=3 modbusctl client poll --start 0 --count 4
 MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ALGO=smart MODBUSCTL_START=0 MODBUSCTL_END=1000 MODBUSCTL_OUTPUT=scan.mcap modbusctl client scan
 ```
 
@@ -925,7 +1096,7 @@ MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ALGO=smart MODBUSCTL_START=0 MODBUSCTL_END=1
 
 ### What is modbusctl?
 
-modbusctl is a command-line tool for Modbus TCP. It identifies devices, fingerprints supported function codes, scans register maps, decodes registers into typed values, discovers devices on a network, and records and replays sessions to simulate devices.
+modbusctl is a command-line tool for Modbus over TCP, UDP and serial lines (RTU and ASCII). It reads, polls and writes coils and registers, identifies devices, fingerprints supported function codes, scans register maps, decodes registers into typed values, discovers devices on a network, and records and replays sessions to simulate devices.
 
 ### How do I find which Modbus registers a device exposes?
 
@@ -933,7 +1104,7 @@ Run a scan, for example `modbusctl client scan --ip 192.168.1.10 --algo smart --
 
 ### How do I read a float or string from Modbus registers on the command line?
 
-Use `client decode` with a codec, for example `modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:1234`. List all codecs with `modbusctl client codecs`. See [Decode registers](#decode-registers-typed-values-via-codecs).
+Use `client decode` with a codec, for example `modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:4321`. List all codecs with `modbusctl client codecs`. See [Decode registers](#decode-registers-typed-values-via-codecs).
 
 ### How do I simulate a Modbus device without hardware?
 
@@ -941,11 +1112,19 @@ Record or scan a real device to an MCAP file, then serve it with `modbusctl serv
 
 ### Does modbusctl support Modbus RTU (serial)?
 
-modbusctl targets Modbus TCP. For serial RTU use a tool such as [mbpoll](https://github.com/epsilonrt/mbpoll) or the `modbus-cli` that ships with [go-modbus](https://github.com/otfabric/go-modbus).
+Yes. Pass a serial URL to any client command, for example `modbusctl client read --url rtu:///dev/ttyUSB0 --baud 9600 --parity even --unit 3 --start 0 --count 4`. Modbus ASCII (`ascii://`), Modbus UDP (`udp://`) and RTU or ASCII through a serial-to-Ethernet bridge (`rtuovertcp://`, `asciiovertcp://`) work the same way. See [Transports and serial settings](#transports-and-serial-settings).
 
 ### Can modbusctl write registers or coils?
 
-The documented commands focus on reading, scanning, diagnostics and simulation. They do not include register or coil writes. See the [comparison](#modbusctl-vs-mbpoll-and-modpoll) for tools that do.
+Yes. `modbusctl client write --ip 192.168.1.10 --start 100 --values 1234` writes a holding register; `--function 5` or `15` writes coils, and `--codec` writes typed values such as floats. See [Write coils and registers](#write-coils-and-registers).
+
+### How do I poll Modbus registers continuously?
+
+Use `modbusctl client poll --ip 192.168.1.10 --start 100 --count 4 --interval 1000`. It prints a sample per poll until you press Ctrl-C (or after `--polls` samples), with `--format json` for one JSON object per line. See [Poll registers continuously](#poll-registers-continuously).
+
+### My serial device does not answer. What should I check?
+
+The serial settings must match the device exactly: `--baud`, `--parity`, `--stop-bits` and `--data-bits`. Many devices use 9600 8N1 (`--baud 9600 --parity none --stop-bits 1`), while modbusctl defaults to 19200 with no parity and 2 stop bits. Also check the `--unit` ID, that A/B are not swapped on RS-485, and whether the device speaks RTU (`rtu://`) or ASCII (`ascii://`).
 
 ### What is MCAP?
 
@@ -957,7 +1136,7 @@ Pass `--format json` (or set `MODBUSCTL_OUTPUT_FORMAT=json`). Progress goes to s
 
 ### How is modbusctl different from mbpoll and modpoll?
 
-mbpoll and modpoll are polling and writing tools. modbusctl adds register-map scanning, device identification, SunSpec discovery, subnet discovery and record/replay simulation. See the [comparison](#modbusctl-vs-mbpoll-and-modpoll).
+mbpoll and modpoll are polling and writing tools. modbusctl polls and writes too, and adds register-map scanning, device identification, SunSpec discovery, subnet discovery and record/replay simulation. See the [comparison](#modbusctl-vs-mbpoll-and-modpoll).
 
 ---
 
@@ -970,18 +1149,19 @@ mbpoll and modpoll are polling and writing tools. modbusctl adds register-map sc
 ```console
 modbusctl/
 ├── cmd/
-│   ├── client (Identify, Fingerprint, Diagnostic, ReportServerID, Read, Record, Scan, SunSpec commands)
+│   ├── client (Identify, Fingerprint, Diagnostic, ReportServerID, Read, Decode, Poll, Write, Record, Scan, SunSpec commands)
 │   ├── discover (Device discovery)
 │   ├── mcap (MCAP file operations: convert, decode, extract, frequencies, info, strings)
 │   └── server (Modbus TCP data replay server)
 ├── internal/
 │   ├── config (CLI & env: types, flags, completion, diagnostics, Modbus URL / SunSpec base parsing)
 │   ├── cli (shared Cobra helpers: enum completion, stdout file, required flags, debug)
-│   ├── format (client stdout **text/json/table** via `Write`; MCAP-derived **strings** / **frequencies** heuristics; table rendering)
+│   ├── format (client stdout **text/json/table** via `Write`, streaming output via `StreamWriter`; MCAP-derived **strings** / **frequencies** heuristics; table rendering)
 │   ├── mcap (MCAP binary codec, load, CSV/JSON/blocks/info exports, profile decode)
 │   ├── runner (client command wiring, formatted run loop, fatal JSON/text rendering)
 │   ├── errs (typed CLI errors, stable codes, exit-kind mapping)
-│   ├── modbus (Modbus TCP client/server logic, collectors, scan strategies)
+│   ├── mbtest (in-memory Modbus device for tests: TCP, UDP, RTU/ASCII over TCP and on a pseudo-terminal)
+│   ├── modbus (Modbus client/server logic, collectors, poll and write, scan strategies)
 │   ├── types (DTOs for JSON/text/table output and MCAP-related structs)
 │   └── validate (Input validation and checks)
 ├── Makefile (Build & test commands)
@@ -997,11 +1177,12 @@ A toplevel `Makefile` is provided for convenience. Run **`make`** (or **`make he
 | Target | Purpose |
 |--------|---------|
 | **`make test`** | Unit tests with race detector (`go test -race ./...`) |
-| **`make coverage`** | Tests + **`coverage.out`** for `go tool cover` |
+| **`make coverage`** | Tests + **`coverage.out`** across the whole module; fails below **85%** total statement coverage (`COVERAGE_MIN`) |
 | **`make compile`** | Full-module typecheck (`go build ./...`) |
 | **`make lint`** | `compile` then **staticcheck** |
 | **`make lint-ci`** | `compile`, **go vet**, **golangci-lint** (uses `.golangci.yml`) |
-| **`make check`** | `fmt`, `lint`, `lint-ci`, `vet`, `test`, **`coverage`** |
+| **`make fmt`** / **`fmt-check`** | Format with the gofmt of the Go version in `go.mod` (the one CI uses); `fmt-check` fails if that gofmt or the locally installed one would change any file |
+| **`make check`** | `fmt`, `fmt-check`, `lint`, `lint-ci`, `vet`, `test`, **`coverage`** |
 | **`make build`** | Runs **`check`** then writes **`bin/modbusctl`** |
 | **`make build-all`** / **`release-all`** | Cross-compile and package archives |
 
@@ -1018,7 +1199,10 @@ make build-all
 
 ```console
 make test
+make coverage
 ```
+
+Tests need no hardware: `internal/mbtest` provides an in-memory Modbus device that is served over TCP, UDP, RTU/ASCII framing over TCP, and RTU/ASCII on a pseudo-terminal that stands in for a serial port (Linux and macOS; those tests are skipped elsewhere).
 
 ## Version History
 
@@ -1029,7 +1213,9 @@ Release notes for each version are maintained in **[RELEASE.md](RELEASE.md)** (e
 
 ## Contributing
 
-Bug reports, device-compatibility notes and pull requests are welcome. Please [open an issue](https://github.com/otfabric/modbusctl/issues) to discuss larger changes first, and run `make check` before submitting.
+Bug reports, device-compatibility notes and pull requests are welcome. Please [open an issue](https://github.com/otfabric/modbusctl/issues) to discuss larger changes first, and run `make check` before submitting. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and guidelines.
+
+Please report security vulnerabilities privately, as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 If modbusctl is useful to you, a star on GitHub helps other engineers find it.
 
@@ -1037,4 +1223,4 @@ If modbusctl is useful to you, a star on GitHub helps other engineers find it.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE.txt](LICENSE.txt).
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

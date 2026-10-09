@@ -22,7 +22,7 @@ single value is decoded; when --count is a multiple of the codec register width 
 block is decoded as an array of values.`,
 	Example: `
   # Decode two registers at 40001 as a big-endian float32
-  modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:1234
+  modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:4321
 
   # Decode an 8-register ASCII string from input registers (function 4)
   modbusctl client decode --ip 192.168.1.10 --function 4 --start 0 --codec ascii/registers:8

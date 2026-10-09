@@ -25,10 +25,7 @@ func readCaptureMcapPath(cfg config.ReadConfig) string {
 
 // writeReadCaptureToMcap writes the capture header and one record for a read operation.
 func writeReadCaptureToMcap(f *os.File, cfg config.ReadConfig, modbusURL string, raw []byte, requestTimestamp, responseTimestamp int64) error {
-	headerIP, headerPort := cfg.IP, cfg.Port
-	if strings.TrimSpace(cfg.URL) != "" {
-		headerIP, headerPort = config.ParseModbusURLHostPort(modbusURL)
-	}
+	headerIP, headerPort := config.CaptureEndpoint(modbusURL)
 	header := types.CaptureHeader{
 		IP:        headerIP,
 		Port:      headerPort,

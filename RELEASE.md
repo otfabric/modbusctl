@@ -1,5 +1,62 @@
 # modbusctl Releases
 
+## v2.4.0
+
+**Date:** 2026-10-09  
+**Previous release:** v2.3.0
+
+### Summary
+
+Closes the capability gap with classic poll-and-write tools. modbusctl now speaks **Modbus RTU and ASCII on serial lines**, **Modbus UDP**, and RTU/ASCII framing through serial-to-Ethernet bridges; it can **write coils and holding registers** (**`client write`**) and **poll continuously at an interval** without recording (**`client poll`**). Every existing client command works over the new transports. No breaking changes to flags or JSON output.
+
+### Highlights
+
+- **Transports (all client commands):** **`--url`** now accepts **`rtu://<device>`**, **`ascii://<device>`**, **`udp://host:port`**, **`rtuovertcp://`**, **`rtuoverudp://`** and **`asciiovertcp://`** in addition to **`tcp://`**. Serial devices are written as `rtu:///dev/ttyUSB0` (Linux/macOS) or `rtu://COM3` (Windows).
+- **Serial settings:** New **`--baud`**, **`--data-bits`**, **`--parity`** (`none`/`even`/`odd`) and **`--stop-bits`** flags on every client command, with **`MODBUSCTL_BAUD`**, **`MODBUSCTL_DATA_BITS`**, **`MODBUSCTL_PARITY`** and **`MODBUSCTL_STOP_BITS`**. Defaults: 19200 baud, 8 data bits for RTU and 7 for ASCII, no parity, 2 stop bits without parity or 1 with. They are ignored for network URLs.
+- **`client write` (new):** Writes coils (**FC05**, **FC15**) and holding registers (**FC06**, **FC16**). **`--values`** takes one value or a comma-separated list; with **`--function`** omitted, one register uses FC06 and several use FC16. **`--codec`** encodes typed values (floats, 32/64-bit integers, strings, IP addresses, timestamps) with the same codec registry as **`client decode`**. **`--start`** is mandatory, everything is validated before anything is sent, and a write is sent exactly once (never retried).
+- **`client poll` (new):** Reads the same block of coils, discrete inputs or registers every **`--interval`** ms and prints each sample as it is read — one line (**text**), one JSON object per line (**json**) or one row (**table**) — until **`--polls`** samples or Ctrl-C. Optional **`--codec`** decoding. Failed polls are reported in-stream and polling continues (reconnecting when needed); exit code **7** when any poll failed. Nothing is written to disk; **`client record`** remains the MCAP capture command.
+- **Serial buses:** On `rtu://` and `ascii://`, **`identify`** and **`reportserverid`** ignore **`--parallel`** and query units one after the other, since a serial line carries one request at a time.
+- **MCAP:** Captures made over a serial line store the device path in the header **`ip`** field with port **0**. The format is unchanged.
+- **Completion:** Tab completion for **`--parity`** and for **`client write --function`** (5, 6, 15, 16).
+- **go-modbus:** Requires **`github.com/otfabric/go-modbus` v1.2.0**, which adds the Modbus ASCII transport and corrects function probing.
+
+### Fixes
+
+- **Silent empty result after a dropped connection:** `client read`, `decode` and `scan` could report success with no data when the connection was reset during the request: the reconnect succeeded and its result overwrote the read error. The read error is now reported (and counted as a transport failure by `scan`).
+- **`client scan --algo safe` (the default) lost registers:** After finding a block that followed unreadable addresses, the scan skipped one register (for example the last register of a short block), and could read one register below `--start`. Both are fixed.
+- **`client scan` with `--end 65535` (the default):** `--algo smart` and `--algo deep` never finished building their work list and ran out of memory, and `--algo safe` could wrap around instead of finishing. Position arithmetic no longer overflows at the top of the address space.
+- **`client scan --algo linear`:** No longer loops forever when the range reaches address 65535, and no longer issues zero-register reads for the full range 0–65535.
+- **`client scan --algo boundary`:** Finds the left edge of blocks of any size (it used to stop after the first failed read), never reads more than 125 registers at once, and handles blocks and seeds that reach address 65535.
+- **`client fingerprint` and `client sunspec probe`:** A function is reported as supported only when the device implements it. Previously any exception counted, so a device answering *Illegal Function* — or a gateway answering for an absent unit — appeared to support every probed function; and a device that correctly echoed FC08 was reported as not supporting diagnostics. (Fixed in go-modbus v1.2.0.)
+- **MCAP files cut short:** A capture truncated exactly between two fields of a record was read as complete, silently dropping the damaged record. Every `mcap` command now reports it as an unexpected end of file. A record too large for the format is rejected instead of corrupting the file.
+- **`server static` / `server replay` with coils or discrete inputs:** A request for more than one coil returned wrong values for every coil after the first. Multi-coil reads now return the recorded bits.
+- **`server replay`:** Fixed a data race between the startup message and the replay loop.
+- **`client sunspec` commands:** `--timeout` now bounds every read. Previously a device that did not answer blocked for the whole operation budget (10 s or more) on the first base address.
+- **`client identify` / `client reportserverid` with several units:** Ctrl-C now stops at the next unit. Previously every remaining unit still waited for its full timeout.
+- **Error classification:** A connection closed by the device is reported as a transport error (exit code 4), not an internal error (10).
+- **`--format table`:** The rule line under the header no longer ends in trailing spaces.
+- **Validation message:** An `--output` path whose parent is a file reported `%!w(<nil>)`; it now says the output directory is not a directory.
+- **Error text:** Connection failures are reported as **`connection error: …`** instead of `TCP connection error: …`, since the transport may be a serial port. The JSON **`kind`** (`transport`) and **`code`** (`transport_connect_failed`) are unchanged.
+- **Documentation:** `float32/layout:1234` was described as big-endian in examples; it is little-endian. Examples now use **`float32/layout:4321`** (big-endian). `client read` reads **`MODBUSCTL_ADDRESS`** (not `MODBUSCTL_START`) for `--start`; the help example and README now say so.
+
+### Quality
+
+- **Coverage:** Test coverage raised from 51% to **96%** of the whole module, with a floor of 85% enforced by **`make coverage`** (`COVERAGE_MIN`) and a Codecov project target; CI now tests the `cmd` packages too. A **Code Coverage** badge replaces the retired Go Report Card badge.
+- **Hardware-free tests:** New **`internal/mbtest`** in-memory Modbus device served over TCP, UDP, RTU/ASCII over TCP, and RTU/ASCII on a pseudo-terminal, so serial transports are exercised end to end in CI.
+- **Makefile:** Sets **`GOWORK=off`** so a parent `go.work` cannot interfere.
+
+### Upgrading
+
+- **Scripts matching error text:** Replace matches on `TCP connection error` with the JSON `code` (`transport_connect_failed`) or the exit code (4).
+- **Completion users:** Regenerate and re-source your shell completion script to pick up the new commands and flags.
+- **Float examples:** If you copied `float32/layout:1234` from earlier documentation expecting big-endian values, switch to `float32/layout:4321`. Codec behaviour itself has not changed.
+
+### Release workflow
+
+- Unchanged from v2.3.0: reusable **`go-binary-release`** workflow and link-time version metadata.
+
+---
+
 ## v2.3.0
 
 **Date:** 2026-07-06  

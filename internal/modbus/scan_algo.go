@@ -134,8 +134,9 @@ func candidateCountsSafe(start, end uint16) []uint16 {
 }
 
 type safeStrategy struct {
-	cfg                      scanSettings
-	current                  uint16
+	cfg scanSettings
+	// current is wider than an address so that it can step past end when end is 65535.
+	current                  uint32
 	end                      uint16
 	done                     bool
 	candidates               []uint16
@@ -143,6 +144,9 @@ type safeStrategy struct {
 	hadFailureThisAddr       bool   // true if we had at least one failure at current address (Milestone D)
 	leftBoundaryProbeAddr    uint16 // address to probe (0 is valid); use with leftBoundaryProbePending
 	leftBoundaryProbePending bool
+	// leftBoundaryProbeInFlight marks the task handed out last as the left-boundary probe: its
+	// result is only captured by the executor and must not move the scan position.
+	leftBoundaryProbeInFlight bool
 }
 
 func newSafeStrategy(cfg scanSettings) *safeStrategy {
@@ -153,13 +157,14 @@ func (s *safeStrategy) Name() string { return "safe" }
 
 func (s *safeStrategy) Init(cfg scanSettings) {
 	s.cfg = cfg
-	s.current = cfg.StartAddress
+	s.current = uint32(cfg.StartAddress)
 	s.end = cfg.EndAddress
 	s.done = false
 	s.candidates = nil
 	s.candidateIndex = 0
 	s.hadFailureThisAddr = false
 	s.leftBoundaryProbePending = false
+	s.leftBoundaryProbeInFlight = false
 	scanDebugf(&s.cfg, "DEBUG [safe] init: range [%d,%d]\n", s.current, s.end)
 }
 
@@ -167,17 +172,18 @@ func (s *safeStrategy) Next() (ScanTask, bool) {
 	// Milestone D: one left-boundary probe when we succeeded after failure (ladder boundary)
 	if s.leftBoundaryProbePending {
 		s.leftBoundaryProbePending = false
+		s.leftBoundaryProbeInFlight = true
 		scanDebugf(&s.cfg, "DEBUG [safe] left-boundary probe: addr=%d count=1\n", s.leftBoundaryProbeAddr)
 		return ScanTask{Start: s.leftBoundaryProbeAddr, Count: 1}, true
 	}
-	if s.done || s.current > s.end {
-		if s.current > s.end {
+	if s.done || s.current > uint32(s.end) {
+		if s.current > uint32(s.end) {
 			scanDebugf(&s.cfg, "DEBUG [safe] done: current=%d > end=%d\n", s.current, s.end)
 		}
 		return ScanTask{}, false
 	}
 	if s.candidates == nil || s.candidateIndex >= len(s.candidates) {
-		s.candidates = candidateCountsSafe(s.current, s.end)
+		s.candidates = candidateCountsSafe(uint16(s.current), s.end)
 		s.candidateIndex = 0
 		if len(s.candidates) == 0 {
 			s.done = true
@@ -188,18 +194,23 @@ func (s *safeStrategy) Next() (ScanTask, bool) {
 	}
 	count := s.candidates[s.candidateIndex]
 	s.candidateIndex++
-	return ScanTask{Start: s.current, Count: count}, true
+	return ScanTask{Start: uint16(s.current), Count: count}, true
 }
 
 func (s *safeStrategy) OnResult(task ScanTask, result ScanResult) {
+	if s.leftBoundaryProbeInFlight {
+		s.leftBoundaryProbeInFlight = false
+		return
+	}
 	if result.Success {
-		if s.hadFailureThisAddr && task.Start > 0 {
+		// Probe the register just below a block found after failures, but never below the range.
+		if s.hadFailureThisAddr && task.Start > s.cfg.StartAddress {
 			s.leftBoundaryProbeAddr = task.Start - 1
 			s.leftBoundaryProbePending = true
 			scanDebugf(&s.cfg, "DEBUG [safe] scheduled left-boundary probe at addr=%d (after success at %d)\n", s.leftBoundaryProbeAddr, task.Start)
 		}
 		prev := s.current
-		s.current += task.Count
+		s.current += uint32(task.Count)
 		s.candidates = nil
 		s.candidateIndex = 0
 		s.hadFailureThisAddr = false
@@ -222,7 +233,7 @@ func (s *safeStrategy) Done() bool {
 	if s.leftBoundaryProbePending {
 		return false
 	}
-	return s.current > s.end
+	return s.current > uint32(s.end)
 }
 
 // --- Smart strategy (priority queue by interval size, split-on-fail) ---
@@ -263,14 +274,14 @@ func (s *smartStrategy) Init(cfg scanSettings) {
 	s.cfg = cfg
 	s.visited = make(map[uint32]bool)
 	s.queue = nil
-	start := cfg.StartAddress
-	end := cfg.EndAddress
-	for start <= end {
+	// 32-bit arithmetic: with end at 65535 a 16-bit start would wrap and never pass it.
+	end := uint32(cfg.EndAddress)
+	for start := uint32(cfg.StartAddress); start <= end; {
 		count := end - start + 1
 		if count > MaxBlockSize {
 			count = MaxBlockSize
 		}
-		heap.Push(&s.queue, Interval{Start: start, Count: count})
+		heap.Push(&s.queue, Interval{Start: uint16(start), Count: uint16(count)})
 		start += count
 	}
 	scanDebugf(&s.cfg, "DEBUG [smart] init: range [%d,%d] initial intervals=%d\n", cfg.StartAddress, cfg.EndAddress, s.queue.Len())
@@ -717,27 +728,29 @@ const (
 	linearTail
 )
 
+// Positions and counts are 32 bits wide so that probeStart and blockEnd (an exclusive bound)
+// can step past address 65535 instead of wrapping around.
 type linearStrategy struct {
 	cfg                scanSettings
-	start              uint16
-	end                uint16
+	start              uint32
+	end                uint32
 	phase              linearPhase
-	probeStart         uint16
+	probeStart         uint32
 	hadProbeFailure    bool
-	originalBlockStart uint16
-	blockStart         uint16
-	blockEnd           uint16
+	originalBlockStart uint32
+	blockStart         uint32
+	blockEnd           uint32
 	// Backward binary search: find max K such that read(originalBlockStart-K, K) succeeds.
-	backwardLow  uint16
-	backwardHigh uint16
-	backwardBest uint16
+	backwardLow  uint32
+	backwardHigh uint32
+	backwardBest uint32
 	// Tail binary search: find max count C such that read(blockEnd, C) succeeds.
-	tailLow             uint16
-	tailHigh            uint16
-	tailBest            uint16
+	tailLow             uint32
+	tailHigh            uint32
+	tailBest            uint32
 	done                bool
 	hasGapProbe         bool // true when a gap probe is pending (address 0 is valid)
-	gapProbeAddr        uint16
+	gapProbeAddr        uint32
 	lastTaskWasGapProbe bool // last Next() was gap probe; OnResult must not update probe state
 }
 
@@ -749,10 +762,10 @@ func (s *linearStrategy) Name() string { return "linear" }
 
 func (s *linearStrategy) Init(cfg scanSettings) {
 	s.cfg = cfg
-	s.start = cfg.StartAddress
-	s.end = cfg.EndAddress
+	s.start = uint32(cfg.StartAddress)
+	s.end = uint32(cfg.EndAddress)
 	s.phase = linearProbe
-	s.probeStart = cfg.StartAddress
+	s.probeStart = uint32(cfg.StartAddress)
 	s.hadProbeFailure = false
 	s.done = false
 	s.blockStart = 0
@@ -767,7 +780,7 @@ func (s *linearStrategy) Init(cfg scanSettings) {
 	scanDebugf(&s.cfg, "DEBUG [linear] init: range [%d,%d] phase=Probe probeStart=%d\n", s.start, s.end, s.probeStart)
 }
 
-func minU16(a, b uint16) uint16 {
+func minU32(a, b uint32) uint32 {
 	if a < b {
 		return a
 	}
@@ -785,24 +798,20 @@ func (s *linearStrategy) Next() (ScanTask, bool) {
 			s.hasGapProbe = false
 			s.lastTaskWasGapProbe = true
 			scanDebugf(&s.cfg, "DEBUG [linear] gap probe: addr=%d (between block and next 125)\n", s.gapProbeAddr)
-			return ScanTask{Start: s.gapProbeAddr, Count: 1}, true
+			return ScanTask{Start: uint16(s.gapProbeAddr), Count: 1}, true
 		}
 		if s.probeStart > s.end {
 			s.done = true
 			scanDebugf(&s.cfg, "DEBUG [linear] done: probeStart=%d > end=%d\n", s.probeStart, s.end)
 			return ScanTask{}, false
 		}
-		count := minU16(125, s.end-s.probeStart+1)
+		count := minU32(125, s.end-s.probeStart+1)
 		scanDebugf(&s.cfg, "DEBUG [linear] phase=Probe probeStart=%d count=%d\n", s.probeStart, count)
-		return ScanTask{Start: s.probeStart, Count: count}, true
+		return ScanTask{Start: uint16(s.probeStart), Count: uint16(count)}, true
 	case linearBackward:
 		if s.backwardLow > s.backwardHigh {
 			s.blockStart = s.originalBlockStart - s.backwardBest
-			newEnd := uint32(s.originalBlockStart) + 125
-			if newEnd > 65535 {
-				newEnd = 65535
-			}
-			s.blockEnd = uint16(newEnd)
+			// blockEnd keeps the end of the successful probe set when the search started.
 			s.phase = linearForward
 			scanDebugf(&s.cfg, "DEBUG [linear] backward done: blockStart=%d blockEnd=%d -> phase Forward\n", s.blockStart, s.blockEnd)
 			return s.Next()
@@ -814,7 +823,7 @@ func (s *linearStrategy) Next() (ScanTask, bool) {
 			return s.Next()
 		}
 		scanDebugf(&s.cfg, "DEBUG [linear] phase=Backward mid=%d [%d,%d] (low=%d high=%d best=%d)\n", mid, chunkStart, chunkStart+mid-1, s.backwardLow, s.backwardHigh, s.backwardBest)
-		return ScanTask{Start: chunkStart, Count: mid}, true
+		return ScanTask{Start: uint16(chunkStart), Count: uint16(mid)}, true
 	case linearForward:
 		if s.blockEnd > s.end {
 			s.probeStart = s.blockEnd
@@ -823,9 +832,9 @@ func (s *linearStrategy) Next() (ScanTask, bool) {
 			scanDebugf(&s.cfg, "DEBUG [linear] block past end: probeStart=%d -> phase Probe\n", s.probeStart)
 			return s.Next()
 		}
-		count := minU16(125, s.end-s.blockEnd+1)
+		count := minU32(125, s.end-s.blockEnd+1)
 		scanDebugf(&s.cfg, "DEBUG [linear] phase=Forward blockEnd=%d count=%d\n", s.blockEnd, count)
-		return ScanTask{Start: s.blockEnd, Count: count}, true
+		return ScanTask{Start: uint16(s.blockEnd), Count: uint16(count)}, true
 	case linearTail:
 		if s.tailLow > s.tailHigh {
 			if s.tailBest > 0 {
@@ -861,7 +870,7 @@ func (s *linearStrategy) Next() (ScanTask, bool) {
 			return s.Next()
 		}
 		scanDebugf(&s.cfg, "DEBUG [linear] phase=Tail blockEnd=%d mid=%d (low=%d high=%d best=%d)\n", s.blockEnd, mid, s.tailLow, s.tailHigh, s.tailBest)
-		return ScanTask{Start: s.blockEnd, Count: mid}, true
+		return ScanTask{Start: uint16(s.blockEnd), Count: uint16(mid)}, true
 	}
 	return ScanTask{}, false
 }
@@ -875,16 +884,11 @@ func (s *linearStrategy) OnResult(task ScanTask, result ScanResult) {
 			return
 		}
 		if result.Success {
-			newEnd := uint32(s.probeStart) + uint32(task.Count)
-			if newEnd > 65535 {
-				// Past valid address space; mark done
-				s.done = true
-				return
-			}
+			newEnd := s.probeStart + uint32(task.Count)
 			if s.hadProbeFailure {
 				s.phase = linearBackward
 				s.originalBlockStart = s.probeStart
-				s.blockEnd = uint16(newEnd)
+				s.blockEnd = newEnd
 				maxBack := s.originalBlockStart - s.start
 				if maxBack > 125 {
 					maxBack = 125
@@ -896,7 +900,7 @@ func (s *linearStrategy) OnResult(task ScanTask, result ScanResult) {
 			} else {
 				s.phase = linearForward
 				s.blockStart = s.probeStart
-				s.blockEnd = uint16(newEnd)
+				s.blockEnd = newEnd
 				scanDebugf(&s.cfg, "DEBUG [linear] probe success -> Forward block [%d,%d)\n", s.blockStart, s.blockEnd)
 			}
 		} else {
@@ -906,7 +910,7 @@ func (s *linearStrategy) OnResult(task ScanTask, result ScanResult) {
 			scanDebugf(&s.cfg, "DEBUG [linear] probe fail: probeStart %d -> %d\n", prev, s.probeStart)
 		}
 	case linearBackward:
-		mid := task.Count
+		mid := uint32(task.Count)
 		if result.Success {
 			s.backwardBest = mid
 			s.backwardLow = mid + 1
@@ -921,22 +925,17 @@ func (s *linearStrategy) OnResult(task ScanTask, result ScanResult) {
 		}
 	case linearForward:
 		if result.Success {
-			newEnd := uint32(s.blockEnd) + uint32(task.Count)
-			if newEnd > 65535 {
-				s.done = true
-				return
-			}
-			s.blockEnd = uint16(newEnd)
+			s.blockEnd += uint32(task.Count)
 			scanDebugf(&s.cfg, "DEBUG [linear] forward success: blockEnd=%d\n", s.blockEnd)
 		} else {
 			s.phase = linearTail
 			s.tailLow = 1
-			s.tailHigh = minU16(125, s.end-s.blockEnd+1)
+			s.tailHigh = minU32(125, s.end-s.blockEnd+1)
 			s.tailBest = 0
 			scanDebugf(&s.cfg, "DEBUG [linear] forward fail -> Tail blockEnd=%d [1,%d]\n", s.blockEnd, s.tailHigh)
 		}
 	case linearTail:
-		mid := task.Count
+		mid := uint32(task.Count)
 		if result.Success {
 			s.tailBest = mid
 			s.tailLow = mid + 1
@@ -971,20 +970,30 @@ const (
 	boundaryDone
 )
 
+// boundaryStrategy grows a known-good seed read into the full contiguous block around it.
+// On each side it first expands with growing reads, then binary-searches the edge inside a
+// window of at most MaxBlockSize registers; a window that turns out to be readable all the
+// way is followed by the next one, so blocks of any size are covered.
+//
+// Positions are 32 bits wide so that blockEnd, an exclusive bound, can be 65536.
 type boundaryStrategy struct {
-	cfg            scanSettings
-	start          uint16
-	end            uint16
-	blockStart     uint16
-	blockEnd       uint16
-	phase          boundaryPhase
+	cfg        scanSettings
+	start      uint32 // first address of the configured range
+	end        uint32 // last address of the configured range (inclusive)
+	blockStart uint32 // first address known to be readable
+	blockEnd   uint32 // one past the last address known to be readable
+	phase      boundaryPhase
+
 	seedEmitted    bool
 	leftExpandIdx  int
-	leftLow        uint16
-	leftHigh       uint16
 	rightExpandIdx int
-	rightLow       uint16
-	rightHigh      uint16
+
+	// Left binary search: the left edge lies in [leftLow, leftHigh]; leftFloor is the
+	// lowest candidate of the current window.
+	leftLow, leftHigh, leftFloor uint32
+	// Right binary search: the last readable address lies in [rightLow-1, rightHigh];
+	// rightCeil is the highest candidate of the current window.
+	rightLow, rightHigh, rightCeil uint32
 }
 
 func newBoundaryStrategy(cfg scanSettings) *boundaryStrategy {
@@ -995,17 +1004,16 @@ func (s *boundaryStrategy) Name() string { return "boundary" }
 
 func (s *boundaryStrategy) Init(cfg scanSettings) {
 	s.cfg = cfg
-	s.start = cfg.StartAddress
-	s.end = cfg.EndAddress
-	s.blockStart = cfg.SeedStart
-	s.blockEnd = cfg.SeedStart + cfg.SeedCount
+	s.start = uint32(cfg.StartAddress)
+	s.end = uint32(cfg.EndAddress)
+	s.blockStart = uint32(cfg.SeedStart)
+	s.blockEnd = uint32(cfg.SeedStart) + uint32(cfg.SeedCount)
 	s.phase = boundarySeed
 	s.seedEmitted = false
 	s.leftExpandIdx = 0
 	s.rightExpandIdx = 0
-	// Seed must be fully inside [StartAddress, EndAddress]: SeedStart >= start, SeedStart+SeedCount-1 <= end
-	// Also reject SeedCount == 0 or SeedCount > 125
-	if cfg.SeedCount == 0 || cfg.SeedCount > 125 || s.blockStart < s.start || (uint32(s.blockEnd)-1 > uint32(s.end)) {
+	// The seed must be 1..125 registers and lie fully inside [StartAddress, EndAddress].
+	if cfg.SeedCount == 0 || cfg.SeedCount > MaxBlockSize || s.blockStart < s.start || s.blockEnd-1 > s.end {
 		s.phase = boundaryDone
 		scanDebugf(&s.cfg, "DEBUG [boundary] init: seed [%d,%d) not fully inside range [%d,%d], done\n", s.blockStart, s.blockEnd, s.start, s.end)
 	} else {
@@ -1013,125 +1021,117 @@ func (s *boundaryStrategy) Init(cfg scanSettings) {
 	}
 }
 
+// boundaryTask builds the read of [from, to).
+func boundaryTask(from, to uint32) ScanTask {
+	return ScanTask{Start: uint16(from), Count: uint16(to - from)}
+}
+
+// openLeftWindow starts a binary search for the left edge in the window below blockStart.
+func (s *boundaryStrategy) openLeftWindow() {
+	s.phase = boundaryLeftBinary
+	s.leftFloor = s.start
+	if s.blockStart-s.start > MaxBlockSize {
+		s.leftFloor = s.blockStart - MaxBlockSize
+	}
+	s.leftLow = s.leftFloor
+	s.leftHigh = s.blockStart
+	scanDebugf(&s.cfg, "DEBUG [boundary] -> phase LeftBinary [leftLow=%d leftHigh=%d]\n", s.leftLow, s.leftHigh)
+}
+
+// openRightWindow starts a binary search for the right edge in the window above blockEnd.
+// It reports false when there is nothing left to search on the right.
+func (s *boundaryStrategy) openRightWindow() bool {
+	if s.blockEnd > s.end {
+		return false
+	}
+	s.phase = boundaryRightBinary
+	s.rightCeil = s.blockEnd + MaxBlockSize - 1
+	if s.rightCeil > s.end {
+		s.rightCeil = s.end
+	}
+	s.rightLow = s.blockEnd
+	s.rightHigh = s.rightCeil
+	scanDebugf(&s.cfg, "DEBUG [boundary] -> phase RightBinary [rightLow=%d rightHigh=%d]\n", s.rightLow, s.rightHigh)
+	return true
+}
+
 func (s *boundaryStrategy) Next() (ScanTask, bool) {
-	switch s.phase {
-	case boundarySeed:
-		if !s.seedEmitted {
-			s.seedEmitted = true
-			count := s.blockEnd - s.blockStart
-			scanDebugf(&s.cfg, "DEBUG [boundary] phase=Seed emit [%d,%d) count=%d\n", s.blockStart, s.blockEnd, count)
-			return ScanTask{Start: s.blockStart, Count: count}, true
-		}
-		s.phase = boundaryLeftExpand
-		scanDebugf(&s.cfg, "DEBUG [boundary] -> phase LeftExpand blockStart=%d\n", s.blockStart)
-		return s.Next()
-	case boundaryLeftExpand:
-		for s.leftExpandIdx < len(boundaryExpandSizes) {
-			size := boundaryExpandSizes[s.leftExpandIdx]
-			if s.blockStart < size {
-				s.leftExpandIdx++
+	for {
+		switch s.phase {
+		case boundarySeed:
+			if !s.seedEmitted {
+				s.seedEmitted = true
+				scanDebugf(&s.cfg, "DEBUG [boundary] phase=Seed emit [%d,%d)\n", s.blockStart, s.blockEnd)
+				return boundaryTask(s.blockStart, s.blockEnd), true
+			}
+			s.phase = boundaryLeftExpand
+			scanDebugf(&s.cfg, "DEBUG [boundary] -> phase LeftExpand blockStart=%d\n", s.blockStart)
+		case boundaryLeftExpand:
+			if s.leftExpandIdx >= len(boundaryExpandSizes) || s.blockStart <= s.start {
+				s.openLeftWindow()
 				continue
 			}
-			chunkStart := s.blockStart - size
-			// Clamp to configured range: read must not start below start
-			if chunkStart < s.start {
-				clampCount := s.blockStart - s.start
-				if clampCount < 1 {
-					s.leftExpandIdx++
-					continue
-				}
-				s.leftExpandIdx++
-				scanDebugf(&s.cfg, "DEBUG [boundary] phase=LeftExpand clamp: [%d,%d)\n", s.start, s.start+clampCount)
-				return ScanTask{Start: s.start, Count: clampCount}, true
-			}
+			size := uint32(boundaryExpandSizes[s.leftExpandIdx])
 			s.leftExpandIdx++
-			scanDebugf(&s.cfg, "DEBUG [boundary] phase=LeftExpand: [%d,%d) size=%d\n", chunkStart, chunkStart+size, size)
-			return ScanTask{Start: chunkStart, Count: size}, true
-		}
-		s.phase = boundaryLeftBinary
-		s.leftLow = s.start
-		s.leftHigh = s.blockStart
-		scanDebugf(&s.cfg, "DEBUG [boundary] -> phase LeftBinary [leftLow=%d leftHigh=%d]\n", s.leftLow, s.leftHigh)
-		return s.Next()
-	case boundaryLeftBinary:
-		if s.leftLow >= s.leftHigh {
-			s.phase = boundaryRightExpand
-			scanDebugf(&s.cfg, "DEBUG [boundary] -> phase RightExpand blockEnd=%d\n", s.blockEnd)
-			return s.Next()
-		}
-		mid := (s.leftLow + s.leftHigh) / 2
-		count := s.blockStart - mid
-		if count < 1 {
-			s.leftLow = mid + 1
-			return s.Next()
-		}
-		scanDebugf(&s.cfg, "DEBUG [boundary] phase=LeftBinary mid=%d count=%d [%d,%d)\n", mid, count, mid, mid+count)
-		return ScanTask{Start: mid, Count: count}, true
-	case boundaryRightExpand:
-		for s.rightExpandIdx < len(boundaryExpandSizes) {
-			size := boundaryExpandSizes[s.rightExpandIdx]
-			if uint32(s.blockEnd)+uint32(size) > 65535 {
-				s.rightExpandIdx++
-				continue
+			// Clamp to the configured range: a read never starts below start.
+			from := s.start
+			if s.blockStart-s.start > size {
+				from = s.blockStart - size
 			}
-			// Clamp to configured range: read must not end past end; never emit Count == 0
-			if s.blockEnd > s.end {
-				s.rightExpandIdx++
-				continue
-			}
-			if s.blockEnd+size-1 > s.end {
-				clampCount := s.end - s.blockEnd + 1
-				if clampCount < 1 {
-					s.rightExpandIdx++
+			scanDebugf(&s.cfg, "DEBUG [boundary] phase=LeftExpand: [%d,%d)\n", from, s.blockStart)
+			return boundaryTask(from, s.blockStart), true
+		case boundaryLeftBinary:
+			if s.leftLow >= s.leftHigh {
+				// The whole window was readable and the range continues: search the next one.
+				if s.blockStart == s.leftFloor && s.blockStart > s.start {
+					s.openLeftWindow()
 					continue
 				}
-				s.rightExpandIdx++
-				scanDebugf(&s.cfg, "DEBUG [boundary] phase=RightExpand clamp: [%d,%d)\n", s.blockEnd, s.blockEnd+clampCount)
-				return ScanTask{Start: s.blockEnd, Count: clampCount}, true
+				s.phase = boundaryRightExpand
+				scanDebugf(&s.cfg, "DEBUG [boundary] -> phase RightExpand blockEnd=%d\n", s.blockEnd)
+				continue
 			}
+			mid := (s.leftLow + s.leftHigh) / 2
+			scanDebugf(&s.cfg, "DEBUG [boundary] phase=LeftBinary mid=%d [%d,%d)\n", mid, mid, s.blockStart)
+			return boundaryTask(mid, s.blockStart), true
+		case boundaryRightExpand:
+			if s.rightExpandIdx >= len(boundaryExpandSizes) || s.blockEnd > s.end {
+				if !s.openRightWindow() {
+					s.phase = boundaryDone
+				}
+				continue
+			}
+			size := uint32(boundaryExpandSizes[s.rightExpandIdx])
 			s.rightExpandIdx++
-			scanDebugf(&s.cfg, "DEBUG [boundary] phase=RightExpand: [%d,%d) size=%d\n", s.blockEnd, s.blockEnd+size, size)
-			return ScanTask{Start: s.blockEnd, Count: size}, true
-		}
-		s.phase = boundaryRightBinary
-		s.rightLow = s.blockEnd
-		lastSize := boundaryExpandSizes[len(boundaryExpandSizes)-1]
-		maxRight := uint32(s.blockEnd) + uint32(lastSize) - 1
-		if maxRight > 65535 {
-			maxRight = 65535
-		}
-		if uint32(s.end) < maxRight {
-			maxRight = uint32(s.end)
-		}
-		s.rightHigh = uint16(maxRight)
-		scanDebugf(&s.cfg, "DEBUG [boundary] -> phase RightBinary [rightLow=%d rightHigh=%d]\n", s.rightLow, s.rightHigh)
-		return s.Next()
-	case boundaryRightBinary:
-		if s.rightLow > s.rightHigh {
-			s.phase = boundaryDone
-			scanDebugf(&s.cfg, "DEBUG [boundary] -> phase Done block [%d,%d)\n", s.blockStart, s.blockEnd)
+			// Clamp to the configured range: a read never ends past end.
+			to := s.end + 1
+			if to-s.blockEnd > size {
+				to = s.blockEnd + size
+			}
+			scanDebugf(&s.cfg, "DEBUG [boundary] phase=RightExpand: [%d,%d)\n", s.blockEnd, to)
+			return boundaryTask(s.blockEnd, to), true
+		case boundaryRightBinary:
+			if s.rightLow > s.rightHigh {
+				// The whole window was readable and the range continues: search the next one.
+				if s.blockEnd == s.rightCeil+1 && s.openRightWindow() {
+					continue
+				}
+				s.phase = boundaryDone
+				scanDebugf(&s.cfg, "DEBUG [boundary] -> phase Done block [%d,%d)\n", s.blockStart, s.blockEnd)
+				continue
+			}
+			mid := (s.rightLow + s.rightHigh) / 2
+			scanDebugf(&s.cfg, "DEBUG [boundary] phase=RightBinary mid=%d [%d,%d]\n", mid, s.blockEnd, mid)
+			return boundaryTask(s.blockEnd, mid+1), true
+		default:
 			return ScanTask{}, false
 		}
-		mid := (uint32(s.rightLow) + uint32(s.rightHigh)) / 2
-		mid16 := uint16(mid)
-		count := mid16 - s.blockEnd + 1
-		if count < 1 {
-			s.rightLow = mid16 + 1
-			return s.Next()
-		}
-		if uint32(s.blockEnd)+uint32(count)-1 > 65535 {
-			s.rightHigh = mid16 - 1
-			return s.Next()
-		}
-		scanDebugf(&s.cfg, "DEBUG [boundary] phase=RightBinary mid=%d count=%d [%d,%d)\n", mid16, count, s.blockEnd, s.blockEnd+count)
-		return ScanTask{Start: s.blockEnd, Count: count}, true
-	case boundaryDone:
-		return ScanTask{}, false
 	}
-	return ScanTask{}, false
 }
 
 func (s *boundaryStrategy) OnResult(task ScanTask, result ScanResult) {
+	from := uint32(task.Start)
+	to := from + uint32(task.Count)
 	switch s.phase {
 	case boundarySeed:
 		if !result.Success {
@@ -1142,54 +1142,46 @@ func (s *boundaryStrategy) OnResult(task ScanTask, result ScanResult) {
 		}
 	case boundaryLeftExpand:
 		if result.Success {
-			s.blockStart = task.Start
+			s.blockStart = from
 			scanDebugf(&s.cfg, "DEBUG [boundary] left expand success: blockStart=%d\n", s.blockStart)
 		} else {
+			// The edge lies inside the failed read: search (from, blockStart].
 			s.phase = boundaryLeftBinary
-			s.leftLow = task.Start
+			s.leftFloor = from
+			s.leftLow = from + 1
 			s.leftHigh = s.blockStart
 			scanDebugf(&s.cfg, "DEBUG [boundary] left expand fail -> LeftBinary leftLow=%d leftHigh=%d\n", s.leftLow, s.leftHigh)
 		}
 	case boundaryLeftBinary:
 		if result.Success {
-			s.blockStart = task.Start
-			s.leftHigh = task.Start
+			s.blockStart = from
+			s.leftHigh = from
 			scanDebugf(&s.cfg, "DEBUG [boundary] left binary success: blockStart=%d\n", s.blockStart)
 		} else {
-			s.leftLow = task.Start + task.Count
+			// [from, blockStart) holds an unreadable register: the edge is above from.
+			s.leftLow = from + 1
 			scanDebugf(&s.cfg, "DEBUG [boundary] left binary fail: leftLow=%d\n", s.leftLow)
 		}
 	case boundaryRightExpand:
 		if result.Success {
-			s.blockEnd = task.Start + task.Count
+			s.blockEnd = to
 			scanDebugf(&s.cfg, "DEBUG [boundary] right expand success: blockEnd=%d\n", s.blockEnd)
 		} else {
-			// Per spec §7.5: failure in right expand → switch to right binary search
+			// The edge lies inside the failed read [blockEnd, to): its last address is unconfirmed.
 			s.phase = boundaryRightBinary
+			s.rightCeil = to - 1
 			s.rightLow = s.blockEnd
-			lastSize := boundaryExpandSizes[len(boundaryExpandSizes)-1]
-			maxRight := uint32(s.blockEnd) + uint32(lastSize) - 1
-			if maxRight > 65535 {
-				maxRight = 65535
-			}
-			if uint32(s.end) < maxRight {
-				maxRight = uint32(s.end)
-			}
-			s.rightHigh = uint16(maxRight)
+			s.rightHigh = to - 2
 			scanDebugf(&s.cfg, "DEBUG [boundary] right expand fail -> RightBinary rightLow=%d rightHigh=%d\n", s.rightLow, s.rightHigh)
 		}
 	case boundaryRightBinary:
 		if result.Success {
-			s.blockEnd = task.Start + task.Count
-			s.rightLow = task.Start + task.Count
+			s.blockEnd = to
+			s.rightLow = to
 			scanDebugf(&s.cfg, "DEBUG [boundary] right binary success: blockEnd=%d\n", s.blockEnd)
 		} else {
-			// tried read(blockEnd, count) up to inclusive task.Start+task.Count-1; max good is one less
-			if task.Count >= 2 {
-				s.rightHigh = task.Start + task.Count - 2
-			} else if task.Start > 0 {
-				s.rightHigh = task.Start - 1
-			}
+			// [blockEnd, to) holds an unreadable register: the last readable address is below to-1.
+			s.rightHigh = to - 2
 			scanDebugf(&s.cfg, "DEBUG [boundary] right binary fail: rightHigh=%d\n", s.rightHigh)
 		}
 	case boundaryDone:

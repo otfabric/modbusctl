@@ -147,3 +147,13 @@ func TestMustMarkFlagRequired_panics(t *testing.T) {
 	}()
 	MustMarkFlagRequired(cmd, "nope")
 }
+
+func TestOpenStdoutOrFile_createError(t *testing.T) {
+	w, cleanup, err := OpenStdoutOrFile(filepath.Join(t.TempDir(), "missing-dir", "out.txt"))
+	if err == nil {
+		t.Fatal("expected an error for a path in a missing directory")
+	}
+	if w != nil || cleanup != nil {
+		t.Fatalf("expected no writer and no cleanup on error, got %v", w)
+	}
+}

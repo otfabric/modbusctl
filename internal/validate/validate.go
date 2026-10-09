@@ -21,8 +21,8 @@ const (
 	maxModbusUnitID    = 255
 )
 
-// validateOptionalTimeoutMilliseconds is the shared client timeout rule for Modbus TCP commands:
-// 0 selects the default per-request budget (10000 ms) and matching TCP dial cap; otherwise the value must be ≥ 200 ms.
+// validateOptionalTimeoutMilliseconds is the shared client timeout rule for Modbus client commands:
+// 0 selects the default per-request budget (10000 ms) and matching dial cap; otherwise the value must be ≥ 200 ms.
 func validateOptionalTimeoutMilliseconds(ms uint16) error {
 	if ms != 0 && ms < 200 {
 		return fmt.Errorf("timeout must be 0 for default (10000 ms) or at least 200 ms")
@@ -31,9 +31,12 @@ func validateOptionalTimeoutMilliseconds(ms uint16) error {
 }
 
 // validateModbusEndpoint applies layered checks: [config.ValidateModbusAddress] (exactly one of URL or IP),
-// then when --ip is set validates literal IP syntax and a non-zero port.
-func validateModbusEndpoint(url, ip string, port uint16) error {
+// the serial-line settings, then when --ip is set literal IP syntax and a non-zero port.
+func validateModbusEndpoint(url, ip string, port uint16, serial config.SerialConfig) error {
 	if err := config.ValidateModbusAddress(url, ip); err != nil {
+		return err
+	}
+	if err := config.ValidateSerialConfig(serial); err != nil {
 		return err
 	}
 	if strings.TrimSpace(ip) == "" {
@@ -57,7 +60,7 @@ func CheckIdentifyConfig(cfg config.IdentifyConfig) error {
 
 // validateUnitClientConfig validates URL-or-IP (mutually exclusive), and when IP is set also Port and UnitID ("all" or 1-255).
 func validateUnitClientConfig(cfg config.UnitClientConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
 		return err
 	}
 	if cfg.UnitID == "" {
@@ -199,6 +202,53 @@ func CheckScanConfig(cfg *config.ScanConfig) error {
 	return validateFile(cfg.OutputFile, false)
 }
 
+// CheckWriteConfig validates the endpoint and the write itself (values, codec, function code,
+// quantity limits and address range) without touching the device.
+func CheckWriteConfig(cfg config.WriteConfig) error {
+	if err := validateDeviceConfig(cfg.DeviceConfig); err != nil {
+		return err
+	}
+	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
+		return err
+	}
+	_, err := modbus.PlanWrite(cfg)
+	return err
+}
+
+// maxPollBits is the Modbus limit for one FC1/FC2 read.
+const maxPollBits = 2000
+
+func CheckPollConfig(cfg config.PollConfig) error {
+	if err := validateDeviceConfig(cfg.DeviceConfig); err != nil {
+		return err
+	}
+	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
+		return err
+	}
+	if err := validateFunctionCode(cfg.Function); err != nil {
+		return err
+	}
+	isBits := cfg.Function == 1 || cfg.Function == 2
+	if isBits && strings.TrimSpace(cfg.Codec) != "" {
+		return fmt.Errorf("--codec decodes registers and cannot be used with function code %d (use 3 or 4)", cfg.Function)
+	}
+	_, count, err := modbus.ResolvePollCodec(cfg)
+	if err != nil {
+		return err
+	}
+	limit := uint16(maxModbusBlockSize)
+	if isBits {
+		limit = maxPollBits
+	}
+	if count == 0 || count > limit {
+		return fmt.Errorf("count must be between 1 and %d for function code %d", limit, cfg.Function)
+	}
+	if cfg.Interval == 0 {
+		return fmt.Errorf("interval must be at least 1 millisecond")
+	}
+	return validateExclusiveRegisterWindow(cfg.StartAddress, count)
+}
+
 func CheckRecordConfig(cfg config.RecordConfig) error {
 	if err := validateDeviceConfig(cfg.DeviceConfig); err != nil {
 		return err
@@ -280,7 +330,7 @@ func CheckInfoConfig(cfg config.InfoConfig) error {
 }
 
 func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
 		return err
 	}
 	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
@@ -293,7 +343,7 @@ func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
 }
 
 func CheckDiagnosticConfig(cfg config.DiagnosticConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
 		return err
 	}
 	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
@@ -417,10 +467,10 @@ func isValidHostIP(s string) bool {
 }
 
 func validateDeviceConfig(cfg config.DeviceConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
 		return err
 	}
-	// uint8 cannot exceed 255; reject 0 (broadcast / invalid for directed TCP client reads).
+	// uint8 cannot exceed 255; reject 0 (broadcast / invalid for directed client requests).
 	if cfg.Unit < 1 || cfg.Unit > maxModbusUnitID {
 		return fmt.Errorf("invalid Modbus unit ID: %d (must be between 1 and %d)", cfg.Unit, maxModbusUnitID)
 	}
@@ -511,7 +561,7 @@ func CheckSunSpecProbeConfig(cfg config.SunSpecProbeConfig) error {
 }
 
 func checkSunSpecBaseConfig(cfg *config.SunSpecBaseConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
 		return err
 	}
 	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
@@ -624,19 +674,26 @@ func validateFile(path string, mustExist bool) error {
 		if dir == "" || dir == "." {
 			dir = "."
 		}
-		dirInfo, err := os.Stat(dir)
-		if err != nil || !dirInfo.IsDir() {
-			return fmt.Errorf("output directory not accessible: %w", err)
-		}
-		return nil
+		return validateOutputDir(dir)
 	}
 	dir := filepath.Dir(path)
-	dirInfo, err := os.Stat(dir)
-	if err != nil || !dirInfo.IsDir() {
-		return fmt.Errorf("output directory not accessible: %w", err)
+	if err := validateOutputDir(dir); err != nil {
+		return err
 	}
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
 		return fmt.Errorf("path cannot be a directory: %s", path)
+	}
+	return nil
+}
+
+// validateOutputDir requires dir to exist and to be a directory.
+func validateOutputDir(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("output directory not accessible: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("output directory is not a directory: %s", dir)
 	}
 	return nil
 }

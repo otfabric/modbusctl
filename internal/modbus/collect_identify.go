@@ -23,10 +23,11 @@ func CollectDeviceIdentification(ctx context.Context, cfg config.IdentifyConfig)
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	res := &types.IdentifyResult{Target: modbusURL}
 
-	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug)
+	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
 	reqBudget := clientRequestTimeout(cfg.Timeout)
 
-	useParallel := len(units) > 1 && cfg.Parallel > 1
+	// A serial line carries one request at a time: never open it more than once.
+	useParallel := len(units) > 1 && cfg.Parallel > 1 && !config.IsSerialURL(modbusURL)
 	if !useParallel {
 		if err := modbus.ValidateConfig(conf); err != nil {
 			return nil, ClientConfigInvalid(err)
@@ -41,6 +42,9 @@ func CollectDeviceIdentification(ctx context.Context, cfg config.IdentifyConfig)
 		defer func() { _ = mc.Close() }()
 
 		for _, unit := range units {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			reqCtx, cancel := context.WithTimeout(ctx, reqBudget)
 			u := collectDeviceIdentificationForUnit(reqCtx, mc, cfg, unit)
 			cancel()
@@ -75,6 +79,10 @@ func CollectDeviceIdentification(ctx context.Context, cfg config.IdentifyConfig)
 		go func() {
 			defer wg.Done()
 			for unit := range unitsCh {
+				// Once cancelled, drain the remaining units without querying them.
+				if ctx.Err() != nil {
+					continue
+				}
 				reqCtx, cancel := context.WithTimeout(ctx, reqBudget)
 				u := collectDeviceIdentificationForUnit(reqCtx, mc, cfg, unit)
 				cancel()
@@ -89,6 +97,9 @@ func CollectDeviceIdentification(ctx context.Context, cfg config.IdentifyConfig)
 
 	for u := range resultsCh {
 		res.Units = append(res.Units, *u)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	sortIdentifyUnitsByID(res.Units)
 	types.FillIdentifySummary(res, len(units))

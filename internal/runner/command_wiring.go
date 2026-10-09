@@ -6,11 +6,12 @@ import (
 )
 
 // RegisterClientCommandCfg runs [config.MustLoadFromEnv], [config.RegisterFlags],
-// [RegisterStdoutFormatCompletion], then optional hooks (extra completions, required flags, etc.).
+// [RegisterStdoutFormatCompletion], [config.RegisterParityCompletion], then optional hooks (extra completions, required flags, etc.).
 func RegisterClientCommandCfg(cmd *cobra.Command, cfg any, hooks ...func(*cobra.Command)) {
 	config.MustLoadFromEnv(cfg)
 	config.RegisterFlags(cmd, cfg)
 	RegisterStdoutFormatCompletion(cmd)
+	config.RegisterParityCompletion(cmd)
 	for _, h := range hooks {
 		if h != nil {
 			h(cmd)
