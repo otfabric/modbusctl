@@ -206,7 +206,10 @@ func TestCoreRecord_canceledBetweenIterations(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dev.OnRequest = func(mbtest.Request) mbtest.Action {
-		cancel()
+		// Cancel once the first block has been answered and recorded, well inside the
+		// five-second interval that follows it. Cancelling right here would abort the
+		// request in flight instead.
+		time.AfterFunc(100*time.Millisecond, cancel)
 		return mbtest.Action{}
 	}
 	out := coreMcapPath(t)
