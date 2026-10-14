@@ -17,7 +17,7 @@ func ScanAlgorithms() []string {
 	return scanAlgorithmValues
 }
 
-var convertFormatValues = []string{"csv", "json"}
+var convertFormatValues = []string{"mbcap", "jsonl", "csv", "wide-csv"}
 
 // ConvertFormats returns valid mcap convert --format values (distinct from client stdout [format.Values]).
 func ConvertFormats() []string {
@@ -26,8 +26,10 @@ func ConvertFormats() []string {
 
 // ConvertFormatDescriptions maps mcap convert --format values to short shell-completion descriptions (keys must match [ConvertFormats]).
 var ConvertFormatDescriptions = map[string]string{
-	"csv":  "comma-separated values",
-	"json": "JSON export",
+	"mbcap":    "MBCAP binary (lossless)",
+	"jsonl":    "MBCAP JSON Lines (lossless)",
+	"csv":      "MBCAP long CSV (lossless)",
+	"wide-csv": "raw values per address over time (view)",
 }
 
 var functionCodeValues = []string{"1", "2", "3", "4"}

@@ -6,11 +6,11 @@
 [![Code Coverage](https://codecov.io/gh/otfabric/modbusctl/graph/badge.svg)](https://codecov.io/gh/otfabric/modbusctl)
 [![Latest Release](https://img.shields.io/github/v/release/otfabric/modbusctl?label=release)](https://github.com/otfabric/modbusctl/releases)
 
-**modbusctl is a command-line toolkit for exploring, operating, testing and simulating Modbus devices over TCP, UDP and serial lines (RTU and ASCII).** Read, poll and write coils and registers, identify a device, fingerprint which function codes it supports, scan its register map to find readable blocks, decode registers into typed values, discover Modbus devices on a subnet, record sessions to a compact capture file (MCAP) and replay them as a simulated device.
+**modbusctl is a command-line toolkit for exploring, operating, testing and simulating Modbus devices over TCP, UDP and serial lines (RTU and ASCII).** Read, poll and write coils and registers, identify a device, fingerprint which function codes it supports, scan its register map to find readable blocks, decode registers into typed values, discover Modbus devices on a subnet, record sessions to a compact capture file ([MBCAP](https://github.com/otfabric/go-modbus-capture)) and replay them as a simulated device.
 
 It is built for commissioning and site surveys, troubleshooting, reverse-engineering undocumented register maps, SunSpec inverter and meter discovery, and building hardware-free test setups. Output can be plain text, a table or JSON with stable exit codes, so it works in scripts and CI. It is written in Go on top of [go-modbus](https://github.com/otfabric/go-modbus).
 
-**Quick links:** [Quick start](#quick-start) · [Comparison](#modbusctl-vs-mbpoll-and-modpoll) · [Features](#features) · [Transports](#transports-and-serial-settings) · [Scan algorithms](#scan-algorithms-detailed) · [MCAP format](#mcap-format) · [FAQ](#faq)
+**Quick links:** [Quick start](#quick-start) · [Comparison](#modbusctl-vs-mbpoll-and-modpoll) · [Features](#features) · [Transports](#transports-and-serial-settings) · [Scan algorithms](#scan-algorithms-detailed) · [Capture files](#capture-files-mbcap) · [FAQ](#faq)
 
 > **Responsible use:** modbusctl sends real Modbus requests. Only use it on devices and networks you own or are authorized to test. Some devices react badly to scanning, so start with `--algo safe` and a `--delay`. `client write` changes coils and registers, and FC08 diagnostic sub-functions can change device state (for example restart communications, clear counters or force listen-only mode): know what an address controls before you write to it.
 
@@ -23,10 +23,10 @@ It is built for commissioning and site surveys, troubleshooting, reverse-enginee
 - **Typed decoding** — `decode` turns registers into integers, floats, strings, BCD, timestamps, IP and MAC addresses with explicit byte and word layouts.
 - **Poll and write** — `poll` reads a block at an interval and streams every sample; `write` sets coils and holding registers, with the same codecs for typed values.
 - **Every common transport** — Modbus TCP, Modbus UDP, serial RTU and ASCII (RS-232/RS-485), and RTU or ASCII framing through a serial-to-Ethernet bridge, all selected with `--url`.
-- **Record, replay, simulate** — Capture sessions to MCAP, then serve them with `server static` or `server replay` to develop and test without hardware.
+- **Record, replay, simulate** — Capture sessions to MBCAP files, then serve them with `server static` or `server replay` (at original speed, faster or slower, looped) to develop and test without hardware.
 - **Find devices** — `discover` sweeps subnets for Modbus devices, with a safety cap on large ranges.
 - **Script-friendly** — `--format text|json|table`, a single JSON error object on failure, stable exit codes and `MODBUSCTL_*` environment variables.
-- **Offline analysis** — Convert, decode, extract, summarize and string-search recorded data with the `mcap` commands.
+- **Offline analysis** — Inspect, verify, convert, decode, extract and string-search recorded data with the `mcap` commands.
 - **Pre-built binaries** — Linux, macOS and Windows (x86-64 and ARM) from [GitHub Releases](https://github.com/otfabric/modbusctl/releases), with SHA-256 checksums; no runtime to install.
 
 ---
@@ -42,8 +42,8 @@ modbusctl client identify --ip 192.168.1.10 --server-id
 # Which read function codes does each unit support?
 modbusctl client fingerprint --ip 192.168.1.10 --unit 1-10
 
-# Which register blocks are readable? (adaptive scan, saved to MCAP)
-modbusctl client scan --ip 192.168.1.10 --algo smart --start 0 --end 5000 --output scan.mcap
+# Which register blocks are readable? (adaptive scan, saved to a capture file)
+modbusctl client scan --ip 192.168.1.10 --algo smart --start 0 --end 5000 --output scan.mbcap
 
 # Read and decode a 32-bit float, as JSON
 modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:4321 --format json
@@ -55,7 +55,7 @@ modbusctl client poll --ip 192.168.1.10 --start 100 --count 4
 modbusctl client write --url rtu:///dev/ttyUSB0 --baud 9600 --unit 3 --start 100 --values 1234
 
 # Serve the scan results as a simulated Modbus TCP device on port 1502
-modbusctl server static --input scan.mcap --port 1502
+modbusctl server static --input scan.mbcap --port 1502
 ```
 
 SunSpec device? Run `modbusctl client sunspec probe --url tcp://192.168.1.10:502 --unit 1`.
@@ -128,7 +128,7 @@ They combine well: use modbusctl to discover and document a device's register ma
 - [Use cases](#use-cases)
 - [Features](#features)
 - [Installation](#installation)
-- [MCAP format](#mcap-format)
+- [Capture files](#capture-files-mbcap)
 - [Usage](#usage)
   - [Transports and serial settings](#transports-and-serial-settings)
   - [Poll registers continuously](#poll-registers-continuously)
@@ -154,24 +154,25 @@ The following features are available:
 | Fingerprint      | Probe supported read functions (FC08/FC43/FC03/FC04/FC01/FC02/FC11/FC18/FC20) per unit: functions the device answers or recognises, not ones it rejects as illegal.          |
 | Diagnostic       | Send FC08 Diagnostics requests (loopback, restart communications, diagnostic counters, etc.).                             |
 | ReportServerID   | Send FC17 Report Server ID and display server ID, run indicator, and additional device data.                              |
-| Read             | Retrieve raw data from specified Modbus registers (arbitrary count, MCAP capture).                                        |
+| Read             | Retrieve raw data from specified Modbus registers (arbitrary count, saved as a capture file).                            |
 | Poll             | Read the same block of coils or registers at an interval and print every sample as it arrives (text, JSON Lines or table), optionally decoded with a codec. Nothing is written to disk. |
 | Write            | Write coils (FC05/FC15) and holding registers (FC06/FC16). Integer values, or typed values (floats, 32/64-bit integers, strings, …) encoded with a **codec**. |
 | Transports       | Modbus TCP, Modbus UDP, serial RTU and ASCII, and RTU or ASCII framing over TCP, selected with **`--url`**. See [Transports and serial settings](#transports-and-serial-settings). |
 | Decode (registers) | Read holding/input registers (FC03/FC04) and decode them into typed values (integers, floats, strings, BCD, time, IP, MAC, …) using a **codec** such as `float32/layout:4321` or `ascii/registers:8`. |
 | Codecs           | List available register codecs (id, family, value kind, register/byte width) with optional family / value-kind / register-width filters. |
-| Record           | Record Modbus responses into structured MCAP files for replay or analysis.                                                |
-| Static           | Serve previously scanned Modbus data to simulate device behavior (static hosting).                                        |
-| Replay           | Serve previously recorded Modbus data to simulate device behavior (dynamically updated).                                  |
-| Convert          | Convert MCAP data into human-readable formats (CSV, JSON).                                                                |
-| Decode           | Decode MCAP data using specific device profiles.                                                                          |
-| Extract          | Extract raw data from recorded MCAP files.                                                                                |
-| Info             | Display detailed metadata and statistics about MCAP files, including channel information, record counts, and time ranges. |
-| Strings          | Extract all printable string data from MCAP files for inspection, debugging, or searching for embedded text.              |
-| Frequencies      | Extract potential frequency readings around 50Hz from MCAP files to help finding the correct data ranges                  |
+| Record           | Record Modbus responses into MBCAP capture files for replay or analysis.                                                  |
+| Static           | Serve the values of a capture as a Modbus TCP device (static hosting).                                                    |
+| Replay           | Replay a capture as a Modbus TCP device whose values follow the recording (speed, loops).                                 |
+| Convert          | Convert captures between mbcap, jsonl and csv (lossless), or to a wide-csv view of raw values.                            |
+| Decode           | Decode captured registers using device profiles.                                                                          |
+| Extract          | Extract the address blocks of a capture (a blocks file for `client record`).                                             |
+| Info             | Summarise a capture: targets, streams, sample counts, functions, time span and poll interval.                             |
+| Verify           | Check a capture file: block checksums, structure and the rules of the format.                                             |
+| Strings          | Extract printable strings from captured registers for inspection, debugging, or searching for embedded text.              |
+| Frequencies      | Find potential frequency readings around 50 Hz in captured registers to help find the right data ranges                  |
 | Discovery        | Discover Modbus devices within specified subnets.                                                                         |
 | SunSpec          | Transport-level SunSpec discovery: detect marker/base, enumerate model headers, print address map, or combined probe (no semantic decoding). |
-| Client `--format` | Many **`modbusctl client`** commands accept **`--format text\|json\|table`** (or **`MODBUSCTL_OUTPUT_FORMAT`**) for structured stdout; **`mcap convert`** uses a different **`--format`** (**csv** / **json**). |
+| Client `--format` | Many **`modbusctl client`** commands accept **`--format text\|json\|table`** (or **`MODBUSCTL_OUTPUT_FORMAT`**) for structured stdout; **`mcap convert`** uses a different **`--format`** (**mbcap** / **jsonl** / **csv** / **wide-csv**). |
 | Completion       | Generate shell completion scripts for bash, zsh, fish, or PowerShell; enum flags (**`--format`**, **`--algo`**, **`--function`**, **`--codec`**, **`--regtype`**, **`--sub-function`**, etc.) support tab completion. |
 
 The following tree view gives the overview of available commands.
@@ -189,22 +190,23 @@ modbusctl
 │   ├── poll             Poll coils/registers at an interval and print every sample
 │   ├── write            Write coils (FC05/FC15) or holding registers (FC06/FC16)
 │   ├── scan             Scan for valid register blocks (algo safe|smart|deep|stepped|linear|boundary|sunspec)
-│   ├── record           Record registers over time to MCAP
+│   ├── record           Record registers over time to a capture file
 │   └── sunspec           SunSpec marker detection and model header discovery
 │       ├── detect       Detect SunSpec marker and base address
 │       ├── models       Enumerate SunSpec model headers
 │       ├── map          Print SunSpec address map summary
 │       └── probe        Combined fingerprint + SunSpec detection summary
 ├── server
-│   ├── static           Serve scanned MCAP data (static)
-│   └── replay           Replay recorded MCAP data (dynamic)
+│   ├── static           Serve the values of a capture (static)
+│   └── replay           Replay a capture (values follow the recording)
 ├── mcap
-│   ├── convert          Convert MCAP → JSON / CSV
-│   ├── decode           Decode MCAP with device profiles
-│   ├── extract          Extract address blocks from MCAP
-│   ├── info             MCAP metadata & statistics
-│   ├── strings          Extract printable strings from MCAP
-│   └── frequencies      Detect ~50 Hz frequency data in MCAP
+│   ├── info             Capture summary: targets, streams, samples, timing
+│   ├── verify           Check a capture file
+│   ├── convert          Convert between mbcap, jsonl, csv; wide-csv view
+│   ├── decode           Decode captured registers with device profiles
+│   ├── extract          Extract address blocks from a capture
+│   ├── strings          Extract printable strings from captured registers
+│   └── frequencies      Detect ~50 Hz frequency data in captured registers
 ├── discover             Discover Modbus devices on subnets
 ├── completion           Generate shell completion script (bash|zsh|fish|powershell)
 └── version              Print version
@@ -348,59 +350,30 @@ make build
 
 ---
 
-## MCAP Format
+## Capture files (MBCAP)
 
-The `MCAP` (Modbus Capture) format is a specialized binary format designed for efficiently recording and replaying Modbus TCP communications, inspired by the well-known `PCAP` (Packet Capture) format used by tools such as Wireshark.
+`client read`, `client scan` and `client record` write **MBCAP** capture files; `server static`, `server replay` and the `mcap` commands read them. MBCAP is defined by [**go-modbus-capture**](https://github.com/otfabric/go-modbus-capture), whose [documentation](https://github.com/otfabric/go-modbus-capture/tree/main/docs) explains the format in full. In short:
 
-### Why MCAP?
+- A capture holds **targets** (a device: endpoint plus unit id), **streams** (how a target's data was acquired: a poll plan, a scan, a single read) and **samples**: one answered request each, stored as the **raw request and response PDUs** with the time the response arrived (monotonic, 1 µs ticks).
+- Values are never decoded or interpolated. Between two samples the earlier value holds (**sample and hold**); what was never recorded does not exist.
+- **Encodings:** `.mbcap` (compact binary: checksummed, append-only, readable after a crash), `.mbcap.jsonl` and `.mbcap.csv` (lossless text). `mcap convert` turns any into any other, and writes a `wide-csv` view of raw register values over time.
+- Files are written as the recording goes and flushed every 10 seconds: an interrupted `client record` leaves a file that is readable up to the last flush.
+- Only answered reads are recorded. Retried attempts and failed reads leave no sample; exception responses are recorded with `--record-exceptions`.
 
-MCAP provides a structured, compact, and efficient way to store Modbus data for:
- - Recording Modbus interactions with timestamps, iteration counters, and metadata.
- - Replaying recorded data for testing or simulation of Modbus devices.
- - Analyzing and decoding Modbus registers for debugging and diagnostics.
+A capture in its JSON Lines form (`modbusctl mcap convert --input session.mbcap --format jsonl`):
 
-### MCAP File Structure
-
-An MCAP file contains two main components, each encoded for a specific purpose:
-
-| Component |Description |
-|-----------|------------|
-| Header    | Includes metadata such as IP address, port, function codes, timestamps, and protocol-specific details. The header is **JSON encoded** for readability and easy inspection. |
-| Records   | Sequential Modbus transaction records containing iteration counts, precise request and response timestamps, register addresses, counts, and raw data payloads. The records are **binary encoded** for performance and compactness, enabling efficient storage and fast replay. |
-
-The following is an example of a JSON converted MCAP file:
-
-```json
-{
-  "header": {
-    "ip": "192.168.2.201",
-    "port": 502,
-    "unit": 21,
-    "function": 3,
-    "start_time": "2025-07-14T13:05:56.998694708Z"
-  },
-  "records": [
-    {
-      "iteration": 0,
-      "request_timestamp": "2025-07-14T13:14:24.701149758Z",
-      "response_timestamp": "2025-07-14T13:14:24.951906811Z",
-      "start_address": 4096,
-      "register_count": 62,
-      "raw_data": "000001a7000000f3000000f4000000f5000001a4000001a8000001a8ffffffff0000013f000001ab000001cf00000047000001cdffffffa0ffffffd1ffffffffffffffffffffffffffffffff000001270000004e00000068000000720000001400000024fffffff6fffffffbfffffee9ffffffbeffffff9bffffff90"
-    },
-    {
-      "iteration": 1,
-      "request_timestamp": "2025-07-14T13:14:31.312332629Z",
-      "response_timestamp": "2025-07-14T13:14:31.570347588Z",
-      "start_address": 4158,
-      "register_count": 67,
-      "raw_data": "000003b40000a790ffffffffffffffff0000c36effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-    }
-  ]
-}
+```jsonl
+{"t":"header","version":"0.1","tick_ns":1000,"wall_start":"2026-10-14T13:14:24.701149Z","producer":"modbusctl 3.0.0"}
+{"t":"target","id":1,"transport":"tcp","host":"192.168.2.201","port":502,"unit":21,"tags":{"url":"tcp://192.168.2.201:502"}}
+{"t":"stream","id":1,"target":1,"role":"poll","label":"FC3, 1 blocks every 1000 ms"}
+{"t":"s","s":1,"at":250757,"req":"0310000002","resp":"0304000101a7"}
+{"t":"s","s":1,"at":1251044,"req":"0310000002","resp":"0304000101a8"}
+{"t":"end","at":2001300}
 ```
 
-More examples and test files can be found in the [results](./results) folder for quick exploration and verification.
+The [`mbcapctl`](https://github.com/otfabric/go-modbus-capture/blob/main/docs/cli.md) tool of go-modbus-capture adds file operations modbusctl does not have: merging, splitting per stream or function code, filtering, trimming and repairing captures.
+
+**Coming from modbusctl 2.x:** the MCAP v1 files (`.mcap`) of modbusctl 2.x are not read by modbusctl 3. Record the device again; the commands reject a v1 file with a message that says so. See the [release notes](RELEASE.md) for every change.
 
 ---
 
@@ -412,7 +385,7 @@ More examples and test files can be found in the [results](./results) folder for
 
 **Client address:** All client commands accept either `--url` (e.g. `tcp://192.168.1.10:502` or `rtu:///dev/ttyUSB0`) or `--ip` and optionally `--port` (Modbus TCP); the two styles are **mutually exclusive** (you must set one and cannot set both). See [Transports and serial settings](#transports-and-serial-settings).
 
-**Client stdout format (`--format`):** Commands **identify**, **read**, **decode**, **write**, **poll**, **scan**, **record**, **reportserverid**, **fingerprint**, **diagnostic**, and **client sunspec** (detect, models, map, probe) accept **`--format text`** (default), **`json`**, or **`table`**, or set **`MODBUSCTL_OUTPUT_FORMAT`**. This controls **only** the final human- or machine-readable **result on stdout**. It is **not** the same as **`modbusctl mcap convert --format`**, which chooses **csv** or **json** export for MCAP files (env **`MODBUSCTL_FORMAT`**).
+**Client stdout format (`--format`):** Commands **identify**, **read**, **decode**, **write**, **poll**, **scan**, **record**, **reportserverid**, **fingerprint**, **diagnostic**, and **client sunspec** (detect, models, map, probe) accept **`--format text`** (default), **`json`**, or **`table`**, or set **`MODBUSCTL_OUTPUT_FORMAT`**. This controls **only** the final human- or machine-readable **result on stdout**. It is **not** the same as **`modbusctl mcap convert --format`**, which chooses the capture encoding: **mbcap**, **jsonl**, **csv** or **wide-csv** (env **`MODBUSCTL_FORMAT`**).
 
 **Scan and record:** Live progress (scan lines, per-block lines, worst-case hints, **`--debug`** traces, record iteration messages) goes to **stderr**; **stdout** is a **single** formatted result after the run (summary for scan/record). When using **`--format json`**, redirect or separate streams if scripts must not mix progress with JSON.
 
@@ -440,6 +413,7 @@ modbusctl client sunspec probe
 modbusctl server static
 modbusctl server replay
 
+modbusctl mcap verify
 modbusctl mcap convert
 modbusctl mcap decode
 modbusctl mcap extract
@@ -451,7 +425,7 @@ modbusctl discover
 modbusctl version
 ```
 
-**Shell completion:** Enum-style flags support tab completion, including **`--format`** (client: text/json/table; **`mcap convert`**: csv/json), **`--algo`**, **`--function`**, **`--codec`**, **`--parity`**, **`--regtype`**, and **`--sub-function`**. To enable completion, generate and source the script (see [Cobra’s shell completion guide](https://github.com/spf13/cobra/blob/main/shell_completions.md)); for example, `modbusctl completion bash` (or `zsh` / `fish` / `powershell`).
+**Shell completion:** Enum-style flags support tab completion, including **`--format`** (client: text/json/table; **`mcap convert`**: mbcap/jsonl/csv/wide-csv), **`--algo`**, **`--function`**, **`--codec`**, **`--parity`**, **`--regtype`**, and **`--sub-function`**. To enable completion, generate and source the script (see [Cobra’s shell completion guide](https://github.com/spf13/cobra/blob/main/shell_completions.md)); for example, `modbusctl completion bash` (or `zsh` / `fish` / `powershell`).
 
 ### Transports and serial settings
 
@@ -489,7 +463,7 @@ modbusctl client identify --url ascii:///dev/ttyUSB0 --baud 9600 --parity even -
 modbusctl client decode --url udp://192.168.1.10:502 --start 100 --codec uint32/layout:4321
 
 # An RTU device behind a serial-to-Ethernet bridge
-modbusctl client scan --url rtuovertcp://192.168.1.50:4001 --unit 7 --start 0 --end 200 --output scan.mcap
+modbusctl client scan --url rtuovertcp://192.168.1.50:4001 --unit 7 --start 0 --end 200 --output scan.mbcap
 ```
 
 Good to know:
@@ -497,7 +471,7 @@ Good to know:
 - **Defaults differ between tools.** Many devices ship as 9600 8N1; the Modbus specification default is 19200 8E1. If a serial device does not answer, check `--baud`, `--parity` and `--stop-bits` against its manual first.
 - **One request at a time on a serial line.** With `rtu://` and `ascii://`, `--parallel` is ignored and units are queried one after the other.
 - **Unit IDs matter on a bus.** A unit that is not present does not answer, so each missing unit costs one `--timeout`. Use a short timeout (for example `--timeout 300`) when sweeping units with `--unit 1-32`.
-- **MCAP captures** made over a serial line store the device path in the header's `ip` field and port 0.
+- **Captures** made over a serial line record the device path and serial settings (baud, parity, data and stop bits) of the target; the full URL is kept in the target's `url` tag.
 - **`server` and `discover` are Modbus TCP only.**
 - UDP transports are not part of the Modbus specification; vendors use either `udp://` (MBAP framing) or `rtuoverudp://`. Try both if unsure.
 
@@ -664,17 +638,17 @@ Example output (default **`--format text`**):
 
 #### Read registers (single or block)
 
-Use **`--format`** for stdout (after any MCAP write). **`--output`** still writes MCAP when set.
+Use **`--format`** for stdout (after the capture is written). **`--output`** names the capture file (`.mbcap`); without it a file `modbusctl_read_<UTC time>.mbcap` is written in the current directory.
 
 **Addresses:** `--start`, scan `--start`/`--end`, and record block JSON use **raw Modbus PDU addresses** (16-bit values as on the wire: 0–65535). They are **not** “4xxxx minus 40001” style logical labels — e.g. `--start 40001` is literal address **40001**, not “register 1”.
 
 ```console
 modbusctl client read --ip 192.168.1.10 --start 30001 --count 2
-modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --output data.mcap
+modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --output data.mbcap
 modbusctl client read --ip 192.168.1.10 --start 40001 --count 10 --format json
 ```
 
-> **Note:** `read` is the raw-capture command (arbitrary register count, MCAP output). Typed
+> **Note:** `read` is the raw-capture command (arbitrary register count, capture file output). Typed
 > interpretation of register values now lives in `client decode`. The former `--ascii` and
 > `--byteswap` flags have been removed; use the corresponding codecs instead
 > (e.g. `--codec ascii/registers:N`, or a layout-aware numeric codec such as `uint32/layout:2143`).
@@ -705,7 +679,7 @@ modbusctl client codecs --value-kind string --format json
 
 #### Poll registers continuously
 
-`client poll` reads the same block every `--interval` milliseconds and prints each sample as soon as it is read. It does not write a file; use [`client record`](#record-registers-over-time-interval-duration-based) to capture to MCAP.
+`client poll` reads the same block every `--interval` milliseconds and prints each sample as soon as it is read. It does not write a file; use [`client record`](#record-registers-over-time-interval-duration-based) to write a capture file.
 
 It runs until `--polls` samples were taken, or until you press Ctrl-C when `--polls` is 0 (the default). `--function` selects coils (1), discrete inputs (2), holding registers (3, default) or input registers (4). With `--codec`, registers are decoded into typed values exactly as `client decode` does.
 
@@ -795,7 +769,7 @@ Safeguards:
 
 #### Scan registers (discover valid address blocks)
 
-Scan discovers which register ranges are readable and writes successful reads to an MCAP file. Choose the algorithm with `--algo`:
+Scan discovers which register ranges are readable and writes successful reads to a capture file (`.mbcap`; with `--record-exceptions` also the exception responses, which show where the device refuses). Choose the algorithm with `--algo`:
 
 | Algorithm | Description | Use case |
 |-----------|-------------|----------|
@@ -805,47 +779,47 @@ Scan discovers which register ranges are readable and writes successful reads to
 | **stepped** | Quick check at step positions (e.g. 0, 1000, 2000). At each step probes 6 reads (pos−1, pos, pos+1 × count 1 or 2); on any hit expands with 125,64,32,16,8,4 **strictly within** `--start`/`--end`. Use `--step` (default 1000) and optional `--step-half-offset` for step/2 positions. | Fast discovery of hotspots; full range with few reads when no hits. |
 | **linear**  | 125-aligned blocks: probe 125 at a time; on success extend forward, then binary-search for max tail. When a 125 succeeds after a previous 125 failed, binary-search backwards for the real start. Emits a single gap probe between blocks to detect small islands. | Longest continuous blocks with minimal probes; good when registers are mostly contiguous. |
 | **boundary** | Given a known-good read (`--seed-start`, `--seed-count`), expands left/right with exponential then binary search; **clamps** to `--start`/`--end` (no skip). Invalid or out-of-range seed → no tasks. | One known-good range; find maximal readable interval around it. |
-| **sunspec** | SunSpec protocol-aware: probes candidate base addresses for the SunS marker, then walks the model chain — reads each header (2 regs) followed by the full model body (in chunks of ≤125 regs). No `--start`/`--end` needed. Use `--sunspec-base` to skip detection; `--sunspec-bases` for custom candidates; `--sunspec-max-models` / `--sunspec-max-span` for limits. | SunSpec-compliant devices; full model capture to MCAP. |
+| **sunspec** | SunSpec protocol-aware: probes candidate base addresses for the SunS marker, then walks the model chain — reads each header (2 regs) followed by the full model body (in chunks of ≤125 regs). No `--start`/`--end` needed. Use `--sunspec-base` to skip detection; `--sunspec-bases` for custom candidates; `--sunspec-max-models` / `--sunspec-max-span` for limits. | SunSpec-compliant devices; full model capture to a capture file. |
 
-**Flags:** `--ip` (required), `--start`, `--end`, `--function` (3=holding, 4=input), `--delay` (ms between requests), `--algo` (safe | smart | deep | stepped | linear | boundary | sunspec), `--step` (stepped algo only, default 1000), `--step-half-offset` (stepped: also probe at step/2), `--retry-timeout` (0 or 1: retry once on timeout/transport error), `--seed-start` and `--seed-count` (boundary algo: known-good read), `--sunspec-base` (sunspec: known base, skip detection), `--sunspec-bases` (sunspec: custom candidate bases), `--sunspec-max-models` (sunspec: max headers, 0=256), `--sunspec-max-span` (sunspec: max address span, 0=unlimited), `--output` (MCAP file), **`--format`** (stdout summary: **text** | **json** | **table**). Use global **`--debug`** to print each read range (start, count, end) on **stderr** before attempting. Default algo is **safe**.
+**Flags:** `--ip` (required), `--start`, `--end`, `--function` (3=holding, 4=input), `--delay` (ms between requests), `--algo` (safe | smart | deep | stepped | linear | boundary | sunspec), `--step` (stepped algo only, default 1000), `--step-half-offset` (stepped: also probe at step/2), `--retry-timeout` (0 or 1: retry once on timeout/transport error), `--seed-start` and `--seed-count` (boundary algo: known-good read), `--sunspec-base` (sunspec: known base, skip detection), `--sunspec-bases` (sunspec: custom candidate bases), `--sunspec-max-models` (sunspec: max headers, 0=256), `--sunspec-max-span` (sunspec: max address span, 0=unlimited), `--output` (capture file or directory), `--record-exceptions` (also record exception responses), **`--format`** (stdout summary: **text** | **json** | **table**). Use global **`--debug`** to print each read range (start, count, end) on **stderr** before attempting. Default algo is **safe**.
 
 ```console
 # Safe (default): conservative, low device load
-modbusctl client scan --ip 192.168.1.10 --start 0 --end 1000 --output scan.mcap
+modbusctl client scan --ip 192.168.1.10 --start 0 --end 1000 --output scan.mbcap
 
 # Smart: interval splitting, good for sparse maps
-modbusctl client scan --ip 192.168.1.10 --algo smart --start 0 --end 5000 --output scan.mcap
+modbusctl client scan --ip 192.168.1.10 --algo smart --start 0 --end 5000 --output scan.mbcap
 
 # Deep: smart + boundary refinement for hard devices
-modbusctl client scan --ip 192.168.1.10 --algo deep --function 3 --start 0 --end 2000 --output scan.mcap
+modbusctl client scan --ip 192.168.1.10 --algo deep --function 3 --start 0 --end 2000 --output scan.mbcap
 
 # With delay between requests (e.g. 100 ms)
-modbusctl client scan --ip 192.168.1.10 --start 1 --end 65535 --delay 100 --output scan-results.mcap
+modbusctl client scan --ip 192.168.1.10 --start 1 --end 65535 --delay 100 --output scan-results.mbcap
 
 # Input registers (function code 4)
-modbusctl client scan --ip 192.168.1.10 --function 4 --algo smart --output input_scan.mcap
+modbusctl client scan --ip 192.168.1.10 --function 4 --algo smart --output input_scan.mbcap
 
 # Stepped: quick check every 1000 registers (override with --step 100, 2000, 10000, etc.)
-modbusctl client scan --ip 192.168.1.10 --algo stepped --step 1000 --output scan.mcap
-modbusctl client scan --ip 192.168.1.10 --algo stepped --step 2000 --start 0 --end 20000 --output scan.mcap
+modbusctl client scan --ip 192.168.1.10 --algo stepped --step 1000 --output scan.mbcap
+modbusctl client scan --ip 192.168.1.10 --algo stepped --step 2000 --start 0 --end 20000 --output scan.mbcap
 
 # Linear: 125-aligned blocks, extend forward then tail; backward to find real start after late hit
-modbusctl client scan --ip 192.168.1.10 --algo linear --start 0 --end 5000 --output scan.mcap
+modbusctl client scan --ip 192.168.1.10 --algo linear --start 0 --end 5000 --output scan.mbcap
 
 # Boundary: expand from a known-good read (e.g. from a prior scan or stepped hit)
-modbusctl client scan --ip 192.168.1.10 --algo boundary --seed-start 100 --seed-count 10 --start 0 --end 500 --output scan.mcap
+modbusctl client scan --ip 192.168.1.10 --algo boundary --seed-start 100 --seed-count 10 --start 0 --end 500 --output scan.mbcap
 
 # With global --debug: print each read range, result outcome, and strategy internals (phase, state, decisions) for all algos
-modbusctl client scan --ip 192.168.1.10 --algo safe --delay 10 --output scan.mcap --debug
+modbusctl client scan --ip 192.168.1.10 --algo safe --delay 10 --output scan.mbcap --debug
 
 # SunSpec: auto-detect base address and walk model chain
-modbusctl client scan --ip 192.168.1.10 --algo sunspec --output sunspec.mcap
+modbusctl client scan --ip 192.168.1.10 --algo sunspec --output sunspec.mbcap
 
 # SunSpec: known base address (skip detection)
-modbusctl client scan --ip 192.168.1.10 --algo sunspec --sunspec-base 40000 --output sunspec.mcap
+modbusctl client scan --ip 192.168.1.10 --algo sunspec --sunspec-base 40000 --output sunspec.mbcap
 
 # SunSpec: custom candidate bases
-modbusctl client scan --ip 192.168.1.10 --algo sunspec --sunspec-bases "0,40000,50000" --output sunspec.mcap
+modbusctl client scan --ip 192.168.1.10 --algo sunspec --sunspec-bases "0,40000,50000" --output sunspec.mbcap
 ```
 
 For every algorithm, a one-line **worst-case hint** and all **live progress** (scanning banner, each **Block:** line, **`--debug`** traces) go to **stderr**. **Stdout** prints **one** final summary after the run (default **text**, or **json** / **table** via **`--format`**). The summary includes algorithm, total requests, success/failed counts, **exception/timeout/transport error breakdown** (when non-zero), blocks and registers captured, average response time, duration, and output path.
@@ -865,7 +839,7 @@ Blocks captured: 91
 Registers captured: 1842
 Avg response time: 12 ms
 Duration: 2m14s
-Output: scan.mcap
+Output: scan.mbcap
 ```
 When non-zero, the summary also reports **Exception**, **Timeout**, and **Transport error** counts (from outcome classification) so you can distinguish Modbus exceptions from transient failures.
 
@@ -879,7 +853,7 @@ When non-zero, the summary also reports **Exception**, **Timeout**, and **Transp
 | **stepped** | Huge range; cheap triage; quick reconnaissance (not a final mapper). |
 | **linear** | Long contiguous maps; PLC-style devices; fast when fragmentation is low. |
 | **boundary** | You have one known-good (start, count); find maximal readable interval around it. |
-| **sunspec** | SunSpec device; protocol-aware base detection + model chain walk to MCAP. |
+| **sunspec** | SunSpec device; protocol-aware base detection + model chain walk to a capture file. |
 
 Failures are classified (success, Modbus exception, timeout, transport error) so strategies can avoid retrying on strong exception evidence (e.g. Illegal Data Address). For a full specification of each algorithm (state, transitions, worst-case counts, and examples suitable for re-implementation), see **[ALGOS.md](ALGOS.md)**. For the optional improvement roadmap (priority queue, stepped offsets, coalesce-smart, etc.), see **[REFACTOR.md](REFACTOR.md)**.
 
@@ -904,64 +878,88 @@ Failures are classified (success, Modbus exception, timeout, transport error) so
 
 #### Record registers over time (interval, duration based)
 
-Progress messages (e.g. each iteration and recorded block) go to **stderr**; **stdout** is a **single** final summary (**`--format text|json|table`**).
+Polls the blocks of `--blocks-file` every `--interval` ms for `--duration` ms and writes every answered read to a capture file. A failed or retried read leaves no sample. Progress messages (each iteration and recorded block) go to **stderr**; **stdout** is a **single** final summary (**`--format text|json|table`**).
 
 ```console
-modbusctl client record --ip 192.168.1.10 --blocks-file register-ranges.json --interval 1000 --duration 60000 --output session.mcap
-modbusctl client record --ip 192.168.1.10 --blocks-file register-ranges.json --interval 1000 --duration 60000 --output session.mcap --format json
+modbusctl client record --ip 192.168.1.10 --blocks-file register-ranges.json --interval 1000 --duration 60000 --output session.mbcap
+modbusctl client record --ip 192.168.1.10 --blocks-file register-ranges.json --interval 1000 --duration 60000 --output session.mbcap --format json
+modbusctl client record --url rtu:///dev/ttyUSB0 --baud 9600 --unit 3 --blocks-file blocks.json --duration 600000 --output meter.mbcap --record-exceptions
 ```
 
 #### Statically host data (no changes in data)
 
+Serves the values of a capture as a Modbus TCP device: by default the last recorded values, or the values at `--at` (a time since the capture start). Every target of the capture answers on its recorded unit id; `--target` picks one and `--unit` serves it on another unit id.
+
 ```console
-modbusctl server static --input session.mcap --port 1502
+modbusctl server static --input session.mbcap --port 1502
+modbusctl server static --input site.mbcap --target 2 --unit 1 --at 10m
 ```
 
 #### Replay recorded data (looped)
 
+The served values follow the recording: at its original speed (`--speed 1`), faster (`--speed 60`: a minute per second) or slower (`--speed 0.1`). `--loops 0` (default) repeats forever; `--loops N` plays N times and then keeps the last values. `--from` starts part-way into the capture.
+
 ```console
-modbusctl server replay --input session.mcap --port 1502 --loops 0
-modbusctl server replay --input session.mcap --loops=0 --interval=1000
+modbusctl server replay --input session.mbcap --port 1502
+modbusctl server replay --input session.mbcap --speed 10 --loops 3 --from 5m
 ```
 
-#### Convert data to json or csv
+Both servers:
+
+- accept up to `--max-clients` concurrent connections (default 10) and close further ones;
+- print a summary when stopped (`📊 Served N requests: …`), counting the answers, exceptions, silences and requests for data the capture does not hold; with `--debug` they also name each such request and log the Modbus frames;
+- answer **FC01–04** from the values recorded per address (any range whose addresses were all recorded, even one never requested as such), **FC07**, **FC11** and **FC12** with the recorded response, and **FC43** device identification from the recorded objects;
+- refuse writes (Illegal Function): a replayed device is read-only;
+- answer what the capture does not hold according to `--missing`: **exception** (default: Illegal Function for a function never recorded, Illegal Data Address otherwise), **zero** (unrecorded registers and coils read 0), or **silence** (no answer: the client times out);
+- before an address is first sampled, serve its first sample (`--before-first hold`, default) or treat it as unrecorded (`--before-first absent`; replay only).
+
+#### Inspect and verify a capture
 
 ```console
-modbusctl mcap convert --input session.mcap --format json --output data.json
-modbusctl mcap convert --input session.mcap --format csv --output data.csv
+modbusctl mcap info --input session.mbcap
+modbusctl mcap verify --input session.mbcap
+```
+
+#### Convert a capture
+
+`mbcap`, `jsonl` and `csv` are lossless and convert back to the identical capture; `wide-csv` is a one-way view with one column per address, for charting raw values.
+
+```console
+modbusctl mcap convert --input session.mbcap --format jsonl --output session.mbcap.jsonl
+modbusctl mcap convert --input session.mbcap --format csv --output session.mbcap.csv
+modbusctl mcap convert --input session.mbcap --format wide-csv --output registers.wide.csv
 ```
 
 #### Decode data using device profiles (decoding+scaling)
 
+The register-block commands (`decode`, `extract`, `strings`, `frequencies`) work on the FC01–04 samples of one target and one function. A capture with several takes `--target` and `--function` to choose; the error message lists the choices.
+
 ```console
-modbusctl mcap decode --input data.mcap --profile device_profile.json --output output.json
+modbusctl mcap decode --input data.mbcap --profile device_profile.json --output output.json
+modbusctl mcap decode --input site.mbcap --target 2 --function 4 --profile meter.json
 ```
 
 #### Extract data address blocks (continuous readable address spaces)
 
-```console
-modbusctl mcap extract --input input.mcap --output register-ranges.json
-```
-
-#### Information data (meta data, timing statistics)
+The output is a blocks file for `client record`: scan once, then record exactly the readable blocks.
 
 ```console
-modbusctl mcap info --input data.mcap --output info.txt
+modbusctl mcap extract --input scan.mbcap --output register-ranges.json
 ```
 
 #### Search for strings data (device identification)
 
-Extracts printable ASCII strings from MCAP data. The command tries four common byte/register layouts (ABCD, BADC, CDAB, DCBA) automatically and tags each hit with the layout that produced it (e.g. `[ABCD] [100-103] 4 regs: TEST`). No byte-order flag is needed.
+Extracts printable ASCII strings from captured registers. The command tries four common byte/register layouts (ABCD, BADC, CDAB, DCBA) automatically and tags each hit with the layout that produced it (e.g. `[ABCD] [100-103] 4 regs: TEST`). No byte-order flag is needed.
 
 ```console
-modbusctl mcap strings --input file.mcap --output strings.txt
-modbusctl mcap strings --input file.mcap
+modbusctl mcap strings --input file.mbcap --output strings.txt
+modbusctl mcap strings --input file.mbcap
 ```
 
 #### Search for frequency data (data discovery)
 
 ```console
-modbusctl mcap frequencies --input file.mcap --output frequencies.txt
+modbusctl mcap frequencies --input file.mbcap --output frequencies.txt
 ```
 
 #### Discover devices (nmap alike probing)
@@ -1037,21 +1035,27 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_DELAY**       | uint16   | Delay in ms between client scan requests                 | `--delay`       | 0          |
 | **MODBUSCTL_DURATION**    | uint32   | Total duration to record in ms                           | `--duration`    | 60000      |
 | **MODBUSCTL_END**         | uint16   | End register address                                     | `--end`         | 65535      |
-| **MODBUSCTL_FORMAT**      | string   | **`mcap convert`** output type: **csv** or **json** (not client stdout) | `--format`      |            |
-| **MODBUSCTL_FUNCTION**    | uint8    | Function code (1=coil, 2=discrete, 3=holding, 4=input); **`client write`**: 5, 6, 15 or 16 (0 = FC06 for one register, otherwise FC16) | `--function`    | 3 (write: 0) |
-| **MODBUSCTL_INPUT**       | string   | Input MCAP file (`mcap` subcommands; `server static` / `server replay`) | `--input`       |            |
+| **MODBUSCTL_AT**          | string   | **`server static`**: serve the values at this time since the capture start (e.g. 90s; default: the last values) | `--at` |            |
+| **MODBUSCTL_BEFORE_FIRST** | string  | **`server replay`**: before an address is first sampled: **hold** (its first sample) or **absent** | `--before-first` | hold |
+| **MODBUSCTL_FORMAT**      | string   | **`mcap convert`** output encoding: **mbcap**, **jsonl**, **csv** or **wide-csv** (not client stdout) | `--format`      |            |
+| **MODBUSCTL_FROM**        | string   | **`server replay`**: start at this time since the capture start (e.g. 10m) | `--from` | 0 |
+| **MODBUSCTL_FUNCTION**    | uint8    | Function code (1=coil, 2=discrete, 3=holding, 4=input); **`client write`**: 5, 6, 15 or 16 (0 = FC06 for one register, otherwise FC16); **`mcap decode`/`extract`/`strings`/`frequencies`**: the function to use (0 = the only one in the capture) | `--function`    | 3 (write, mcap: 0) |
+| **MODBUSCTL_INPUT**       | string   | Input capture file (`mcap` subcommands; `server static` / `server replay`) | `--input`       |            |
 | **MODBUSCTL_BLOCKS_FILE** | string   | JSON address blocks for **`client record`** only         | `--blocks-file` |            |
 | **MODBUSCTL_INTERFACE**   | string   | Network interface to use for discovery                   | `--interface`   | eth0       |
-| **MODBUSCTL_INTERVAL**    | uint32   | Interval in ms (poll/record/replay iterations or fingerprint probes) | `--interval`    | 0 (fingerprint), 1000 (poll), 5000 (record/replay) |
+| **MODBUSCTL_INTERVAL**    | uint32   | Interval in ms (poll/record iterations or fingerprint probes) | `--interval`    | 0 (fingerprint), 1000 (poll), 5000 (record) |
 | **MODBUSCTL_IP**          | string   | Modbus TCP device IP address                             | `--ip`          |            |
-| **MODBUSCTL_LOOPS**       | uint16   | Number of times to loop the replay                       | `--loops`       | 0          |
-| **MODBUSCTL_OUTPUT**      | string   | Output MCAP file or directory                            | `--output`      |            |
+| **MODBUSCTL_LOOPS**       | uint16   | **`server replay`**: times to play the capture (0 = forever); afterwards the last values stay | `--loops`       | 0          |
+| **MODBUSCTL_MAX_CLIENTS** | uint16   | **`server static`/`replay`**: maximum concurrent client connections (0 = 10) | `--max-clients` | 0 |
+| **MODBUSCTL_MISSING**     | string   | **`server static`/`replay`**: answer for data the capture does not hold: **exception**, **zero** or **silence** | `--missing` | exception |
+| **MODBUSCTL_OUTPUT**      | string   | Output capture file (`.mbcap`) or directory              | `--output`      |            |
 | **MODBUSCTL_DATA**            | string   | Hex-encoded request data for FC08 Diagnostics        | `--data`        |            |
 | **MODBUSCTL_PARALLEL**        | uint16   | Concurrent probes when using `identify --unit all` (1-64); ignored on serial lines | `--parallel`    | 10         |
 | **MODBUSCTL_PARITY**      | string   | Serial parity: none, even or odd                         | `--parity`      | none       |
 | **MODBUSCTL_POLLS**       | uint32   | **`client poll`**: number of polls before exiting (0 = until interrupted) | `--polls`       | 0          |
 | **MODBUSCTL_PORT**        | uint16   | Modbus TCP port or server port                           | `--port`        | 502        |
 | **MODBUSCTL_PROFILE**     | string   | Device profile to decode                                 | `--profile`     |            |
+| **MODBUSCTL_RECORD_EXCEPTIONS** | bool | **`client record`/`scan`**: also record exception responses in the capture | `--record-exceptions` | false |
 | **MODBUSCTL_RESOLVE_MAC** | bool     | Resolve MAC addresses of discovered devices              | `--resolve-mac` | false      |
 | **MODBUSCTL_DISCOVER_FORCE_LARGE** | bool | Allow **discover** when unique host count exceeds the built-in safety cap | `--force-large-scan` | false |
 | **MODBUSCTL_SUB_FUNCTION**| string   | FC08 Diagnostics sub-function name, lowercase (e.g. returnquerydata, clearcountersanddiagnosticreg) | `--sub-function`| returnquerydata |
@@ -1066,9 +1070,11 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_SUNSPEC_BASES** | string | Sunspec algo: comma-separated candidate base addresses    | `--sunspec-bases` |          |
 | **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Sunspec algo: max model headers to read (0=256)         | `--sunspec-max-models` | 0   |
 | **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Sunspec algo: max address span from base (0=no limit)  | `--sunspec-max-span` | 0     |
+| **MODBUSCTL_SPEED**       | string   | **`server replay`**: speed factor (1 = original, 10 = ten times faster, 0.1 = ten times slower) | `--speed` | 1 |
 | **MODBUSCTL_SUBNETS**     | string   | Subnets to scan for Modbus devices (comma-separated)     | `--subnets`     |            |
+| **MODBUSCTL_TARGET**      | uint32   | Capture target to use: **`server static`/`replay`** (0 = every target), **`mcap decode`/`extract`/`strings`/`frequencies`** (0 = the only one) | `--target` | 0 |
 | **MODBUSCTL_TIMEOUT**     | uint16   | Request timeout in ms and dial cap; **0 = 10000** ms default | `--timeout`     | 0 (most client commands) |
-| **MODBUSCTL_UNIT**        | string   | Unit ID (1-255); for multi-unit commands: single, range (1-10), list (1,5,25), mixed (1-10,255), or `all` | `--unit` | 1       |
+| **MODBUSCTL_UNIT**        | string   | Unit ID (1-255); for multi-unit commands: single, range (1-10), list (1,5,25), mixed (1-10,255), or `all`; **`server static`/`replay`**: serve the target on this unit id (0 = its recorded unit id) | `--unit` | 1 (servers: 0) |
 | **MODBUSCTL_URL**         | string   | Modbus URL for client commands: `tcp://`, `udp://`, `rtu://`, `ascii://`, `rtuovertcp://`, `rtuoverudp://` or `asciiovertcp://` (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port | `--url`  |         |
 | **MODBUSCTL_VALUES**      | string   | **`client write`**: comma-separated values to write       | `--values`      |            |
 | **MODBUSCTL_REGTYPE**     | string   | Register type for sunspec: holding or input | `--regtype` | holding |
@@ -1087,7 +1093,7 @@ Example usage:
 ```console
 MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ADDRESS=40001 MODBUSCTL_COUNT=10 modbusctl client read
 MODBUSCTL_URL=rtu:///dev/ttyUSB0 MODBUSCTL_BAUD=9600 MODBUSCTL_PARITY=even MODBUSCTL_UNIT=3 modbusctl client poll --start 0 --count 4
-MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ALGO=smart MODBUSCTL_START=0 MODBUSCTL_END=1000 MODBUSCTL_OUTPUT=scan.mcap modbusctl client scan
+MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ALGO=smart MODBUSCTL_START=0 MODBUSCTL_END=1000 MODBUSCTL_OUTPUT=scan.mbcap modbusctl client scan
 ```
 
 ---
@@ -1100,7 +1106,7 @@ modbusctl is a command-line tool for Modbus over TCP, UDP and serial lines (RTU 
 
 ### How do I find which Modbus registers a device exposes?
 
-Run a scan, for example `modbusctl client scan --ip 192.168.1.10 --algo smart --start 0 --end 5000 --output scan.mcap`. Use `--algo safe` with `--delay` for fragile devices and `--algo deep` for precise block edges. See [Scan registers](#scan-registers-discover-valid-address-blocks).
+Run a scan, for example `modbusctl client scan --ip 192.168.1.10 --algo smart --start 0 --end 5000 --output scan.mbcap`. Use `--algo safe` with `--delay` for fragile devices and `--algo deep` for precise block edges. See [Scan registers](#scan-registers-discover-valid-address-blocks).
 
 ### How do I read a float or string from Modbus registers on the command line?
 
@@ -1108,7 +1114,7 @@ Use `client decode` with a codec, for example `modbusctl client decode --ip 192.
 
 ### How do I simulate a Modbus device without hardware?
 
-Record or scan a real device to an MCAP file, then serve it with `modbusctl server static --input session.mcap --port 1502` (fixed values) or `modbusctl server replay --input session.mcap` (values replayed over time).
+Record or scan a real device to a capture file, then serve it with `modbusctl server static --input session.mbcap --port 1502` (fixed values) or `modbusctl server replay --input session.mbcap --speed 10` (values replayed over time, here ten times faster).
 
 ### Does modbusctl support Modbus RTU (serial)?
 
@@ -1126,9 +1132,9 @@ Use `modbusctl client poll --ip 192.168.1.10 --start 100 --count 4 --interval 10
 
 The serial settings must match the device exactly: `--baud`, `--parity`, `--stop-bits` and `--data-bits`. Many devices use 9600 8N1 (`--baud 9600 --parity none --stop-bits 1`), while modbusctl defaults to 19200 with no parity and 2 stop bits. Also check the `--unit` ID, that A/B are not swapped on RS-485, and whether the device speaks RTU (`rtu://`) or ASCII (`ascii://`).
 
-### What is MCAP?
+### What is MBCAP?
 
-MCAP (Modbus Capture) is a compact capture format, inspired by PCAP, that stores Modbus transactions with timestamps for replay and analysis. See [MCAP format](#mcap-format).
+MBCAP is the capture format of modbusctl 3, defined by [go-modbus-capture](https://github.com/otfabric/go-modbus-capture): what a device answered (raw request and response PDUs) and when, for several devices and acquisition streams in one file, in a compact binary encoding or lossless JSON Lines and CSV. See [Capture files](#capture-files-mbcap). modbusctl 2.x wrote MCAP v1 files, which modbusctl 3 does not read.
 
 ### How do I use modbusctl in scripts and CI?
 
@@ -1151,18 +1157,20 @@ modbusctl/
 ├── cmd/
 │   ├── client (Identify, Fingerprint, Diagnostic, ReportServerID, Read, Decode, Poll, Write, Record, Scan, SunSpec commands)
 │   ├── discover (Device discovery)
-│   ├── mcap (MCAP file operations: convert, decode, extract, frequencies, info, strings)
+│   ├── mcap (capture file operations: info, verify, convert, decode, extract, frequencies, strings)
 │   └── server (Modbus TCP data replay server)
 ├── internal/
 │   ├── config (CLI & env: types, flags, completion, diagnostics, Modbus URL / SunSpec base parsing)
 │   ├── cli (shared Cobra helpers: enum completion, stdout file, required flags, debug)
-│   ├── format (client stdout **text/json/table** via `Write`, streaming output via `StreamWriter`; MCAP-derived **strings** / **frequencies** heuristics; table rendering)
-│   ├── mcap (MCAP binary codec, load, CSV/JSON/blocks/info exports, profile decode)
+│   ├── format (client stdout **text/json/table** via `Write`, streaming output via `StreamWriter`; capture-derived **strings** / **frequencies** heuristics; table rendering)
+│   ├── capfile (capture recorder over the go-modbus PDU tap, loader, register-block adapter)
+│   ├── replay (replay core: sample-and-hold lookup per address, request and identity object; replay clock)
+│   ├── mcap (capture info, verify, convert, blocks export, profile decode)
 │   ├── runner (client command wiring, formatted run loop, fatal JSON/text rendering)
 │   ├── errs (typed CLI errors, stable codes, exit-kind mapping)
 │   ├── mbtest (in-memory Modbus device for tests: TCP, UDP, RTU/ASCII over TCP and on a pseudo-terminal)
 │   ├── modbus (Modbus client/server logic, collectors, poll and write, scan strategies)
-│   ├── types (DTOs for JSON/text/table output and MCAP-related structs)
+│   ├── types (DTOs for JSON/text/table output and register-block records)
 │   └── validate (Input validation and checks)
 ├── Makefile (Build & test commands)
 └── go.mod (Dependencies)

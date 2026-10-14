@@ -14,39 +14,30 @@ import (
 
 var replayCmd = &cobra.Command{
 	Use:   "replay",
-	Short: "Replay a Modbus TCP register recording as a dynamic Modbus server",
+	Short: "Replay a capture as a Modbus TCP device whose values follow the recording",
 	Example: `
-  # Replay a recording from a file (FC from MCAP header; --interval 0 uses captured timing between iterations)
-  modbusctl server replay --input=recording.mcap
+  # Replay a capture at its original speed, looping forever, every target on its recorded unit id
+  modbusctl server replay --input=recording.mbcap
 
-  # Optional: confirm FC matches the file (e.g. FC4 input registers)
-  modbusctl server replay --input=input_regs.mcap --function 4 --port=1502 --unit=1
+  # Ten times faster, three times, starting 5 minutes in
+  modbusctl server replay --input=recording.mbcap --speed=10 --loops=3 --from=5m
 
-  # Replay a recording with infinite loops
-  modbusctl server replay --input=recording.mcap --loops=0
-
-  # Replay a recording with a specific number of loops
-  modbusctl server replay --input=recording.mcap --loops=5
-
-  # Infinite loops with a fixed wall-clock pause between iterations (milliseconds)
-  modbusctl server replay --input=recording.mcap --loops=0 --interval=100
+  # One target as unit 1 on port 1502; addresses are absent until first sampled
+  modbusctl server replay --input=site.mbcap --target=2 --unit=1 --port=1502 --before-first=absent
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_PORT=1502 MODBUSCTL_INPUT=recording.mcap modbusctl server replay
+  MODBUSCTL_PORT=1502 MODBUSCTL_INPUT=recording.mbcap MODBUSCTL_SPEED=60 modbusctl server replay
 `,
 }
 
 func init() {
 	cfg := config.ReplayServerConfig{
 		Port:      502,
-		Unit:      1,
 		Loops:     0,
-		Interval:  0, // Default to 0 (original timing)
 		InputFile: "",
 	}
 	config.MustLoadFromEnv(&cfg)
 	config.RegisterFlags(replayCmd, &cfg)
-	config.RegisterFunctionCompletion(replayCmd)
 	cli.MustMarkFlagRequired(replayCmd, "input")
 	ServerCmd.AddCommand(replayCmd)
 
@@ -55,7 +46,7 @@ func init() {
 		if err := validate.CheckReplayServerConfig(cfg); err != nil {
 			return errs.WrapValidation(err)
 		}
-		if err := modbus.LoadMCAPAndServeReplay(cmd.Context(), cfg, cmd.OutOrStdout()); err != nil {
+		if err := modbus.ServeReplay(cmd.Context(), cfg, cmd.OutOrStdout()); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}

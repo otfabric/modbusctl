@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/otfabric/modbusctl/internal/capfile/capfiletest"
 	"github.com/otfabric/modbusctl/internal/config"
-	"github.com/otfabric/modbusctl/internal/mcap"
 	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,28 +17,21 @@ import (
 
 func writeCapture(t *testing.T, records ...types.CaptureRecord) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "capture.mcap")
-	f, err := os.Create(path)
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-	require.NoError(t, mcap.WriteHeader(f, types.CaptureHeader{IP: "127.0.0.1", Port: 502, Unit: 1, Function: 3}))
-	for _, r := range records {
-		require.NoError(t, mcap.AppendRecord(f, r))
-	}
-	return path
+	return capfiletest.WriteRecords(t, capfiletest.Path(t, "capture.mbcap"),
+		types.CaptureHeader{IP: "127.0.0.1", Port: 502, Unit: 1, Function: 3}, records...)
 }
 
 func TestExportDerived_loadErrors(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing.mcap")
+	missing := filepath.Join(t.TempDir(), "missing.mbcap")
 	var buf bytes.Buffer
 
 	err := ExportStrings(&buf, config.StringsConfig{InputFile: missing})
 	require.Error(t, err)
-	assert.True(t, strings.HasPrefix(err.Error(), "failed to load records: failed to open mcap file:"), err.Error())
+	assert.True(t, strings.HasPrefix(err.Error(), "failed to load records: open "), err.Error())
 
-	err = ExportHeuristicFrequency(&buf, missing)
+	err = ExportHeuristicFrequency(&buf, missing, config.CaptureSelection{})
 	require.Error(t, err)
-	assert.True(t, strings.HasPrefix(err.Error(), "failed to load records: failed to open mcap file:"), err.Error())
+	assert.True(t, strings.HasPrefix(err.Error(), "failed to load records: open "), err.Error())
 	assert.Empty(t, buf.String())
 }
 
@@ -71,14 +63,14 @@ func TestExportHeuristicFrequency_exactLineAndLimit(t *testing.T) {
 
 	var buf bytes.Buffer
 	require.NoError(t, ExportHeuristicFrequency(&buf, writeCapture(t,
-		types.CaptureRecord{StartAddress: 40070, RegisterCount: 2, Data: f32})))
+		types.CaptureRecord{StartAddress: 40070, RegisterCount: 2, Data: f32}), config.CaptureSelection{}))
 	assert.Equal(t, "[40070] 2 regs (float32 BE) = 49.9500 → candidate frequency (confidence: 0.75)\n", buf.String())
 
 	// 30 registers of 5000 (centi-Hz) give 30 uint16 BE and 30 int16 BE candidates; only 20 are reported.
 	many := bytes.Repeat([]byte{0x13, 0x88}, 30)
 	buf.Reset()
 	require.NoError(t, ExportHeuristicFrequency(&buf, writeCapture(t,
-		types.CaptureRecord{StartAddress: 0, RegisterCount: 30, Data: many})))
+		types.CaptureRecord{StartAddress: 0, RegisterCount: 30, Data: many}), config.CaptureSelection{}))
 	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
 	require.Len(t, lines, 20)
 	for _, l := range lines {
@@ -86,7 +78,7 @@ func TestExportHeuristicFrequency_exactLineAndLimit(t *testing.T) {
 	}
 
 	buf.Reset()
-	require.NoError(t, ExportHeuristicFrequency(&buf, writeCapture(t)))
+	require.NoError(t, ExportHeuristicFrequency(&buf, writeCapture(t), config.CaptureSelection{}))
 	assert.Empty(t, buf.String())
 }
 

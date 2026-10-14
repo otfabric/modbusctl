@@ -19,7 +19,7 @@ var pollCmd = &cobra.Command{
 	Short: "Continuously read coils or registers at an interval and print every sample",
 	Long: `Read the same block of coils, discrete inputs or registers every --interval
 milliseconds and print one sample per poll. Nothing is written to disk; use
-"modbusctl client record" to capture to MCAP instead.
+"modbusctl client record" to capture to a capture file instead.
 
 Polling runs until --polls samples were taken, or until interrupted (Ctrl-C) when --polls
 is 0. With --codec, registers are decoded into typed values exactly as "client decode" does.

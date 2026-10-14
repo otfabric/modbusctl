@@ -47,7 +47,7 @@ type ReadConfig struct {
 	Function      uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (3=holding, 4=input)" flag:"function"`
 	StartAddress  uint16 `env:"MODBUSCTL_ADDRESS" desc:"Starting register address" flag:"start"`
 	RegisterCount uint16 `env:"MODBUSCTL_COUNT" desc:"Number of registers to read" flag:"count"`
-	OutputFile    string `env:"MODBUSCTL_OUTPUT" desc:"Output MCAP file or directory" flag:"output"`
+	OutputFile    string `env:"MODBUSCTL_OUTPUT" desc:"Output capture file (.mbcap) or directory" flag:"output"`
 	OutputFormat  string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Debug         bool   // set from global --debug (root persistent flag)
 }
@@ -98,7 +98,8 @@ type RecordConfig struct {
 	Interval     uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between reads" flag:"interval"`
 	Duration     uint32 `env:"MODBUSCTL_DURATION" desc:"Total duration to record in milliseconds" flag:"duration"`
 	BlocksFile   string `env:"MODBUSCTL_BLOCKS_FILE" desc:"JSON file of address blocks [{start_address, register_count}, ...]" flag:"blocks-file"`
-	OutputFile   string `env:"MODBUSCTL_OUTPUT" desc:"Output MCAP file or directory" flag:"output"`
+	OutputFile   string `env:"MODBUSCTL_OUTPUT" desc:"Output capture file (.mbcap) or directory" flag:"output"`
+	Exceptions   bool   `env:"MODBUSCTL_RECORD_EXCEPTIONS" desc:"Also record exception responses in the capture" flag:"record-exceptions"`
 	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Debug        bool   // set from global --debug (root persistent flag)
 }
@@ -139,7 +140,8 @@ type ScanConfig struct {
 	Function                uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (3=holding, 4=input)" flag:"function"`
 	StartAddress            uint16 `env:"MODBUSCTL_START" desc:"Start register address" flag:"start"`
 	EndAddress              uint16 `env:"MODBUSCTL_END" desc:"End register address" flag:"end"`
-	OutputFile              string `env:"MODBUSCTL_OUTPUT" desc:"Output file" flag:"output"`
+	OutputFile              string `env:"MODBUSCTL_OUTPUT" desc:"Output capture file (.mbcap) or directory" flag:"output"`
+	Exceptions              bool   `env:"MODBUSCTL_RECORD_EXCEPTIONS" desc:"Also record exception responses in the capture" flag:"record-exceptions"`
 	Algo                    string `env:"MODBUSCTL_ALGO" desc:"Scan algorithm: safe, smart, deep, stepped, linear, boundary, or sunspec" flag:"algo"`
 	Step                    uint16 `env:"MODBUSCTL_STEP" desc:"Stepped algo: step size (e.g. 100, 1000, 2000)" flag:"step"`
 	StepHalfOffset          bool   `env:"MODBUSCTL_STEP_HALF_OFFSET" desc:"Stepped algo: also probe at step/2 offset" flag:"step-half-offset"`
@@ -158,42 +160,62 @@ type ScanConfig struct {
 }
 
 type ConvertConfig struct {
-	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Input MCAP file" flag:"input"`
-	FormatType string `env:"MODBUSCTL_FORMAT" desc:"Output format type (e.g., CSV, JSON)" flag:"format"`
-	OutputFile string `env:"MODBUSCTL_OUTPUT" desc:"Output file or directory" flag:"output"`
+	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
+	FormatType string `env:"MODBUSCTL_FORMAT" desc:"Output encoding: mbcap, jsonl, csv (lossless) or wide-csv (view)" flag:"format"`
+	OutputFile string `env:"MODBUSCTL_OUTPUT" desc:"Output file (default: stdout)" flag:"output"`
+}
+
+// CaptureSelection picks the FC01-04 samples of one target and one function from a
+// capture, for the commands that work on register blocks.
+type CaptureSelection struct {
+	Target   uint32 `env:"MODBUSCTL_TARGET" desc:"Capture target to use (0 = the only one)" flag:"target"`
+	Function uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code to use, 1-4 (0 = the only one)" flag:"function"`
 }
 
 type ExtractConfig struct {
-	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Input MCAP file" flag:"input"`
+	CaptureSelection
+	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
 	OutputFile string `env:"MODBUSCTL_OUTPUT" desc:"Output file or directory" flag:"output"`
 }
 
 type StringsConfig struct {
-	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Input MCAP file" flag:"input"`
+	CaptureSelection
+	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
 	OutputFile string `env:"MODBUSCTL_OUTPUT" desc:"Output file or directory" flag:"output"`
 }
 
 type InfoConfig struct {
-	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Input MCAP file" flag:"input"`
+	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
 	OutputFile string `env:"MODBUSCTL_OUTPUT" desc:"Output file or directory" flag:"output"`
 }
 
+type VerifyConfig struct {
+	InputFile string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
+}
+
 type StaticServerConfig struct {
-	Port      uint16 `env:"MODBUSCTL_PORT" desc:"Port for the static server" flag:"port"`
-	Unit      uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID for the Modbus device" flag:"unit"`
-	Function  uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (1–4); 0=use MCAP header FC (default). If set, must match the file." flag:"function"`
-	InputFile string `env:"MODBUSCTL_INPUT" desc:"Input MCAP file to serve" flag:"input"`
-	Debug     bool   // set from global --debug (root persistent flag)
+	Port       uint16 `env:"MODBUSCTL_PORT" desc:"Port for the static server" flag:"port"`
+	Unit       uint8  `env:"MODBUSCTL_UNIT" desc:"Serve the target as this unit id (0 = the unit id recorded for each target)" flag:"unit"`
+	Target     uint32 `env:"MODBUSCTL_TARGET" desc:"Capture target to serve (0 = every target, each on its recorded unit id)" flag:"target"`
+	At         string `env:"MODBUSCTL_AT" desc:"Serve the values at this time since the capture start, e.g. 90s (default: the capture end, i.e. the last values)" flag:"at"`
+	Missing    string `env:"MODBUSCTL_MISSING" desc:"Answer for data the capture does not hold: exception (default), zero, or silence" flag:"missing"`
+	MaxClients uint16 `env:"MODBUSCTL_MAX_CLIENTS" desc:"Maximum concurrent client connections (0 = 10); further connections are closed" flag:"max-clients"`
+	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Capture file to serve (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
+	Debug      bool   // set from global --debug (root persistent flag)
 }
 
 type ReplayServerConfig struct {
-	Port      uint16 `env:"MODBUSCTL_PORT" desc:"Port for the replay server" flag:"port"`
-	Unit      uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID for the Modbus device" flag:"unit"`
-	Function  uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (1–4); 0=use MCAP header FC (default). If set, must match the file." flag:"function"`
-	Loops     uint16 `env:"MODBUSCTL_LOOPS" desc:"Number of times to loop the replay" flag:"loops"`
-	Interval  uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between iterations (0 for original timing)" flag:"interval"`
-	InputFile string `env:"MODBUSCTL_INPUT" desc:"Input MCAP file to replay" flag:"input"`
-	Debug     bool   // set from global --debug (root persistent flag)
+	Port        uint16 `env:"MODBUSCTL_PORT" desc:"Port for the replay server" flag:"port"`
+	Unit        uint8  `env:"MODBUSCTL_UNIT" desc:"Serve the target as this unit id (0 = the unit id recorded for each target)" flag:"unit"`
+	Target      uint32 `env:"MODBUSCTL_TARGET" desc:"Capture target to serve (0 = every target, each on its recorded unit id)" flag:"target"`
+	Speed       string `env:"MODBUSCTL_SPEED" desc:"Replay speed: 1 = original (default), 0.1 = ten times slower, 60 = a minute per second" flag:"speed"`
+	Loops       uint16 `env:"MODBUSCTL_LOOPS" desc:"Times to play the capture (0 = forever, the default); afterwards the last values stay" flag:"loops"`
+	From        string `env:"MODBUSCTL_FROM" desc:"Start the replay at this time since the capture start, e.g. 10m (default 0)" flag:"from"`
+	Missing     string `env:"MODBUSCTL_MISSING" desc:"Answer for data the capture does not hold: exception (default), zero, or silence" flag:"missing"`
+	BeforeFirst string `env:"MODBUSCTL_BEFORE_FIRST" desc:"Before an address is first sampled: hold (serve its first sample, default) or absent" flag:"before-first"`
+	MaxClients  uint16 `env:"MODBUSCTL_MAX_CLIENTS" desc:"Maximum concurrent client connections (0 = 10); further connections are closed" flag:"max-clients"`
+	InputFile   string `env:"MODBUSCTL_INPUT" desc:"Capture file to replay (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
+	Debug       bool   // set from global --debug (root persistent flag)
 }
 
 type DiscoverConfig struct {
@@ -243,7 +265,8 @@ type ReportServerIDConfig struct {
 }
 
 type DeviceProfileDecodeConfig struct {
-	InputFile     string `env:"MODBUSCTL_INPUT" desc:"Input MCAP file with device profile" flag:"input"`
+	CaptureSelection
+	InputFile     string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
 	DeviceProfile string `env:"MODBUSCTL_PROFILE" desc:"Device profile to decode" flag:"profile"`
 	OutputFile    string `env:"MODBUSCTL_OUTPUT" desc:"Output file for decoded profile" flag:"output"`
 }

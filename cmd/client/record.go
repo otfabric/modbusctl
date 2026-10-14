@@ -17,16 +17,16 @@ var recordCmd = &cobra.Command{
 	Short: "Continuously read and record registers from a Modbus TCP device",
 	Example: `
   # Record holding registers from a Modbus device at 192.168.1.100 every 5 seconds for 1 minute
-  modbusctl client record --ip 192.168.1.100 --blocks-file blocks.json --output data.mcap --interval 5 --duration 60
+  modbusctl client record --ip 192.168.1.100 --blocks-file blocks.json --output data.mbcap --interval 5 --duration 60
 
   # Connect via URL (mutually exclusive with --ip/--port)
-  modbusctl client record --url tcp://192.168.1.100:502 --blocks-file blocks.json --output data.mcap --interval 5 --duration 60
+  modbusctl client record --url tcp://192.168.1.100:502 --blocks-file blocks.json --output data.mbcap --interval 5 --duration 60
 
   # Record input registers with function code 4, polling every 10 seconds for 2 minutes
-  modbusctl client record --ip 192.168.1.100 --function 4 --blocks-file register-ranges.json --output data.mcap --interval 10 --duration 120
+  modbusctl client record --ip 192.168.1.100 --function 4 --blocks-file register-ranges.json --output data.mbcap --interval 10 --duration 120
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_IP=192.168.1.100 MODBUSCTL_BLOCKS_FILE=blocks.json MODBUSCTL_OUTPUT=data.mcap MODBUSCTL_INTERVAL=5 MODBUSCTL_DURATION=60 modbusctl client record
+  MODBUSCTL_IP=192.168.1.100 MODBUSCTL_BLOCKS_FILE=blocks.json MODBUSCTL_OUTPUT=data.mbcap MODBUSCTL_INTERVAL=5 MODBUSCTL_DURATION=60 modbusctl client record
 `,
 }
 
@@ -54,7 +54,7 @@ func init() {
 		return runner.RunClientFormattedWithDebug(cmd, func(d bool) { cfg.Debug = d }, cfg.OutputFormat,
 			func() error { return validate.CheckRecordConfig(cfg) },
 			func(ctx context.Context) (any, error) {
-				r, e := modbus.RecordAndWriteMCAP(ctx, cfg, cmd.ErrOrStderr())
+				r, e := modbus.RecordToCapture(ctx, cfg, cmd.ErrOrStderr())
 				if e != nil {
 					return nil, modbus.WrapCollectError(e)
 				}

@@ -1,6 +1,7 @@
 package mcap
 
 import (
+	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
@@ -11,16 +12,19 @@ import (
 
 var convertCmd = &cobra.Command{
 	Use:   "convert",
-	Short: "Convert MCAP file to CSV or JSON",
+	Short: "Convert a capture between mbcap, jsonl and csv, or to a wide-csv view",
 	Example: `
-  # Convert MCAP file to CSV and output to stdout
-  modbusctl mcap convert --input file.mcap --format csv
+  # Convert a capture to JSON Lines on stdout (lossless; converts back with --format mbcap)
+  modbusctl mcap convert --input data.mbcap --format jsonl
 
-  # Convert MCAP file to JSON and save to output file
-  modbusctl mcap convert --input file.mcap --format json --output output.json
+  # Convert to long CSV for a spreadsheet (lossless)
+  modbusctl mcap convert --input data.mbcap --format csv --output data.mbcap.csv
+
+  # Chart raw register values per address over time (one-way view)
+  modbusctl mcap convert --input data.mbcap --format wide-csv --output registers.wide.csv
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_INPUT=file.mcap MODBUSCTL_FORMAT=csv modbusctl mcap convert
+  MODBUSCTL_INPUT=data.mbcap MODBUSCTL_FORMAT=jsonl modbusctl mcap convert
 `,
 }
 
@@ -47,17 +51,8 @@ func init() {
 		}
 		defer cleanup()
 
-		switch cfg.FormatType {
-		case "csv":
-			if err := mcapfile.ExportCSV(w, cfg.InputFile); err != nil {
-				return errs.Output(errs.CodeMCAPLoadFailed, err)
-			}
-		case "json":
-			if err := mcapfile.ExportJSON(w, cfg.InputFile); err != nil {
-				return errs.Output(errs.CodeMCAPLoadFailed, err)
-			}
-		default:
-			return errs.InvalidInput(errs.CodeInvalidInput, "unsupported format: "+cfg.FormatType, nil)
+		if err := mcapfile.Convert(w, cfg.InputFile, cfg.FormatType); err != nil {
+			return capfile.WrapError(err)
 		}
 		return nil
 	}

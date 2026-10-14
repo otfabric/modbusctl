@@ -15,9 +15,10 @@ import (
 	"time"
 
 	"github.com/otfabric/go-modbus"
+	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
-	"github.com/otfabric/modbusctl/internal/mcap"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
@@ -132,6 +133,10 @@ type deviceLink struct {
 	conf   modbus.Config
 	url    string
 	debug  bool
+	// rec, when set, records every successful read attempt as a sample of
+	// stream (see [deviceLink.begin]).
+	rec    *capfile.Recorder
+	stream uint32
 }
 
 // openDeviceLink connects to modbusURL. The caller must Close the returned link.
@@ -145,6 +150,51 @@ func openDeviceLink(modbusURL string, timeoutMS uint16, debug bool, serial confi
 		return nil, err
 	}
 	return link, nil
+}
+
+// openRecordingLink is openDeviceLink for a link whose successful reads are recorded as samples
+// of stream, once [deviceLink.record] attaches a recorder. Connecting first means that a device
+// that cannot be reached leaves no capture file behind.
+func openRecordingLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, stream uint32) (*deviceLink, error) {
+	link := &deviceLink{
+		conf:   buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial),
+		url:    modbusURL,
+		debug:  debug,
+		stream: stream,
+	}
+	// The tap runs in the goroutine of the read, after record has set rec.
+	link.conf.PDUTap = modbus.PDUTapFunc(func(ctx context.Context, ex modbus.PDUExchange) {
+		if link.rec != nil {
+			link.rec.Tap().OnPDU(ctx, ex)
+		}
+	})
+	if err := link.reconnect(); err != nil {
+		return nil, err
+	}
+	return link, nil
+}
+
+// record attaches the recorder of the link's reads.
+func (l *deviceLink) record(rec *capfile.Recorder) { l.rec = rec }
+
+// begin starts one read attempt: with a recorder, the returned context ties
+// the PDUs of the attempt to the token that commit takes.
+func (l *deviceLink) begin(ctx context.Context) (context.Context, uint64) {
+	if l.rec == nil {
+		return ctx, 0
+	}
+	return l.rec.Begin(ctx)
+}
+
+// commit records the attempt tok when it succeeded (see [capfile.Recorder.Commit]).
+func (l *deviceLink) commit(tok uint64, err error) error {
+	if l.rec == nil {
+		return nil
+	}
+	if cerr := l.rec.Commit(tok, l.stream, err); cerr != nil {
+		return errs.Output(errs.CodeMcapWriteFailed, cerr)
+	}
+	return nil
 }
 
 // reconnect closes the current client, if any, and dials a new one.
@@ -294,9 +344,13 @@ func readRegisters(ctx context.Context, link *deviceLink, fc uint8, start, count
 				return nil, 0, 0, rerr
 			}
 		}
+		actx, tok := link.begin(ctx)
 		requestTS = time.Now().UnixNano()
-		data, err = performRead(ctx, link.client, unit, fc, start, count)
+		data, err = performRead(actx, link.client, unit, fc, start, count)
 		responseTS = time.Now().UnixNano()
+		if cerr := link.commit(tok, err); cerr != nil {
+			return nil, requestTS, responseTS, cerr
+		}
 
 		if err == nil {
 			return data, requestTS, responseTS, nil
@@ -353,41 +407,61 @@ func executeReadTask(ctx context.Context, link *deviceLink, cfg config.ScanConfi
 	}
 }
 
-// CollectRead performs the Modbus read, writes MCAP, and returns the stdout payload (no formatted stdout write).
-func CollectRead(ctx context.Context, cfg config.ReadConfig, progress io.Writer) (*types.ReadResult, error) {
+// CollectRead performs the Modbus read, records it to an MBCAP capture, and returns the stdout
+// payload (no formatted stdout write).
+func CollectRead(ctx context.Context, cfg config.ReadConfig, progress io.Writer) (res *types.ReadResult, err error) {
 	if progress == nil {
 		progress = io.Discard
 	}
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
+	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, 1)
 	if err != nil {
 		return nil, err
 	}
 	defer link.Close()
-
-	mcapPath := readCaptureMcapPath(cfg)
-	f, err := os.Create(mcapPath)
-	if err != nil {
-		return nil, errs.Output(errs.CodeOutputFileCreateFailed, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	rawData, requestTimestamp, responseTimestamp, err := readRegisters(ctx, link, cfg.Function, cfg.StartAddress, cfg.RegisterCount, 1, cfg.Unit, 0, progress)
+	rec, err := startCapture(readCaptureMcapPath(cfg), modbusURL, cfg.DeviceConfig, false,
+		capture.Stream{ID: 1, Target: 1, Role: capture.RoleSnapshot, Label: fmt.Sprintf("read FC%d %d x%d", cfg.Function, cfg.StartAddress, cfg.RegisterCount)})
 	if err != nil {
 		return nil, err
 	}
+	defer finishCapture(rec, &err)
+	link.record(rec)
 
-	byteCount := len(rawData)
-	finalHex := fmt.Sprintf("% X", rawData)
-
-	if err := writeReadCaptureToMcap(f, cfg, modbusURL, rawData, requestTimestamp, responseTimestamp); err != nil {
-		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
+	rawData, _, _, err := readRegisters(ctx, link, cfg.Function, cfg.StartAddress, cfg.RegisterCount, 1, cfg.Unit, 0, progress)
+	if err != nil {
+		return nil, err
 	}
-
-	return newReadResult(cfg, modbusURL, mcapPath, finalHex, byteCount), nil
+	return newReadResult(cfg, modbusURL, rec.Path(), fmt.Sprintf("% X", rawData), len(rawData)), nil
 }
 
-func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Writer) (*types.ScanSummaryResult, error) {
+// startCapture creates the capture file at path with one target (id 1) for the device and the
+// given stream.
+func startCapture(path, modbusURL string, dev config.DeviceConfig, exceptions bool, stream capture.Stream) (*capfile.Recorder, error) {
+	rec, err := capfile.Create(path, capfile.RecorderOptions{Exceptions: exceptions})
+	if err != nil {
+		return nil, errs.Output(errs.CodeOutputFileCreateFailed, err)
+	}
+	if err := rec.AddTarget(capfile.TargetFor(1, modbusURL, dev.Unit, dev.SerialConfig, "")); err != nil {
+		_ = rec.Close()
+		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
+	}
+	if err := rec.AddStream(stream); err != nil {
+		_ = rec.Close()
+		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
+	}
+	return rec, nil
+}
+
+// finishCapture closes rec, writing its index and end, and reports a close failure through
+// *errp unless an earlier error is already there.
+func finishCapture(rec *capfile.Recorder, errp *error) {
+	if cerr := rec.Close(); cerr != nil && *errp == nil {
+		*errp = errs.Output(errs.CodeMcapWriteFailed, cerr)
+	}
+}
+
+// ScanAndRecord scans the configured range and records every successful read to an MBCAP capture.
+func ScanAndRecord(ctx context.Context, cfg config.ScanConfig, progress io.Writer) (res *types.ScanSummaryResult, err error) {
 	if progress == nil {
 		progress = io.Discard
 	}
@@ -395,12 +469,6 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 	// hint, per-success block summary, and inter-request delay (silent when delay 0). Debug-only = executor
 	// next-task/result lines gated on cfg.Debug; strategy debug uses scanSettings.DebugWriter (same stream when debug).
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
-	if err != nil {
-		return nil, err
-	}
-	defer link.Close()
-
 	out := cfg.OutputFile
 	if out == "" || strings.HasSuffix(out, "/") {
 		dir := out
@@ -409,24 +477,18 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 		}
 		out = AutoCaptureMcapPath(dir, "scan")
 	}
-
-	f, err := os.Create(out)
+	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, 1)
 	if err != nil {
-		return nil, errs.Output(errs.CodeOutputFileCreateFailed, err)
+		return nil, err
 	}
-	defer func() { _ = f.Close() }()
-
-	headerIP, headerPort := config.CaptureEndpoint(modbusURL)
-	header := types.CaptureHeader{
-		IP:        headerIP,
-		Port:      headerPort,
-		Unit:      cfg.Unit,
-		Function:  cfg.Function,
-		StartTime: time.Now().UnixNano(),
+	defer link.Close()
+	rec, err := startCapture(out, modbusURL, cfg.DeviceConfig, cfg.Exceptions, capture.Stream{ID: 1, Target: 1, Role: capture.RoleScan,
+		Label: fmt.Sprintf("scan FC%d %d-%d (%s)", cfg.Function, cfg.StartAddress, cfg.EndAddress, config.ScanAlgorithmForExecution(&cfg))})
+	if err != nil {
+		return nil, err
 	}
-	if err := mcap.WriteHeader(f, header); err != nil {
-		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
-	}
+	defer finishCapture(rec, &err)
+	link.record(rec)
 
 	ss := scanSettings{ScanConfig: cfg}
 	if cfg.Debug {
@@ -447,7 +509,6 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 	printScanWorstCaseHint(cfg, algo, progress)
 
 	var stats ScanStats
-	var iteration uint32
 	startTime := time.Now()
 
 	for !strategy.Done() {
@@ -460,6 +521,9 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 			_, _ = fmt.Fprintf(progress, "DEBUG [exec] next task: start=%d count=%d end=%d\n", task.Start, task.Count, end)
 		}
 		result := executeReadTask(ctx, link, cfg, task, progress)
+		if e, ok := errs.As(result.Err); ok && e.Code == errs.CodeMcapWriteFailed {
+			return nil, result.Err
+		}
 		// Milestone B: retry once on timeout/transport if configured
 		retryAppliedDelay := false
 		if !result.Success && cfg.RetryOnTimeoutTransport > 0 &&
@@ -492,18 +556,8 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 			stats.RegistersCaptured += int(result.Count)
 			stats.ResponseTimeNanos += result.ResponseTimestamp - result.RequestTimestamp
 
-			rec := types.CaptureRecord{
-				Iteration:         iteration,
-				RequestTimestamp:  result.RequestTimestamp,
-				ResponseTimestamp: result.ResponseTimestamp,
-				StartAddress:      result.Start,
-				RegisterCount:     result.Count,
-				Data:              result.Data,
-			}
-			if err := mcap.AppendRecord(f, rec); err != nil {
-				return nil, errs.Output(errs.CodeMcapWriteFailed, err)
-			}
-			_, _ = fmt.Fprintf(progress, "Block: Start: %d, End: %d, Count: %d\n", rec.StartAddress, rec.StartAddress+rec.RegisterCount-1, rec.RegisterCount)
+			// The sample was recorded by the link when the read succeeded.
+			_, _ = fmt.Fprintf(progress, "Block: Start: %d, End: %d, Count: %d\n", result.Start, result.Start+result.Count-1, result.Count)
 		} else {
 			stats.FailCount++
 			switch result.OutcomeType {
@@ -525,7 +579,6 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 				return nil, err
 			}
 		}
-		iteration++
 	}
 
 	stats.TotalDurationNanos = time.Since(startTime).Nanoseconds()
@@ -552,7 +605,9 @@ func ScanAndWriteMCAP(ctx context.Context, cfg config.ScanConfig, progress io.Wr
 	return summary, nil
 }
 
-func RecordAndWriteMCAP(ctx context.Context, cfg config.RecordConfig, progress io.Writer) (*types.RecordSummaryResult, error) {
+// RecordToCapture polls the blocks of cfg.BlocksFile every cfg.Interval for cfg.Duration and records
+// every successful read to an MBCAP capture.
+func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.Writer) (res *types.RecordSummaryResult, err error) {
 	if progress == nil {
 		progress = io.Discard
 	}
@@ -570,12 +625,6 @@ func RecordAndWriteMCAP(ctx context.Context, cfg config.RecordConfig, progress i
 	}
 
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
-	if err != nil {
-		return nil, err
-	}
-	defer link.Close()
-
 	out := cfg.OutputFile
 	if out == "" || strings.HasSuffix(out, "/") {
 		dir := out
@@ -584,24 +633,18 @@ func RecordAndWriteMCAP(ctx context.Context, cfg config.RecordConfig, progress i
 		}
 		out = AutoCaptureMcapPath(dir, "record")
 	}
-
-	f, err := os.Create(out)
+	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, 1)
 	if err != nil {
-		return nil, errs.Output(errs.CodeOutputFileCreateFailed, err)
+		return nil, err
 	}
-	defer func() { _ = f.Close() }()
-
-	headerIP, headerPort := config.CaptureEndpoint(modbusURL)
-	header := types.CaptureHeader{
-		IP:        headerIP,
-		Port:      headerPort,
-		Unit:      cfg.Unit,
-		Function:  cfg.Function,
-		StartTime: time.Now().UnixNano(),
+	defer link.Close()
+	rec, err := startCapture(out, modbusURL, cfg.DeviceConfig, cfg.Exceptions, capture.Stream{ID: 1, Target: 1, Role: capture.RolePoll,
+		Label: fmt.Sprintf("FC%d, %d blocks every %d ms", cfg.Function, len(blocks), cfg.Interval)})
+	if err != nil {
+		return nil, err
 	}
-	if err := mcap.WriteHeader(f, header); err != nil {
-		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
-	}
+	defer finishCapture(rec, &err)
+	link.record(rec)
 
 	startTime := time.Now()
 	var i uint32 = 0
@@ -613,21 +656,13 @@ func RecordAndWriteMCAP(ctx context.Context, cfg config.RecordConfig, progress i
 		}
 		_, _ = fmt.Fprintf(progress, "📟 Recording %d started...\n", i)
 		for _, b := range blocks {
-			data, requestTimestamp, responseTimestamp, err := readRegisters(ctx, link, cfg.Function, b.StartAddress, b.RegisterCount, 5, cfg.Unit, 0, progress)
+			_, _, _, err := readRegisters(ctx, link, cfg.Function, b.StartAddress, b.RegisterCount, 5, cfg.Unit, 0, progress)
 			if err != nil {
+				if e, ok := errs.As(err); ok && e.Code == errs.CodeMcapWriteFailed || ctx.Err() != nil {
+					return nil, err
+				}
 				_, _ = fmt.Fprintf(progress, "⚠️ Failed to read block (start: %d, count: %d): %v\n", b.StartAddress, b.RegisterCount, err)
 				continue
-			}
-			rec := types.CaptureRecord{
-				Iteration:         i,
-				RequestTimestamp:  requestTimestamp,
-				ResponseTimestamp: responseTimestamp,
-				StartAddress:      b.StartAddress,
-				RegisterCount:     b.RegisterCount,
-				Data:              data,
-			}
-			if err := mcap.AppendRecord(f, rec); err != nil {
-				return nil, errs.Output(errs.CodeMcapWriteFailed, err)
 			}
 			blockCount++
 			_, _ = fmt.Fprintf(progress, "✓ Recorded block: Start %d, Count %d\n", b.StartAddress, b.RegisterCount)
@@ -644,7 +679,7 @@ func RecordAndWriteMCAP(ctx context.Context, cfg config.RecordConfig, progress i
 		Target:         modbusURL,
 		BlocksRecorded: blockCount,
 		Iterations:     i,
-		McapOutputPath: out,
+		McapOutputPath: rec.Path(),
 	}, nil
 }
 

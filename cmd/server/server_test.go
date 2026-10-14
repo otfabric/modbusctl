@@ -21,7 +21,7 @@ import (
 )
 
 // recordHolding records holding registers 100-102 of a device whose register 100 counts the
-// iterations (1, 2, 3, ...), and returns the MCAP path and the number of iterations.
+// iterations (1, 2, 3, ...), and returns the capture path and the number of iterations.
 func recordHolding(t *testing.T) (string, uint16) {
 	t.Helper()
 	d := mbtest.NewDevice().SetHolding(100, 0, 0xBEEF, 0x1234)
@@ -42,8 +42,8 @@ func record(t *testing.T, d *mbtest.Device, fc uint8, blocksJSON string) (string
 	if err := os.WriteFile(blocks, []byte(blocksJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out := filepath.Join(tmp, "capture.mcap")
-	res, err := modbus.RecordAndWriteMCAP(context.Background(), config.RecordConfig{
+	out := filepath.Join(tmp, "capture.mbcap")
+	res, err := modbus.RecordToCapture(context.Background(), config.RecordConfig{
 		DeviceConfig: config.DeviceConfig{URL: "tcp://" + d.ServeTCP(t), Unit: 1},
 		Function:     fc,
 		BlocksFile:   blocks,
@@ -164,7 +164,7 @@ func readHolding(t *testing.T, c *gomodbus.Client, unit uint8, addr, count uint1
 
 func TestStatic(t *testing.T) {
 	in, iterations := recordHolding(t)
-	s := startServer(t, "static", "--input", in, "--unit", "1", "--function", "3")
+	s := startServer(t, "static", "--input", in, "--unit", "1")
 	c := s.dial(t)
 
 	// A static server serves the last value captured for every register.
@@ -191,8 +191,8 @@ func TestStatic(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
-	wantContains(t, s.stdout.String(), "Static server ready on port "+s.port+" for unit 1 and function 3",
-		"Loaded 3 address entries", "Serving Modbus TCP on port "+s.port)
+	wantContains(t, s.stdout.String(), "Static server ready on port "+s.port+" with the last recorded values of "+in,
+		"Unit 1: target 1, ", "Serving Modbus TCP on port "+s.port)
 }
 
 func TestStatic_coils(t *testing.T) {
@@ -200,8 +200,10 @@ func TestStatic_coils(t *testing.T) {
 	in, _ := record(t, d, 1, `[{"start_address":8,"register_count":4}]`)
 	s := startServer(t, "--debug", "static", "--input", in)
 	c := s.dial(t)
-	// Each coil is read on its own: a multi-coil read from the static server only returns
-	// the first coil correctly (HandleCoils treats the per-coil store bytes as packed bits).
+	got, err := c.ReadCoils(context.Background(), 1, 8, 4)
+	if err != nil || fmt.Sprint(got) != "[true false true true]" {
+		t.Fatalf("read 4 coils from static server: %v, %v", got, err)
+	}
 	for i, want := range []bool{true, false, true, true} {
 		got, err := c.ReadCoils(context.Background(), 1, 8+uint16(i), 1)
 		if err != nil {
@@ -223,13 +225,13 @@ func TestStatic_coils(t *testing.T) {
 	if r := s.stop(t); r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
-	wantContains(t, s.stdout.String(), "function 1")
+	wantContains(t, s.stdout.String(), "Unit 1: target 1")
 }
 
 func TestReplay(t *testing.T) {
 	in, iterations := recordHolding(t)
-	// One pass over the capture with a fixed 10 ms between iterations.
-	s := startServer(t, "replay", "--input", in, "--loops", "1", "--interval", "10", "--function", "3")
+	// One pass over the capture at its original speed, then the last values stay.
+	s := startServer(t, "replay", "--input", in, "--loops", "1")
 	c := s.dial(t)
 
 	// Register 100 steps through the captured iterations and ends on the last one.
@@ -264,19 +266,20 @@ func TestReplay(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
-	wantContains(t, s.stdout.String(), "Replay server ready on port "+s.port+" for unit 1 and function 3",
-		"Starting replay loop 1/1", "Processing iteration 0 with 1 records")
+	wantContains(t, s.stdout.String(), "Replay server ready on port "+s.port+": ", " of "+in+" at 1x, looping 1 time(s)",
+		"Unit 1: target 1")
 }
 
-func TestReplay_capturedTimingAndLoops(t *testing.T) {
+func TestReplay_loopsForever(t *testing.T) {
 	in, iterations := recordHolding(t)
-	// --interval 0 keeps the captured spacing (10 ms); --loops 0 repeats until interrupted.
+	// --loops 0 repeats until interrupted: after the last value the first comes back.
 	s := startServer(t, "replay", "--input", in)
 	c := s.dial(t)
 	deadline := time.Now().Add(5 * time.Second)
-	for !strings.Contains(s.stdout.String(), "Starting replay loop 2/0") {
+	var prev uint16
+	for wrapped := false; !wrapped; {
 		if time.Now().After(deadline) {
-			t.Fatalf("replay did not start a second loop:\n%s", s.stdout.String())
+			t.Fatalf("replay did not loop back to the start")
 		}
 		got, err := readHolding(t, c, 1, 100, 1)
 		if err != nil {
@@ -285,18 +288,21 @@ func TestReplay_capturedTimingAndLoops(t *testing.T) {
 		if got[0] < 1 || got[0] > iterations {
 			t.Fatalf("replay served %d, outside the captured values 1..%d", got[0], iterations)
 		}
-		time.Sleep(5 * time.Millisecond)
+		wrapped = prev != 0 && got[0] < prev
+		prev = got[0]
+		time.Sleep(2 * time.Millisecond)
 	}
 	if r := s.stop(t); r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
+	wantContains(t, s.stdout.String(), "looping forever")
 }
 
 func TestFailures(t *testing.T) {
 	in, _ := recordHolding(t)
 	tmp := t.TempDir()
-	garbage := filepath.Join(tmp, "garbage.mcap")
-	if err := os.WriteFile(garbage, []byte("not an MCAP file"), 0o600); err != nil {
+	garbage := filepath.Join(tmp, "garbage.mbcap")
+	if err := os.WriteFile(garbage, []byte("not a capture file"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// A port that is already taken on every interface.
@@ -316,15 +322,15 @@ func TestFailures(t *testing.T) {
 			t.Fatalf("server %s: expected a required-flag error, got %v", sub, r.err)
 		}
 
-		wantKind(t, run(t, "server", sub, "--input", filepath.Join(tmp, "missing.mcap"), "--port", port), errs.KindInvalidInput)
+		wantKind(t, run(t, "server", sub, "--input", filepath.Join(tmp, "missing.mbcap"), "--port", port), errs.KindInvalidInput)
 		wantKind(t, run(t, "server", sub, "--input", tmp, "--port", port), errs.KindInvalidInput)
 		wantKind(t, run(t, "server", sub, "--input", in, "--port", "0"), errs.KindInvalidInput)
-		wantKind(t, run(t, "server", sub, "--input", in, "--port", port, "--function", "9"), errs.KindInvalidInput)
+		wantKind(t, run(t, "server", sub, "--input", in, "--port", port, "--missing", "panic"), errs.KindInvalidInput)
 
-		// --function only confirms the function code of the capture.
-		r = run(t, "server", sub, "--input", in, "--port", port, "--function", "4")
+		// A target the capture does not have is named, with the ones it has.
+		r = run(t, "server", sub, "--input", in, "--port", port, "--target", "9")
 		wantKind(t, r, errs.KindInvalidInput)
-		wantContains(t, r.err.Error(), "function code mismatch")
+		wantContains(t, r.err.Error(), "no target 9", "1 (unit 1)")
 
 		r = run(t, "server", sub, "--input", garbage, "--port", port)
 		wantKind(t, r, errs.KindOutput)

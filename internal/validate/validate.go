@@ -7,7 +7,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/otfabric/go-modbus/codec"
 	"github.com/otfabric/modbusctl/internal/config"
@@ -287,6 +289,9 @@ func CheckConvertConfig(cfg *config.ConvertConfig) error {
 }
 
 func CheckDeviceProfileDecodeConfig(cfg config.DeviceProfileDecodeConfig) error {
+	if err := checkSelection(cfg.CaptureSelection); err != nil {
+		return err
+	}
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
 	}
@@ -300,6 +305,9 @@ func CheckDeviceProfileDecodeConfig(cfg config.DeviceProfileDecodeConfig) error 
 }
 
 func CheckExtractConfig(cfg config.ExtractConfig) error {
+	if err := checkSelection(cfg.CaptureSelection); err != nil {
+		return err
+	}
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
 	}
@@ -310,11 +318,25 @@ func CheckExtractConfig(cfg config.ExtractConfig) error {
 }
 
 func CheckStringsConfig(cfg config.StringsConfig) error {
+	if err := checkSelection(cfg.CaptureSelection); err != nil {
+		return err
+	}
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
 	}
 	if strings.TrimSpace(cfg.OutputFile) != "" {
 		return validateFile(cfg.OutputFile, false)
+	}
+	return nil
+}
+
+func CheckVerifyConfig(cfg config.VerifyConfig) error {
+	return validateFile(cfg.InputFile, true)
+}
+
+func checkSelection(sel config.CaptureSelection) error {
+	if sel.Function > 4 {
+		return fmt.Errorf("invalid --function %d: use 1-4 (0 = the only one in the capture)", sel.Function)
 	}
 	return nil
 }
@@ -429,35 +451,53 @@ func CheckStaticServerConfig(cfg config.StaticServerConfig) error {
 	if cfg.Port == 0 {
 		return fmt.Errorf("port must be greater than 0")
 	}
-
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
 	}
-
-	if cfg.Function != 0 {
-		if err := validateFunctionCode(cfg.Function); err != nil {
-			return err
-		}
+	if err := checkMissing(cfg.Missing); err != nil {
+		return err
 	}
-
-	return nil
+	return checkOffset("at", cfg.At)
 }
 
 func CheckReplayServerConfig(cfg config.ReplayServerConfig) error {
 	if cfg.Port == 0 {
 		return fmt.Errorf("port must be greater than 0")
 	}
-
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
 	}
-
-	if cfg.Function != 0 {
-		if err := validateFunctionCode(cfg.Function); err != nil {
-			return err
+	if err := checkMissing(cfg.Missing); err != nil {
+		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.BeforeFirst)) {
+	case "", "hold", "absent":
+	default:
+		return fmt.Errorf("invalid --before-first %q: use hold or absent", cfg.BeforeFirst)
+	}
+	if s := strings.TrimSpace(cfg.Speed); s != "" {
+		if v, err := strconv.ParseFloat(s, 64); err != nil || v <= 0 {
+			return fmt.Errorf("invalid --speed %q: use a positive factor such as 1, 0.1 or 60", cfg.Speed)
 		}
 	}
+	return checkOffset("from", cfg.From)
+}
 
+func checkMissing(s string) error {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "exception", "zero", "silence":
+		return nil
+	}
+	return fmt.Errorf("invalid --missing %q: use exception, zero or silence", s)
+}
+
+func checkOffset(flag, s string) error {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	if d, err := time.ParseDuration(strings.TrimSpace(s)); err != nil || d < 0 {
+		return fmt.Errorf("invalid --%s %q: use a duration since the capture start, such as 90s or 1m30s", flag, s)
+	}
 	return nil
 }
 
@@ -515,10 +555,12 @@ func validateInclusiveScanRange(start, end uint16) error {
 func canonicalConvertFormat(format string) (string, error) {
 	s := strings.ToLower(strings.TrimSpace(format))
 	switch s {
-	case "csv", "json":
+	case "mbcap", "jsonl", "csv", "wide-csv":
 		return s, nil
+	case "json":
+		return "", fmt.Errorf("unsupported format: %q: modbusctl 3 writes MBCAP; use jsonl (one JSON object per line)", format)
 	default:
-		return "", fmt.Errorf("unsupported format: %q (expected csv or json)", format)
+		return "", fmt.Errorf("unsupported format: %q (expected mbcap, jsonl, csv or wide-csv)", format)
 	}
 }
 
@@ -667,7 +709,7 @@ func validateFile(path string, mustExist bool) error {
 	if path == "" {
 		return nil
 	}
-	// Directory-style output: auto-named MCAP under this directory (trailing / or \).
+	// Directory-style output: auto-named capture file under this directory (trailing / or \).
 	trimTrail := strings.TrimRight(path, `/\`)
 	if trimTrail != path {
 		dir := filepath.Clean(trimTrail)

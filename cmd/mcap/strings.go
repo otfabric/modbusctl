@@ -1,6 +1,7 @@
 package mcap
 
 import (
+	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
@@ -11,16 +12,16 @@ import (
 
 var stringsCmd = &cobra.Command{
 	Use:   "strings",
-	Short: "Extract ASCII strings from MCAP file",
+	Short: "Extract ASCII strings from capture file",
 	Example: `
-  # Extract strings from an MCAP file and print to stdout
-  modbusctl mcap strings --input file.mcap
+  # Extract strings from a capture file and print to stdout
+  modbusctl mcap strings --input file.mbcap
 
   # Extract strings and write output to a file
-  modbusctl mcap strings --input file.mcap --output strings.txt
+  modbusctl mcap strings --input file.mbcap --output strings.txt
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_INPUT=file.mcap MODBUSCTL_OUTPUT=strings.txt modbusctl mcap strings
+  MODBUSCTL_INPUT=file.mbcap MODBUSCTL_OUTPUT=strings.txt modbusctl mcap strings
 `,
 }
 
@@ -45,7 +46,7 @@ func init() {
 		defer cleanup()
 
 		if err := format.ExportStrings(w, cfg); err != nil {
-			return errs.Output(errs.CodeMCAPLoadFailed, err)
+			return capfile.WrapError(err)
 		}
 		return nil
 	}

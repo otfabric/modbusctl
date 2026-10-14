@@ -6,5 +6,5 @@ import (
 
 var McapCmd = &cobra.Command{
 	Use:   "mcap",
-	Short: "Commands for Modbus TCP mcap operations",
+	Short: "Inspect, verify, convert and analyse capture files (MBCAP)",
 }

@@ -14,28 +14,29 @@ import (
 
 var staticCmd = &cobra.Command{
 	Use:   "static",
-	Short: "Host a static Modbus TCP server with fixed register values",
+	Short: "Serve the values of a capture as a static Modbus TCP device",
 	Example: `
-  # Serve last-known values from an MCAP file (function code comes from the MCAP header)
-  modbusctl server static --port 502 --unit 1 --input mydata.mcap
+  # Serve the last recorded values of every target in a capture, each on its recorded unit id
+  modbusctl server static --port 502 --input site.mbcap
 
-  # Override is only for verification: --function must match the file's FC (here FC3 holding registers)
-  modbusctl server static --port 502 --unit 1 --input holding.mcap --function 3
+  # Serve one target as unit 1, with the values it had 10 minutes into the capture
+  modbusctl server static --port 1502 --input site.mbcap --target 2 --unit 1 --at 10m
+
+  # Answer unrecorded registers with zeros instead of an exception
+  modbusctl server static --input site.mbcap --missing zero
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_PORT=502 MODBUSCTL_UNIT=1 MODBUSCTL_INPUT=mydata.mcap modbusctl server static
+  MODBUSCTL_PORT=502 MODBUSCTL_INPUT=site.mbcap modbusctl server static
 `,
 }
 
 func init() {
 	cfg := config.StaticServerConfig{
 		Port:      502,
-		Unit:      1,
 		InputFile: "",
 	}
 	config.MustLoadFromEnv(&cfg)
 	config.RegisterFlags(staticCmd, &cfg)
-	config.RegisterFunctionCompletion(staticCmd)
 	cli.MustMarkFlagRequired(staticCmd, "input")
 	ServerCmd.AddCommand(staticCmd)
 
@@ -44,7 +45,7 @@ func init() {
 		if err := validate.CheckStaticServerConfig(cfg); err != nil {
 			return errs.WrapValidation(err)
 		}
-		if err := modbus.LoadMCAPAndServeStatic(cmd.Context(), cfg, cmd.OutOrStdout()); err != nil {
+		if err := modbus.ServeStatic(cmd.Context(), cfg, cmd.OutOrStdout()); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}

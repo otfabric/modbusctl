@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/mdlayher/arp v0.0.0-20220512170110-6706a2966875
-	github.com/otfabric/go-modbus v1.3.0
+	github.com/otfabric/go-modbus v1.6.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
@@ -17,6 +17,7 @@ require (
 	github.com/mdlayher/ethernet v0.0.0-20220221185849-529eae5b6118 // indirect
 	github.com/mdlayher/packet v1.1.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
+	github.com/otfabric/go-modbus-capture v0.0.1 // indirect
 	github.com/otfabric/go-serial v0.1.6 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/net v0.52.0 // indirect

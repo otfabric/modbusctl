@@ -6,184 +6,382 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/otfabric/go-modbus"
+	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
-	"github.com/otfabric/modbusctl/internal/mcap"
-	"github.com/otfabric/modbusctl/internal/types"
+	"github.com/otfabric/modbusctl/internal/replay"
 )
 
-type RegisterStore interface {
-	get(fc uint8, start uint16, count uint16) ([]byte, error)
+// Missing says how the server answers a request the capture holds nothing for.
+type Missing int
+
+const (
+	// MissingException answers like a device would: Illegal Function for a
+	// function never recorded, Illegal Data Address otherwise.
+	MissingException Missing = iota
+	// MissingZero answers unrecorded coils and registers with zeros.
+	MissingZero
+	// MissingSilence does not answer: the client times out.
+	MissingSilence
+)
+
+// ParseMissing parses the --missing flag: exception (default), zero or silence.
+func ParseMissing(s string) (Missing, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "exception":
+		return MissingException, nil
+	case "zero":
+		return MissingZero, nil
+	case "silence":
+		return MissingSilence, nil
+	}
+	return 0, fmt.Errorf("invalid --missing %q: use exception, zero or silence", s)
 }
 
-type MemoryStore struct {
-	mu        sync.RWMutex
-	registers map[uint16][]byte
-	coils     map[uint16][]byte // FC01
-	discrete  map[uint16][]byte // FC02 (packed bits, same layout as coils)
+// ParseBeforeFirst parses the --before-first flag: hold (default) or absent.
+func ParseBeforeFirst(s string) (replay.BeforeFirst, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "hold":
+		return replay.HoldFirst, nil
+	case "absent":
+		return replay.AbsentUntilSampled, nil
+	}
+	return 0, fmt.Errorf("invalid --before-first %q: use hold or absent", s)
 }
 
-type ReplayController struct {
-	store   *MemoryStore
-	records []types.CaptureRecord
-	start   time.Time
-	loop    int
+// ParseSpeed parses the --speed flag: a positive factor, 1 by default.
+func ParseSpeed(s string) (float64, error) {
+	if strings.TrimSpace(s) == "" {
+		return 1, nil
+	}
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || v <= 0 {
+		return 0, fmt.Errorf("invalid --speed %q: use a positive factor such as 1, 0.1 or 60", s)
+	}
+	return v, nil
 }
 
-type ServerConfig struct {
-	Port     uint16
-	Unit     uint8
-	Function uint8
-	Debug    bool
+// ParseOffset parses a time since the capture start: a Go duration such as 90s
+// or 1m30s. Empty is 0.
+func ParseOffset(flag, s string) (time.Duration, error) {
+	if strings.TrimSpace(s) == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(s))
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("invalid --%s %q: use a duration since the capture start, such as 90s or 1m30s", flag, s)
+	}
+	return d, nil
 }
 
-type StaticHandler struct {
-	Store RegisterStore
-	Cfg   ServerConfig
+// captureHandler serves the targets of a capture, one per unit id, as of the
+// replay time now() returns. It answers reads only. It is safe for concurrent
+// use: the devices are immutable and the counters atomic.
+type captureHandler struct {
+	devices map[uint8]*replay.Device
+	now     func() capture.Ticks
+	missing Missing
+	stats   *serveStats
+	// debug, when set, receives a line per request the capture holds nothing for.
+	debug   io.Writer
+	debugMu sync.Mutex
 }
 
-func writeRegistersToStore(store *MemoryStore, rec types.CaptureRecord, fc uint8) error {
-	if fc == 1 || fc == 2 {
-		// FC01/FC02 response data is packed: one bit per point, LSB-first within each byte (same as [packCoilsToBytes]).
-		packLen := (int(rec.RegisterCount) + 7) / 8
-		if packLen == 0 || len(rec.Data) < packLen {
-			return fmt.Errorf("record at address %d: FC%d data length %d incompatible with point count %d", rec.StartAddress, fc, len(rec.Data), rec.RegisterCount)
+// serveStats counts what a server did: requests and their outcomes come from
+// go-modbus ServerMetrics, unrecorded requests from the handler.
+type serveStats struct {
+	requests, answered, exceptions, silent, unrecorded atomic.Int64
+}
+
+func (s *serveStats) OnRequest(uint8, modbus.FunctionCode) { s.requests.Add(1) }
+
+func (s *serveStats) OnResponse(uint8, modbus.FunctionCode, time.Duration) { s.answered.Add(1) }
+
+func (s *serveStats) OnError(_ uint8, _ modbus.FunctionCode, _ time.Duration, err error) {
+	if errors.Is(err, modbus.ErrNoResponse) {
+		s.silent.Add(1)
+		return
+	}
+	s.exceptions.Add(1)
+}
+
+// summary describes the counters in one line.
+func (s *serveStats) summary() string {
+	return fmt.Sprintf("📊 Served %d requests: %d answered, %d with an exception, %d left unanswered; %d asked for data the capture does not hold",
+		s.requests.Load(), s.answered.Load(), s.exceptions.Load(), s.silent.Load(), s.unrecorded.Load())
+}
+
+func (h *captureHandler) unrecorded(unit, fc uint8, addr, qty uint16) {
+	if h.stats != nil {
+		h.stats.unrecorded.Add(1)
+	}
+	if h.debug != nil {
+		h.debugMu.Lock()
+		if fc >= 1 && fc <= 4 {
+			_, _ = fmt.Fprintf(h.debug, "DEBUG [serve] unit %d FC%02d %d x%d: not in the capture\n", unit, fc, addr, qty)
+		} else {
+			_, _ = fmt.Fprintf(h.debug, "DEBUG [serve] unit %d FC%02d: not in the capture\n", unit, fc)
 		}
-		pack := make([]byte, packLen)
-		copy(pack, rec.Data[:packLen])
-		dest := store.coils
-		if fc == 2 {
-			dest = store.discrete
-		}
-		for i := uint16(0); i < rec.RegisterCount; i++ {
-			byteIdx := i / 8
-			bitIdx := i % 8
-			bit := (pack[byteIdx] >> bitIdx) & 1
-			dest[rec.StartAddress+i] = []byte{bit}
-		}
-		return nil
+		h.debugMu.Unlock()
 	}
-	if len(rec.Data) != int(rec.RegisterCount)*2 {
-		return fmt.Errorf("record %d has mismatched data size", rec.StartAddress)
-	}
-	for i := uint16(0); i < rec.RegisterCount; i++ {
-		offset := i * 2
-		chunk := make([]byte, 2)
-		copy(chunk, rec.Data[offset:offset+2])
-		store.registers[rec.StartAddress+i] = chunk
-	}
-	return nil
 }
 
-func newMemoryStoreLastValues(records []types.CaptureRecord, fc uint8) (*MemoryStore, error) {
-	s := &MemoryStore{
-		registers: make(map[uint16][]byte),
-		coils:     make(map[uint16][]byte),
-		discrete:  make(map[uint16][]byte),
+func (h *captureHandler) device(unit uint8) (*replay.Device, error) {
+	if d := h.devices[unit]; d != nil {
+		return d, nil
 	}
-	for _, rec := range records {
-		if err := writeRegistersToStore(s, rec, fc); err != nil {
-			return nil, err
-		}
-	}
-	return s, nil
+	return nil, modbus.ErrBadUnitID
 }
 
-func newMemoryStoreFirstValues(records []types.CaptureRecord, fc uint8, progress io.Writer) *MemoryStore {
-	if progress == nil {
-		progress = io.Discard
-	}
-	store := &MemoryStore{
-		registers: make(map[uint16][]byte),
-		coils:     make(map[uint16][]byte),
-		discrete:  make(map[uint16][]byte),
-	}
-	if len(records) == 0 {
-		return store
-	}
-	firstIteration := records[0].Iteration
-	for _, rec := range records {
-		if rec.Iteration != firstIteration {
-			continue
+// absent answers a request the capture holds nothing for.
+func (h *captureHandler) absent(d *replay.Device, fc uint8, qty uint16) ([]uint16, error) {
+	switch h.missing {
+	case MissingZero:
+		if fc >= 1 && fc <= 4 {
+			return make([]uint16, qty), nil
 		}
-		if err := writeRegistersToStore(store, rec, fc); err != nil {
-			_, _ = fmt.Fprintf(progress, "⚠️ Failed to write record at address %d: %v\n", rec.StartAddress, err)
-		}
+	case MissingSilence:
+		return nil, modbus.ErrNoResponse
+	case MissingException:
 	}
-	return store
+	if !d.HasFunction(fc) {
+		return nil, modbus.ErrIllegalFunction
+	}
+	return nil, modbus.ErrIllegalDataAddress
 }
 
-// upsertRecord merges one capture record into the store (used by replay updates; takes write lock).
-func (s *MemoryStore) upsertRecord(rec types.CaptureRecord, fc uint8) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return writeRegistersToStore(s, rec, fc)
+func (h *captureHandler) values(unit, fc uint8, addr, qty uint16) ([]uint16, error) {
+	d, err := h.device(unit)
+	if err != nil {
+		return nil, err
+	}
+	t := h.now()
+	if vals, ok := d.Values(t, fc, addr, qty); ok {
+		return vals, nil
+	}
+	h.unrecorded(unit, fc, addr, qty)
+	if h.missing == MissingZero && d.HasFunction(fc) {
+		// Recorded addresses keep their values; the others read as zero.
+		vals, _ := d.Lookup(t, fc, addr, qty)
+		if vals != nil {
+			return vals, nil
+		}
+	}
+	return h.absent(d, fc, qty)
 }
 
-func (s *MemoryStore) get(fc uint8, start uint16, count uint16) ([]byte, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	capacity := int(count)
-	if fc == 3 || fc == 4 {
-		capacity = int(count) * 2
+func toBools(vals []uint16, err error) ([]bool, error) {
+	if err != nil {
+		return nil, err
 	}
-	out := make([]byte, 0, capacity)
-	for i := uint16(0); i < count; i++ {
-		var chunk []byte
-		var ok bool
-		switch fc {
-		case 1:
-			chunk, ok = s.coils[start+i]
-		case 2:
-			chunk, ok = s.discrete[start+i]
-		case 3, 4:
-			chunk, ok = s.registers[start+i]
-		default:
-			return nil, modbus.ErrIllegalFunction
-		}
-		if !ok {
-			return nil, modbus.ErrIllegalDataAddress
-		}
-		out = append(out, chunk...)
+	out := make([]bool, len(vals))
+	for i, v := range vals {
+		out[i] = v != 0
 	}
 	return out, nil
 }
 
-func newModbusServer(ctx context.Context, store RegisterStore, cfg ServerConfig, progress io.Writer) error {
+func (h *captureHandler) HandleCoils(_ context.Context, req *modbus.CoilsRequest) ([]bool, error) {
+	if req.IsWrite {
+		return nil, modbus.ErrIllegalFunction // a replayed device is read-only
+	}
+	return toBools(h.values(req.UnitID, 1, req.Addr, req.Quantity))
+}
+
+func (h *captureHandler) HandleDiscreteInputs(_ context.Context, req *modbus.DiscreteInputsRequest) ([]bool, error) {
+	return toBools(h.values(req.UnitID, 2, req.Addr, req.Quantity))
+}
+
+func (h *captureHandler) HandleHoldingRegisters(_ context.Context, req *modbus.HoldingRegistersRequest) ([]uint16, error) {
+	if req.IsWrite {
+		return nil, modbus.ErrIllegalFunction
+	}
+	return h.values(req.UnitID, 3, req.Addr, req.Quantity)
+}
+
+func (h *captureHandler) HandleInputRegisters(_ context.Context, req *modbus.InputRegistersRequest) ([]uint16, error) {
+	return h.values(req.UnitID, 4, req.Addr, req.Quantity)
+}
+
+// response returns the payload of the recorded response to a request without
+// data (FC07, FC0B, FC0C), when it holds at least n bytes.
+func (h *captureHandler) response(unit, fc uint8, n int) ([]byte, error) {
+	d, err := h.device(unit)
+	if err != nil {
+		return nil, err
+	}
+	resp, ok := d.Response(h.now(), []byte{fc})
+	if ok && len(resp) >= 1+n {
+		return resp[1:], nil
+	}
+	h.unrecorded(unit, fc, 0, 0)
+	_, err = h.absent(d, fc, 0)
+	return nil, err
+}
+
+func (h *captureHandler) HandleExceptionStatus(_ context.Context, req *modbus.ExceptionStatusRequest) (uint8, error) {
+	p, err := h.response(req.UnitID, 0x07, 1)
+	if err != nil {
+		return 0, err
+	}
+	return p[0], nil
+}
+
+func (h *captureHandler) HandleCommEventCounter(_ context.Context, req *modbus.CommEventCounterRequest) (*modbus.CommEventCounterResponse, error) {
+	p, err := h.response(req.UnitID, 0x0B, 4)
+	if err != nil {
+		return nil, err
+	}
+	return &modbus.CommEventCounterResponse{Status: binary.BigEndian.Uint16(p), EventCount: binary.BigEndian.Uint16(p[2:])}, nil
+}
+
+func (h *captureHandler) HandleCommEventLog(_ context.Context, req *modbus.CommEventLogRequest) (*modbus.CommEventLogResponse, error) {
+	p, err := h.response(req.UnitID, 0x0C, 7)
+	if err != nil {
+		return nil, err
+	}
+	// p = byte count, status, event count, message count, events.
+	if int(p[0]) != len(p)-1 {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	return &modbus.CommEventLogResponse{Status: binary.BigEndian.Uint16(p[1:]), EventCount: binary.BigEndian.Uint16(p[3:]),
+		MessageCount: binary.BigEndian.Uint16(p[5:]), Events: append([]byte(nil), p[7:]...)}, nil
+}
+
+func (h *captureHandler) HandleDeviceIdentification(_ context.Context, req *modbus.DeviceIdentificationRequest) (*modbus.DeviceIdentificationResponse, error) {
+	d, err := h.device(req.UnitID)
+	if err != nil {
+		return nil, err
+	}
+	conf, objs, ok := d.Identification(h.now())
+	if !ok {
+		h.unrecorded(req.UnitID, 0x2B, 0, 0)
+		_, err := h.absent(d, 0x2B, 0)
+		return nil, err
+	}
+	res := &modbus.DeviceIdentificationResponse{ConformityLevel: conf}
+	for _, o := range objs {
+		res.Objects = append(res.Objects, modbus.DeviceIdentificationObject{ID: modbus.DeviceIDObjectID(o.ID), Value: string(o.Value)})
+	}
+	return res, nil
+}
+
+// serveTargets loads the capture and builds one device per served target,
+// keyed by the unit id it answers on.
+func serveTargets(input string, target uint32, unit uint8, opts replay.Options) (*capfile.Loaded, map[uint8]*replay.Device, error) {
+	l, err := capfile.Load(input)
+	if err != nil {
+		return nil, nil, capfile.WrapError(err)
+	}
+	var ids []uint32
+	if target != 0 {
+		if _, ok := l.Target(target); !ok {
+			return nil, nil, errs.InvalidInput(errs.CodeInvalidInput,
+				fmt.Sprintf("the capture has no target %d; its targets are: %s", target, l.ListTargets()), nil)
+		}
+		ids = []uint32{target}
+	} else {
+		for _, t := range l.Targets {
+			ids = append(ids, t.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil, errs.InvalidInput(errs.CodeInvalidInput, "the capture has no targets", nil)
+	}
+	if unit != 0 && len(ids) > 1 {
+		return nil, nil, errs.InvalidInput(errs.CodeInvalidFlagCombination,
+			fmt.Sprintf("--unit needs a single target: choose one with --target (%s)", l.ListTargets()), nil)
+	}
+	devices := map[uint8]*replay.Device{}
+	for _, id := range ids {
+		d, err := replay.Build(l.Capture, id, l.End(), opts)
+		if err != nil {
+			return nil, nil, errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
+		}
+		u := d.Target().Unit
+		if unit != 0 {
+			u = unit
+		}
+		if other := devices[u]; other != nil {
+			return nil, nil, errs.InvalidInput(errs.CodeInvalidFlagCombination,
+				fmt.Sprintf("targets %d and %d both answer on unit %d: serve one with --target", other.Target().ID, id, u), nil)
+		}
+		devices[u] = d
+	}
+	return l, devices, nil
+}
+
+func describeDevices(w io.Writer, devices map[uint8]*replay.Device) {
+	units := make([]int, 0, len(devices))
+	for u := range devices {
+		units = append(units, int(u))
+	}
+	sort.Ints(units)
+	for _, u := range units {
+		d := devices[uint8(u)]
+		t := d.Target()
+		label := ""
+		if t.Label != "" {
+			label = fmt.Sprintf(" %q", t.Label)
+		}
+		_, _ = fmt.Fprintf(w, "🧱 Unit %d: target %d%s, %d samples\n", u, t.ID, label, d.Samples())
+	}
+}
+
+// ServerConfig configures the Modbus TCP listener.
+type ServerConfig struct {
+	Port uint16
+	// MaxClients limits concurrent client connections; 0 is the go-modbus
+	// default (10).
+	MaxClients uint16
+	Debug      bool
+}
+
+// serve runs the handler on a Modbus TCP listener until ctx ends, then prints
+// what it served.
+func serve(ctx context.Context, h *captureHandler, cfg ServerConfig, progress io.Writer) error {
+	h.stats = &serveStats{}
+	if cfg.Debug {
+		h.debug = progress
+	}
+	err := newModbusServer(ctx, h, h.stats, cfg, progress)
+	if h.stats.requests.Load() > 0 || errors.Is(err, context.Canceled) {
+		_, _ = fmt.Fprintln(progress, h.stats.summary())
+	}
+	return err
+}
+
+func newModbusServer(ctx context.Context, handler modbus.RequestHandler, metrics modbus.ServerMetrics, cfg ServerConfig, progress io.Writer) error {
 	if progress == nil {
 		progress = io.Discard
 	}
-	handler := &StaticHandler{
-		Store: store,
-		Cfg:   cfg,
-	}
-
 	logger := modbus.NopLogger()
 	if cfg.Debug {
 		logger = modbus.NewStdLogger(nil)
 	}
 	server, err := modbus.NewServer(&modbus.ServerConfig{
-		URL:     fmt.Sprintf("tcp://0.0.0.0:%d", cfg.Port),
-		Timeout: 0,
-		Logger:  logger,
+		URL:        fmt.Sprintf("tcp://0.0.0.0:%d", cfg.Port),
+		Timeout:    0,
+		MaxClients: uint(cfg.MaxClients),
+		Logger:     logger,
+		Metrics:    metrics,
 	}, handler)
 	if err != nil {
 		return errs.New(errs.KindTransport, errs.CodeTransportConnectFailed, "failed to start modbus server: "+err.Error(), err)
 	}
-
-	_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on port %d for unit %d\n", cfg.Port, cfg.Unit)
-
-	err = server.Start()
-	if err != nil {
+	_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on port %d\n", cfg.Port)
+	if err := server.Start(); err != nil {
 		return errs.New(errs.KindTransport, errs.CodeTransportConnectFailed, "modbus server failed: "+err.Error(), err)
 	}
-
 	// Block until context canceled (e.g. SIGINT/SIGTERM via root Execute).
 	<-ctx.Done()
 	// Close listener and client sockets (go-modbus); ignore error—return cancel reason for CLI exit handling.
@@ -191,211 +389,83 @@ func newModbusServer(ctx context.Context, store RegisterStore, cfg ServerConfig,
 	return ctx.Err()
 }
 
-// storedBitsToBools converts [MemoryStore.get] output for coils and discrete inputs, which is
-// one byte (0 or 1) per point, into one bool per point.
-func storedBitsToBools(data []byte) []bool {
-	out := make([]bool, len(data))
-	for i, b := range data {
-		out[i] = b != 0
-	}
-	return out
-}
-
-func (h *StaticHandler) HandleCoils(ctx context.Context, req *modbus.CoilsRequest) ([]bool, error) {
-	if h.Cfg.Function != 1 {
-		return nil, modbus.ErrIllegalFunction
-	}
-	if req.UnitID != h.Cfg.Unit {
-		return nil, modbus.ErrBadUnitID
-	}
-	data, err := h.Store.get(1, req.Addr, req.Quantity)
-	if err != nil {
-		if errors.Is(err, modbus.ErrIllegalFunction) {
-			return nil, err
-		}
-		return nil, modbus.ErrIllegalDataAddress
-	}
-	return storedBitsToBools(data), nil
-}
-
-func (h *StaticHandler) HandleDiscreteInputs(ctx context.Context, req *modbus.DiscreteInputsRequest) ([]bool, error) {
-	if h.Cfg.Function != 2 {
-		return nil, modbus.ErrIllegalFunction
-	}
-	if req.UnitID != h.Cfg.Unit {
-		return nil, modbus.ErrBadUnitID
-	}
-	data, err := h.Store.get(2, req.Addr, req.Quantity)
-	if err != nil {
-		if errors.Is(err, modbus.ErrIllegalFunction) {
-			return nil, err
-		}
-		return nil, modbus.ErrIllegalDataAddress
-	}
-	return storedBitsToBools(data), nil
-}
-
-func (h *StaticHandler) HandleHoldingRegisters(ctx context.Context, req *modbus.HoldingRegistersRequest) ([]uint16, error) {
-	if h.Cfg.Function != 3 {
-		return nil, modbus.ErrIllegalFunction
-	}
-	if req.UnitID != h.Cfg.Unit {
-		return nil, modbus.ErrBadUnitID
-	}
-	data, err := h.Store.get(3, req.Addr, req.Quantity)
-	if err != nil {
-		if errors.Is(err, modbus.ErrIllegalFunction) {
-			return nil, err
-		}
-		return nil, modbus.ErrIllegalDataAddress
-	}
-	var out []uint16
-	for i := 0; i+1 < len(data); i += 2 {
-		val := binary.BigEndian.Uint16(data[i : i+2])
-		out = append(out, val)
-	}
-	return out, nil
-}
-
-func (h *StaticHandler) HandleInputRegisters(ctx context.Context, req *modbus.InputRegistersRequest) ([]uint16, error) {
-	if h.Cfg.Function != 4 {
-		return nil, modbus.ErrIllegalFunction
-	}
-	if req.UnitID != h.Cfg.Unit {
-		return nil, modbus.ErrBadUnitID
-	}
-	data, err := h.Store.get(4, req.Addr, req.Quantity)
-	if err != nil {
-		if errors.Is(err, modbus.ErrIllegalFunction) {
-			return nil, err
-		}
-		return nil, modbus.ErrIllegalDataAddress
-	}
-	var out []uint16
-	for i := 0; i+1 < len(data); i += 2 {
-		val := binary.BigEndian.Uint16(data[i : i+2])
-		out = append(out, val)
-	}
-	return out, nil
-}
-
-func LoadMCAPAndServeStatic(ctx context.Context, cfg config.StaticServerConfig, progress io.Writer) error {
+// ServeStatic serves the values of a capture as of one moment (by default
+// its end: the last values recorded).
+func ServeStatic(ctx context.Context, cfg config.StaticServerConfig, progress io.Writer) error {
 	if progress == nil {
 		progress = io.Discard
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	records, header, err := mcap.LoadRecordsFromMCAP(cfg.InputFile)
+	missing, err := ParseMissing(cfg.Missing)
 	if err != nil {
-		return errs.Output(errs.CodeMCAPLoadFailed, err)
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
 	}
-
-	if cfg.Function != 0 && cfg.Function != header.Function {
-		return errs.InvalidInput(errs.CodeInvalidFlagCombination,
-			fmt.Sprintf("function code mismatch: MCAP header FC=%d, --function=%d (omit --function to use the file's FC)", header.Function, cfg.Function), nil)
-	}
-
-	store, err := newMemoryStoreLastValues(records, header.Function)
+	at, err := ParseOffset("at", cfg.At)
 	if err != nil {
-		return errs.InvalidInput(errs.CodeInvalidInput, "invalid MCAP data for static server: "+err.Error(), err)
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
 	}
-
-	_, _ = fmt.Fprintf(progress, "✅ Static server ready on port %d for unit %d and function %d\n", cfg.Port, cfg.Unit, header.Function)
-	_, _ = fmt.Fprintf(progress, "🧱 Loaded %d address entries from MCAP (per-point coil/discrete or per-register map)\n",
-		len(store.registers)+len(store.coils)+len(store.discrete))
-	return newModbusServer(ctx, store, ServerConfig{
-		Port:     cfg.Port,
-		Unit:     cfg.Unit,
-		Function: header.Function,
-		Debug:    cfg.Debug,
-	}, progress)
+	l, devices, err := serveTargets(cfg.InputFile, cfg.Target, cfg.Unit, replay.Options{})
+	if err != nil {
+		return err
+	}
+	t := l.End()
+	when := "the last recorded values"
+	if strings.TrimSpace(cfg.At) != "" {
+		t = min(l.Header.Ticks(at), l.End())
+		when = "the values at " + l.Header.Duration(t).String()
+	}
+	if l.Truncated {
+		_, _ = fmt.Fprintf(progress, "⚠️ %s is truncated; serving what it holds\n", cfg.InputFile)
+	}
+	_, _ = fmt.Fprintf(progress, "✅ Static server ready on port %d with %s of %s\n", cfg.Port, when, cfg.InputFile)
+	describeDevices(progress, devices)
+	h := &captureHandler{devices: devices, now: func() capture.Ticks { return t }, missing: missing}
+	return serve(ctx, h, ServerConfig{Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
 }
 
-func LoadMCAPAndServeReplay(ctx context.Context, cfg config.ReplayServerConfig, progress io.Writer) error {
+// ServeReplay replays a capture: the served values follow the recorded ones
+// at the chosen speed, looping as configured.
+func ServeReplay(ctx context.Context, cfg config.ReplayServerConfig, progress io.Writer) error {
 	if progress == nil {
 		progress = io.Discard
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	records, header, err := mcap.LoadRecordsFromMCAP(cfg.InputFile)
+	missing, err := ParseMissing(cfg.Missing)
 	if err != nil {
-		return errs.Output(errs.CodeMCAPLoadFailed, err)
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
 	}
-	replayFC := header.Function
-	if cfg.Function != 0 {
-		if cfg.Function != header.Function {
-			return errs.InvalidInput(errs.CodeInvalidFlagCombination,
-				fmt.Sprintf("function code mismatch: MCAP header FC=%d, --function=%d (omit --function to use the file's FC)", header.Function, cfg.Function), nil)
-		}
-		replayFC = cfg.Function
+	before, err := ParseBeforeFirst(cfg.BeforeFirst)
+	if err != nil {
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
 	}
-
-	store := newMemoryStoreFirstValues(records, replayFC, progress)
-	controller := &ReplayController{
-		store:   store,
-		records: records,
-		start:   time.Unix(0, header.StartTime),
-		loop:    int(cfg.Loops),
+	speed, err := ParseSpeed(cfg.Speed)
+	if err != nil {
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
 	}
-
-	// Count the entries before the replay goroutine starts updating the store.
-	entries := len(store.registers) + len(store.coils) + len(store.discrete)
-
-	go func() {
-		w := progress
-		grouped := make(map[uint32][]types.CaptureRecord)
-		var iterations []uint32
-		for _, rec := range controller.records {
-			if _, ok := grouped[rec.Iteration]; !ok {
-				iterations = append(iterations, rec.Iteration)
-			}
-			grouped[rec.Iteration] = append(grouped[rec.Iteration], rec)
-		}
-		slices.Sort(iterations)
-
-		var lastIterationStart int64
-		for loop := 0; ctx.Err() == nil && (controller.loop == 0 || loop < controller.loop); loop++ {
-			_, _ = fmt.Fprintf(w, "🔄 Starting replay loop %d/%d\n", loop+1, controller.loop)
-			for _, iter := range iterations {
-				if ctx.Err() != nil {
-					return
-				}
-				_, _ = fmt.Fprintf(w, "  Processing iteration %d with %d records\n", iter, len(grouped[iter]))
-				records := grouped[iter]
-				startTs := records[0].RequestTimestamp
-				var delay time.Duration
-				if lastIterationStart > 0 {
-					// Interval 0: preserve relative spacing from captured request timestamps (first iteration uses absolute MCAP times).
-					// Interval > 0: fixed wall-clock pause between iterations (ignores original capture timing).
-					if cfg.Interval == 0 {
-						delay = time.Duration(startTs - lastIterationStart)
-					} else {
-						delay = time.Duration(cfg.Interval) * time.Millisecond
-					}
-					if delay > 0 {
-						if err := sleepContext(ctx, delay); err != nil {
-							return
-						}
-					}
-				}
-				lastIterationStart = startTs
-				for _, rec := range records {
-					if err := store.upsertRecord(rec, replayFC); err != nil {
-						_, _ = fmt.Fprintf(w, "⚠️ Failed to write record at address %d: %v\n", rec.StartAddress, err)
-					}
-				}
-			}
-		}
-	}()
-
-	_, _ = fmt.Fprintf(progress, "✅ Replay server ready on port %d for unit %d and function %d\n", cfg.Port, cfg.Unit, replayFC)
-	_, _ = fmt.Fprintf(progress, "🧱 Loaded %d address entries from MCAP (per-point coil/discrete or per-register map)\n", entries)
-	return newModbusServer(ctx, store, ServerConfig{
-		Port:     cfg.Port,
-		Unit:     cfg.Unit,
-		Function: replayFC,
-		Debug:    cfg.Debug,
-	}, progress)
+	from, err := ParseOffset("from", cfg.From)
+	if err != nil {
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
+	}
+	l, devices, err := serveTargets(cfg.InputFile, cfg.Target, cfg.Unit, replay.Options{BeforeFirst: before})
+	if err != nil {
+		return err
+	}
+	clock := replay.Clock{TickNS: l.Header.TickNS, Speed: speed, From: min(l.Header.Ticks(from), l.End()), To: l.End(), Loops: int(cfg.Loops)}
+	if l.Truncated {
+		_, _ = fmt.Fprintf(progress, "⚠️ %s is truncated; replaying what it holds\n", cfg.InputFile)
+	}
+	loops := "forever"
+	if cfg.Loops > 0 {
+		loops = fmt.Sprintf("%d time(s), then the last values stay", cfg.Loops)
+	}
+	_, _ = fmt.Fprintf(progress, "✅ Replay server ready on port %d: %s of %s at %gx, looping %s\n",
+		cfg.Port, l.Header.Duration(clock.To-clock.From), cfg.InputFile, speed, loops)
+	describeDevices(progress, devices)
+	start := time.Now()
+	h := &captureHandler{devices: devices, now: func() capture.Ticks { return clock.At(time.Since(start)) }, missing: missing}
+	return serve(ctx, h, ServerConfig{Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
 }
