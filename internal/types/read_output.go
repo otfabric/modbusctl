@@ -1,5 +1,5 @@
 // Package types defines read command output. RawDataHex is the canonical post-read byte
-// sequence written to MCAP. Typed decoding of these bytes is handled by `client decode`.
+// sequence written to the capture file. Typed decoding of these bytes is handled by `client decode`.
 package types
 
 import (
@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// ReadResult is the structured outcome of a single client read (plus MCAP side effect).
+// ReadResult is the structured outcome of a single client read (plus the capture file it writes).
 type ReadResult struct {
 	Target         string `json:"target"`
 	UnitID         uint8  `json:"unit_id"`

@@ -4,34 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 
+	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
-// ExportAddressBlocks extracts a unique set of address blocks from an MCAP file and writes them as JSON to the provided writer.
-func ExportAddressBlocks(w io.Writer, path string) error {
-	f, err := os.Open(path)
+// ExportAddressBlocks extracts the distinct address blocks the selected samples of a capture read,
+// as JSON: the blocks file format of client record.
+func ExportAddressBlocks(w io.Writer, path string, sel config.CaptureSelection) error {
+	records, _, err := LoadRecords(path, sel)
 	if err != nil {
-		return fmt.Errorf("failed to open mcap file: %w", err)
+		return err
 	}
-	defer func() { _ = f.Close() }()
-
-	_, err = ReadHeader(f)
-	if err != nil {
-		return fmt.Errorf("failed to read header: %w", err)
-	}
-
 	blockSet := make(map[string]types.AddressBlock)
-	for {
-		rec, err := ReadRecord(f)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read record: %w", err)
-		}
+	for _, rec := range records {
 		key := fmt.Sprintf("%d:%d", rec.StartAddress, rec.RegisterCount)
 		blockSet[key] = types.AddressBlock{
 			StartAddress:  rec.StartAddress,

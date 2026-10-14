@@ -12,7 +12,7 @@ import (
 )
 
 // scanSettings bundles config.ScanConfig (flags/env only) with execution-only debug output.
-// ScanAndWriteMCAP builds ss := scanSettings{ScanConfig: cfg} and sets DebugWriter when cfg.Debug.
+// ScanAndRecord builds ss := scanSettings{ScanConfig: cfg} and sets DebugWriter when cfg.Debug.
 type scanSettings struct {
 	config.ScanConfig
 	DebugWriter io.Writer `json:"-"`
@@ -309,7 +309,7 @@ func (s *smartStrategy) Next() (ScanTask, bool) {
 func (s *smartStrategy) OnResult(task ScanTask, result ScanResult) {
 	if result.Success {
 		scanDebugf(&s.cfg, "DEBUG [smart] success: [%d,%d] recorded\n", task.Start, task.Start+task.Count-1)
-		return // interval recorded as readable (MCAP written by executor)
+		return // interval recorded as readable (recorded by the executor)
 	}
 	if task.Count > 1 {
 		leftCount := task.Count / 2
@@ -475,7 +475,7 @@ func (s *deepStrategy) OnResult(task ScanTask, result ScanResult) {
 			scanDebugf(&s.cfg, "DEBUG [deep] phase 1: failed + [%d,%d] (total=%d)\n", task.Start, task.Start+task.Count-1, len(s.failedIntervals))
 		}
 	}
-	// Phase 2: no further splitting, executor already wrote MCAP on success
+	// Phase 2: no further splitting, executor already recorded the read on success
 }
 
 func (s *deepStrategy) Done() bool {

@@ -10,7 +10,7 @@ import (
 
 // ExportStrings scans each record's data for embedded ASCII substrings and writes them with their address range.
 func ExportStrings(w io.Writer, cfg config.StringsConfig) error {
-	records, _, err := mcap.LoadRecordsFromMCAP(cfg.InputFile)
+	records, _, err := mcap.LoadRecords(cfg.InputFile, cfg.CaptureSelection)
 	if err != nil {
 		return fmt.Errorf("failed to load records: %w", err)
 	}
@@ -22,8 +22,8 @@ func ExportStrings(w io.Writer, cfg config.StringsConfig) error {
 }
 
 // ExportHeuristicFrequency scans the records for potential frequency values and writes them to the provided writer.
-func ExportHeuristicFrequency(w io.Writer, path string) error {
-	records, _, err := mcap.LoadRecordsFromMCAP(path)
+func ExportHeuristicFrequency(w io.Writer, path string, sel config.CaptureSelection) error {
+	records, _, err := mcap.LoadRecords(path, sel)
 	if err != nil {
 		return fmt.Errorf("failed to load records: %w", err)
 	}

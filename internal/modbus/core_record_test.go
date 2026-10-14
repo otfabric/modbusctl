@@ -36,7 +36,7 @@ func TestCoreRecord_capturesEveryBlockEachIteration(t *testing.T) {
 	out := coreMcapPath(t)
 
 	var progress bytes.Buffer
-	sum, err := RecordAndWriteMCAP(context.Background(), config.RecordConfig{
+	sum, err := RecordToCapture(context.Background(), config.RecordConfig{
 		DeviceConfig: dc, Timeout: coreTimeoutMS, Function: 3, Interval: 10, Duration: 60,
 		BlocksFile: coreBlocksFile(t, types.AddressBlock{StartAddress: 0, RegisterCount: 10}, types.AddressBlock{StartAddress: 100, RegisterCount: 5}),
 		OutputFile: out,
@@ -84,7 +84,7 @@ func TestCoreRecord_unreadableBlockIsSkipped(t *testing.T) {
 	dev := coreScanDevice(coreRange{0, 3})
 	out := coreMcapPath(t)
 	var progress bytes.Buffer
-	sum, err := RecordAndWriteMCAP(context.Background(), config.RecordConfig{
+	sum, err := RecordToCapture(context.Background(), config.RecordConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 4, Duration: 1,
 		BlocksFile: coreBlocksFile(t, types.AddressBlock{StartAddress: 500, RegisterCount: 2}, types.AddressBlock{StartAddress: 0, RegisterCount: 4}),
 		OutputFile: out,
@@ -119,7 +119,7 @@ func TestCoreRecord_retriesBusyAndDroppedConnection(t *testing.T) {
 	}
 	out := coreMcapPath(t)
 	var progress bytes.Buffer
-	sum, err := RecordAndWriteMCAP(context.Background(), config.RecordConfig{
+	sum, err := RecordToCapture(context.Background(), config.RecordConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, Duration: 1, Debug: true,
 		BlocksFile: coreBlocksFile(t, types.AddressBlock{StartAddress: 0, RegisterCount: 4}),
 		OutputFile: out,
@@ -139,7 +139,7 @@ func TestCoreRecord_retriesBusyAndDroppedConnection(t *testing.T) {
 func TestCoreRecord_zeroDuration(t *testing.T) {
 	dev := coreScanDevice(coreRange{0, 3})
 	dir := t.TempDir()
-	sum, err := RecordAndWriteMCAP(context.Background(), config.RecordConfig{
+	sum, err := RecordToCapture(context.Background(), config.RecordConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3,
 		BlocksFile: coreBlocksFile(t, types.AddressBlock{StartAddress: 0, RegisterCount: 4}),
 		OutputFile: dir + "/",
@@ -149,16 +149,16 @@ func TestCoreRecord_zeroDuration(t *testing.T) {
 	assert.Zero(t, sum.BlocksRecorded)
 	assert.Zero(t, dev.RequestCount(0))
 	assert.Equal(t, dir, filepath.Dir(sum.McapOutputPath))
-	assert.Regexp(t, `^modbusctl_record_\d{8}_\d{6}\.mcap$`, filepath.Base(sum.McapOutputPath))
+	assert.Regexp(t, `^modbusctl_record_\d{8}_\d{6}\.mbcap$`, filepath.Base(sum.McapOutputPath))
 	records, header := coreLoadMcap(t, sum.McapOutputPath)
 	assert.Empty(t, records)
-	assert.Equal(t, uint8(3), header.Function)
+	assert.Equal(t, uint8(1), header.Unit, "the target is recorded even without samples")
 }
 
 func TestCoreRecord_setupFailures(t *testing.T) {
 	t.Run("blocks file missing", func(t *testing.T) {
 		out := coreMcapPath(t)
-		_, err := RecordAndWriteMCAP(context.Background(), config.RecordConfig{
+		_, err := RecordToCapture(context.Background(), config.RecordConfig{
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t)}, Timeout: coreShortTimeoutMS, Function: 3, Duration: 10,
 			BlocksFile: filepath.Join(t.TempDir(), "nope.json"), OutputFile: out,
 		}, nil)
@@ -170,7 +170,7 @@ func TestCoreRecord_setupFailures(t *testing.T) {
 	t.Run("blocks file is not JSON", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "blocks.json")
 		require.NoError(t, os.WriteFile(path, []byte(`{"start_address": 1}`), 0o600))
-		_, err := RecordAndWriteMCAP(context.Background(), config.RecordConfig{
+		_, err := RecordToCapture(context.Background(), config.RecordConfig{
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t)}, Timeout: coreShortTimeoutMS, Function: 3, Duration: 10,
 			BlocksFile: path, OutputFile: coreMcapPath(t),
 		}, nil)
@@ -179,7 +179,7 @@ func TestCoreRecord_setupFailures(t *testing.T) {
 
 	t.Run("connect refused", func(t *testing.T) {
 		out := coreMcapPath(t)
-		_, err := RecordAndWriteMCAP(context.Background(), config.RecordConfig{
+		_, err := RecordToCapture(context.Background(), config.RecordConfig{
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t)}, Timeout: coreShortTimeoutMS, Function: 3, Duration: 10,
 			BlocksFile: coreBlocksFile(t, types.AddressBlock{StartAddress: 0, RegisterCount: 1}), OutputFile: out,
 		}, nil)
@@ -189,7 +189,7 @@ func TestCoreRecord_setupFailures(t *testing.T) {
 
 	t.Run("output file cannot be created", func(t *testing.T) {
 		dev := coreScanDevice(coreRange{0, 3})
-		_, err := RecordAndWriteMCAP(context.Background(), config.RecordConfig{
+		_, err := RecordToCapture(context.Background(), config.RecordConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, Duration: 10,
 			BlocksFile: coreBlocksFile(t, types.AddressBlock{StartAddress: 0, RegisterCount: 1}),
 			OutputFile: filepath.Join(t.TempDir(), "missing", "record.mcap"),
@@ -214,7 +214,7 @@ func TestCoreRecord_canceledBetweenIterations(t *testing.T) {
 	}
 	out := coreMcapPath(t)
 	start := time.Now()
-	sum, err := RecordAndWriteMCAP(ctx, config.RecordConfig{
+	sum, err := RecordToCapture(ctx, config.RecordConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, Interval: 5000, Duration: 60000,
 		BlocksFile: coreBlocksFile(t, types.AddressBlock{StartAddress: 0, RegisterCount: 4}), OutputFile: out,
 	}, nil)

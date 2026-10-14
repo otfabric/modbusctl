@@ -6,10 +6,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/otfabric/modbusctl/internal/capfile/capfiletest"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/mbtest"
-	"github.com/otfabric/modbusctl/internal/mcap"
 	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -39,15 +39,13 @@ func coreClosedURL(t *testing.T) string {
 // coreMcapPath returns a capture path inside the test's temporary directory.
 func coreMcapPath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "capture.mcap")
+	return filepath.Join(t.TempDir(), "capture.mbcap")
 }
 
 // coreLoadMcap reads back a capture file.
 func coreLoadMcap(t *testing.T, path string) ([]types.CaptureRecord, types.CaptureHeader) {
 	t.Helper()
-	records, header, err := mcap.LoadRecordsFromMCAP(path)
-	require.NoError(t, err)
-	return records, header
+	return capfiletest.ReadRecords(t, path)
 }
 
 // coreRequireKind asserts that err, once wrapped the way the command runner wraps collector

@@ -3,125 +3,138 @@ package mcap
 import (
 	"fmt"
 	"io"
-	"os"
 	"sort"
+	"strings"
 	"time"
 
-	"github.com/otfabric/modbusctl/internal/types"
+	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/modbusctl/internal/capfile"
 )
 
-// ExportInfo reads the header and records from an MCAP file and writes a summary to the provided writer.
+// ExportInfo writes a summary of a capture file: header, targets, streams,
+// sample counts, function mix and per-stream poll interval.
 func ExportInfo(w io.Writer, path string) error {
-	f, err := os.Open(path)
+	l, err := capfile.Load(path)
 	if err != nil {
-		return fmt.Errorf("failed to open mcap file: %w", err)
+		return err
 	}
-	defer func() { _ = f.Close() }()
+	h := l.Header
+	p := func(format string, args ...any) { _, _ = fmt.Fprintf(w, format, args...) }
 
-	header, err := ReadHeader(f)
-	if err != nil {
-		return fmt.Errorf("failed to read header: %w", err)
+	p("Capture: %s (%s)\n", path, l.Encoding)
+	if h.Producer != "" {
+		p("  Producer:  %s\n", h.Producer)
 	}
-
-	_, _ = fmt.Fprintf(w, "Header Information:\n")
-	_, _ = fmt.Fprintf(w, "  IP:        %s\n", header.IP)
-	_, _ = fmt.Fprintf(w, "  Port:      %d\n", header.Port)
-	_, _ = fmt.Fprintf(w, "  Unit:      %d\n", header.Unit)
-	_, _ = fmt.Fprintf(w, "  Function:  %d\n", header.Function)
-	_, _ = fmt.Fprintf(w, "  StartTime: %s\n", time.Unix(0, header.StartTime).Format(time.RFC3339Nano))
-	_, _ = fmt.Fprintf(w, "\n")
-
-	iterDetails := make(map[uint32]*types.IterationDetail)
-	var durations []time.Duration
-
-	for {
-		rec, err := ReadRecord(f)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read record: %w", err)
-		}
-
-		detail, ok := iterDetails[rec.Iteration]
-		if !ok {
-			detail = &types.IterationDetail{
-				FirstRequestTS: rec.RequestTimestamp,
-				LastResponseTS: rec.ResponseTimestamp,
-				MinAddr:        rec.StartAddress,
-				MaxAddr:        rec.StartAddress + rec.RegisterCount - 1,
-			}
-			iterDetails[rec.Iteration] = detail
-		}
-		detail.BlockCount++
-		detail.TotalRegisters += int(rec.RegisterCount)
-		if rec.RequestTimestamp < detail.FirstRequestTS {
-			detail.FirstRequestTS = rec.RequestTimestamp
-		}
-		if rec.ResponseTimestamp > detail.LastResponseTS {
-			detail.LastResponseTS = rec.ResponseTimestamp
-		}
-		if rec.StartAddress < detail.MinAddr {
-			detail.MinAddr = rec.StartAddress
-		}
-		if end := rec.StartAddress + rec.RegisterCount - 1; end > detail.MaxAddr {
-			detail.MaxAddr = end
+	p("  Start:     %s\n", h.WallStart.Format(time.RFC3339Nano))
+	p("  Tick:      %v\n", time.Duration(h.TickNS))
+	mode := "full capture"
+	if h.ChangeOnly {
+		mode = "change-only"
+	}
+	if h.Exceptions {
+		mode += ", exceptions recorded"
+	}
+	p("  Mode:      %s\n", mode)
+	switch {
+	case l.Truncated:
+		p("  End:       unknown: the file is truncated (last sample at %v)\n", h.Duration(l.End()))
+	case !l.Capture.End.Known:
+		p("  End:       not recorded (last sample at %v)\n", h.Duration(l.End()))
+	default:
+		p("  End:       %v\n", h.Duration(l.End()))
+	}
+	exc := 0
+	fcs := map[uint8]int{}
+	for i := range l.Samples {
+		fcs[l.Samples[i].Function()]++
+		if l.Samples[i].IsException() {
+			exc++
 		}
 	}
-
-	_, _ = fmt.Fprintf(w, "Record Summary:\n")
-	_, _ = fmt.Fprintf(w, "  Iterations: %d\n", len(iterDetails))
-
-	var minDur, maxDur time.Duration
-	var totalDur time.Duration
-	first := true
-
-	var sortedIters []uint32
-	for iter := range iterDetails {
-		sortedIters = append(sortedIters, iter)
-	}
-	sort.Slice(sortedIters, func(i, j int) bool {
-		return sortedIters[i] < sortedIters[j]
-	})
-
-	for _, iter := range sortedIters {
-		d := iterDetails[iter]
-		duration := time.Duration(d.LastResponseTS - d.FirstRequestTS)
-		durations = append(durations, duration)
-		if first {
-			minDur = duration
-			maxDur = duration
-			totalDur = duration
-			first = false
-		} else {
-			if duration < minDur {
-				minDur = duration
-			}
-			if duration > maxDur {
-				maxDur = duration
-			}
-			totalDur += duration
+	p("  Samples:   %d (%d exception responses)\n", len(l.Samples), exc)
+	if len(fcs) > 0 {
+		var parts []string
+		for _, fc := range sortedKeys(fcs) {
+			parts = append(parts, fmt.Sprintf("FC%02d x%d", fc, fcs[fc]))
 		}
-
-		_, _ = fmt.Fprintf(w, "    Iteration %d:\n", iter)
-		_, _ = fmt.Fprintf(w, "      Blocks: %d\n", d.BlockCount)
-		_, _ = fmt.Fprintf(w, "      Total Registers: %d\n", d.TotalRegisters)
-		_, _ = fmt.Fprintf(w, "      Time: %s → %s (duration: %dms)\n",
-			time.Unix(0, d.FirstRequestTS).Format(time.RFC3339Nano),
-			time.Unix(0, d.LastResponseTS).Format(time.RFC3339Nano),
-			duration.Milliseconds())
-		_, _ = fmt.Fprintf(w, "      Address Range: %d → %d\n", d.MinAddr, d.MaxAddr)
+		p("  Functions: %s\n", strings.Join(parts, ", "))
 	}
 
-	if len(durations) > 0 {
-		avgDur := totalDur / time.Duration(len(durations))
-		_, _ = fmt.Fprintf(w, "  Iteration Durations:\n")
-		_, _ = fmt.Fprintf(w, "    Min: %v\n", minDur)
-		_, _ = fmt.Fprintf(w, "    Avg: %v\n", avgDur)
-		_, _ = fmt.Fprintf(w, "    Max: %v\n", maxDur)
-	} else {
-		_, _ = fmt.Fprintf(w, "  No records found.\n")
+	p("\nTargets:\n")
+	for _, t := range l.Targets {
+		p("  %d  %s  %s  unit %d\n", t.ID, orDash(quote(t.Label)), endpoint(t), t.Unit)
 	}
-
+	p("\nStreams:\n")
+	for _, s := range l.Streams {
+		n, first, last, interval := streamStats(l.Samples, s.ID)
+		p("  %d  target %d  %s  %s  %d samples", s.ID, s.Target, orDash(s.Role), orDash(quote(s.Label)), n)
+		if n > 0 {
+			p(", %v to %v", h.Duration(first), h.Duration(last))
+		}
+		if interval > 0 {
+			p(", every %v", h.Duration(interval))
+		}
+		p("\n")
+	}
 	return nil
+}
+
+// streamStats returns the sample count, time span and median interval
+// between two samples of the same request of stream.
+func streamStats(samples []capture.Sample, stream uint32) (n int, first, last, interval capture.Ticks) {
+	lastAt := map[string]capture.Ticks{}
+	var gaps []capture.Ticks
+	for i := range samples {
+		s := &samples[i]
+		if s.Stream != stream {
+			continue
+		}
+		if n == 0 || s.At < first {
+			first = s.At
+		}
+		last = max(last, s.At)
+		n++
+		if prev, ok := lastAt[string(s.Request)]; ok && s.At > prev {
+			gaps = append(gaps, s.At-prev)
+		}
+		lastAt[string(s.Request)] = s.At
+	}
+	if len(gaps) > 0 {
+		sort.Slice(gaps, func(i, j int) bool { return gaps[i] < gaps[j] })
+		interval = gaps[len(gaps)/2]
+	}
+	return n, first, last, interval
+}
+
+func endpoint(t capture.Target) string {
+	if !t.Serial.IsZero() {
+		return fmt.Sprintf("%s %s %d baud", t.Transport, t.Serial.Device, t.Serial.Baud)
+	}
+	if t.Host != "" || t.Port != 0 {
+		return fmt.Sprintf("%s %s:%d", t.Transport, t.Host, t.Port)
+	}
+	return t.Transport.String()
+}
+
+func sortedKeys(m map[uint8]int) []uint8 {
+	keys := make([]uint8, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
+}
+
+func quote(s string) string {
+	if s == "" {
+		return ""
+	}
+	return fmt.Sprintf("%q", s)
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }

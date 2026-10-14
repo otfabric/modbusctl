@@ -31,6 +31,9 @@ type Action struct {
 	Close bool
 	// Delay is waited before the request is processed.
 	Delay time.Duration
+	// Reply, when set, is sent as the response PDU instead of the normal answer,
+	// for example a malformed one.
+	Reply []byte
 }
 
 // Request is one request seen by the device.
@@ -193,6 +196,8 @@ func (d *Device) handle(unit uint8, pdu []byte) reply {
 			return reply{}
 		case act.Exception != 0:
 			return reply{pdu: exception(fc, act.Exception)}
+		case act.Reply != nil:
+			return reply{pdu: append([]byte(nil), act.Reply...)}
 		}
 	}
 	if len(d.Units) > 0 {

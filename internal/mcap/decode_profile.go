@@ -6,22 +6,20 @@ import (
 	"io"
 	"os"
 
+	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
-// ExportDeviceProfileDecode reads the records from an MCAP file and writes a summary to the provided writer.
-func ExportDeviceProfileDecode(w io.Writer, path string, deviceProfilePath string) error {
-	f, err := os.Open(path)
+// ExportDeviceProfileDecode decodes the register samples of a capture with a device profile and
+// writes the values. Each register holds its latest recorded value.
+func ExportDeviceProfileDecode(w io.Writer, path string, deviceProfilePath string, sel config.CaptureSelection) error {
+	records, header, err := LoadRecords(path, sel)
 	if err != nil {
-		return fmt.Errorf("failed to open mcap file: %w", err)
+		return err
 	}
-	defer func() { _ = f.Close() }()
-
-	_, err = ReadHeader(f)
-	if err != nil {
-		return fmt.Errorf("failed to read header: %w", err)
+	if len(records) > 0 && header.Function != 3 && header.Function != 4 {
+		return fmt.Errorf("decode needs register samples (FC03 or FC04); the selection holds FC%02d", header.Function)
 	}
-
 	profileFile, err := os.Open(deviceProfilePath)
 	if err != nil {
 		return fmt.Errorf("failed to open device profile: %w", err)
@@ -34,14 +32,7 @@ func ExportDeviceProfileDecode(w io.Writer, path string, deviceProfilePath strin
 	}
 
 	mem := make(map[uint16][]byte)
-	for {
-		rec, err := ReadRecord(f)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read record: %w", err)
-		}
+	for _, rec := range records {
 		for i := uint16(0); i < rec.RegisterCount; i++ {
 			addr := rec.StartAddress + i
 			offset := i * 2

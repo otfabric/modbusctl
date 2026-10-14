@@ -35,6 +35,12 @@ const (
 	CodeInputFileOpenFailed    = "input_file_open_failed"
 	CodeInputDecodeFailed      = "input_decode_failed"
 	CodeMcapWriteFailed        = "mcap_write_failed"
+	// A capture file in the MCAP v1 format of modbusctl 2.x, which modbusctl 3 does not read.
+	CodeCaptureLegacyFormat = "capture_legacy_format"
+	// A capture holds several targets or functions and the command needs one (--target, --function).
+	CodeCaptureSelectionAmbiguous = "capture_selection_ambiguous"
+	// The selected target or function has no data in the capture.
+	CodeCaptureSelectionEmpty = "capture_selection_empty"
 
 	CodeInternalUnexpected = "internal_unexpected"
 )

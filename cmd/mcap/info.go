@@ -1,6 +1,7 @@
 package mcap
 
 import (
+	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
@@ -11,16 +12,16 @@ import (
 
 var infoCmd = &cobra.Command{
 	Use:   "info",
-	Short: "Extract header and record info from MCAP file",
+	Short: "Summarise a capture: targets, streams, samples, functions and timing",
 	Example: `
-  # Get information about an MCAP file and print to stdout
-  modbusctl mcap info --input data.mcap
+  # Get information about a capture file and print to stdout
+  modbusctl mcap info --input data.mbcap
 
-  # Get information about an MCAP file and save to output file
-  modbusctl mcap info --input data.mcap --output info.txt
+  # Get information about a capture file and save to output file
+  modbusctl mcap info --input data.mbcap --output info.txt
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_INPUT=data.mcap MODBUSCTL_OUTPUT=info.txt modbusctl mcap info
+  MODBUSCTL_INPUT=data.mbcap MODBUSCTL_OUTPUT=info.txt modbusctl mcap info
 `,
 }
 
@@ -45,7 +46,7 @@ func init() {
 		defer cleanup()
 
 		if err := mcapfile.ExportInfo(w, cfg.InputFile); err != nil {
-			return errs.Output(errs.CodeMCAPLoadFailed, err)
+			return capfile.WrapError(err)
 		}
 		return nil
 	}

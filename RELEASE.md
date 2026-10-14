@@ -1,5 +1,49 @@
 # modbusctl Releases
 
+## v3.0.0
+
+**Date:** 2026-10-14  
+**Previous release:** v2.4.1
+
+### Summary
+
+Major release: captures are now **MBCAP** files, the format of [**go-modbus-capture**](https://github.com/otfabric/go-modbus-capture), instead of MCAP v1. A capture stores the **raw request and response PDUs** of every answered read with the time the response arrived, for several devices and acquisition streams in one file. **`server static`** and **`server replay`** are rebuilt on it: they serve every target of a capture on its own unit id, coils, discrete inputs and registers per address, FC07/FC11/FC12 and FC43 device identification, and **`server replay`** plays the recording at any speed. **MCAP v1 files are no longer read.** Also adopts **go-modbus v1.6.1**.
+
+### Breaking changes
+
+- **Capture format:** **`client read`**, **`client scan`** and **`client record`** write MBCAP (`.mbcap`) instead of MCAP v1 (`.mcap`); automatic file names are now `modbusctl_<kind>_<UTC time>.mbcap`. **`server`** and **`mcap`** commands read MBCAP in any of its encodings (`.mbcap`, `.mbcap.jsonl`, `.mbcap.csv`) and reject an MCAP v1 file with a message saying so.
+- **`server static`:** `--function` is gone: a capture may hold several function codes, and all of them are served. `--unit` now defaults to **0**, meaning each target answers on the unit id it was recorded with; `--unit` serves a single target (chosen with the new `--target`) on another unit id.
+- **`server replay`:** `--function` and `--interval` are gone. Timing follows the recorded sample times; `--speed` scales it (1 = original, 10 = ten times faster, 0.1 = ten times slower). `--loops 0` still loops forever; `--loops N` now plays the capture N times and then keeps serving the last values.
+- **`mcap convert --format`:** `csv` now writes the lossless MBCAP long CSV (one row per record, raw PDUs in hex); `json` is replaced by **`jsonl`** (MBCAP JSON Lines); new **`mbcap`** and **`wide-csv`** (raw values per address over time).
+- **`mcap info`** prints an MBCAP summary (targets, streams, sample counts, functions, span, poll interval) instead of the v1 header and iteration statistics.
+- **Answers for data a capture does not hold** are now chosen with `--missing`; the default (exception) matches v2 for addresses: Illegal Data Address; a function never recorded now answers Illegal Function on both servers.
+
+### Added
+
+- **`server static --at`** serves the values at a moment of the capture instead of its last values; **`server replay --from`** starts part-way in.
+- **`--missing exception|zero|silence`** and (replay) **`--before-first hold|absent`** on both servers.
+- **`--max-clients`** on both servers (default 10, as before): the number of concurrent client connections served; further ones are closed.
+- **Server summary:** on shutdown both servers print what they served (`📊 Served N requests: …`), from go-modbus server metrics: answers, exceptions, silences, and requests for data the capture does not hold. With `--debug` they also name each such request.
+- **Error codes** for capture files (exit 3): `capture_legacy_format` (an MCAP v1 file), `capture_selection_ambiguous` and `capture_selection_empty` (a `--target`/`--function` selection that matches several or no targets and functions).
+- **`--target`** on both servers, and on **`mcap decode`**, **`extract`**, **`strings`** and **`frequencies`** together with **`--function`**, to pick one target and function out of a capture holding several.
+- **`mcap verify`** checks a capture's block checksums, structure and the rules of the format.
+- **`--record-exceptions`** on **`client record`** and **`client scan`** also records exception responses (for a scan: where the device refuses).
+- Serial captures keep the serial settings of the device (baud, parity, data and stop bits); every capture keeps the connection URL in the target's `url` tag.
+
+### Changed
+
+- **Recording:** samples come from the go-modbus **PDU tap**, so they are the exact bytes on the wire. A read that is retried (busy device, reconnect) leaves one sample, of the attempt that succeeded; a failed read leaves none. The file is flushed every 10 seconds: an interrupted recording is readable up to the last flush.
+- **`server static`** serves several coils or discrete inputs in one request correctly (v2 answered only the first one right).
+- **Writes** to either server are refused with Illegal Function: a replayed device is read-only.
+- **go-modbus:** Requires **`github.com/otfabric/go-modbus` v1.6.1** (was v1.3.0). Adds **`github.com/otfabric/go-modbus-capture` v0.0.1**.
+
+### Migration
+
+- Re-record devices with modbusctl 3. Old `.mcap` files can be kept and inspected with modbusctl 2.x; nothing converts them.
+- Scripts that passed `--function` to **`server static`/`replay`**: drop it. Scripts that passed `--interval` to **`server replay`**: use `--speed` (original timing is the default).
+- Scripts that ran **`mcap convert --format json`**: use `--format jsonl` (one JSON object per line: header, target, stream, sample and end records with hex PDUs).
+- The JSON summaries of **`client read`**, **`scan`** and **`record`** keep the key `mcap_output_path`; it names the `.mbcap` file.
+
 ## v2.4.1
 
 **Date:** 2026-10-11  

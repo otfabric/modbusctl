@@ -20,19 +20,19 @@ var scanClientCmd = &cobra.Command{
 Exit code 7 (partial success) is used when the command completes and writes output but the scan summary reports failed requests (timeouts, transport errors, or Modbus exceptions) alongside successes — see docs/exitcodes.md.`,
 	Example: `
   # Scan holding registers 0-10 (default algo: safe)
-  modbusctl client scan --ip 192.168.1.100 --start 0 --end 10 --output scan.mcap
+  modbusctl client scan --ip 192.168.1.100 --start 0 --end 10 --output scan.mbcap
 
   # Connect via URL (mutually exclusive with --ip/--port)
-  modbusctl client scan --url tcp://192.168.1.100:502 --start 0 --end 10 --output scan.mcap
+  modbusctl client scan --url tcp://192.168.1.100:502 --start 0 --end 10 --output scan.mbcap
 
   # Scan holding registers with smart algorithm (interval splitting)
-  modbusctl client scan --ip 192.168.1.100 --function 3 --algo smart --start 0 --end 1000 --output scan.mcap
+  modbusctl client scan --ip 192.168.1.100 --function 3 --algo smart --start 0 --end 1000 --output scan.mbcap
 
   # Scan input registers with delay between requests
-  modbusctl client scan --ip 192.168.1.100 --function 4 --start 100 --end 110 --delay 100 --output input_scan.mcap
+  modbusctl client scan --ip 192.168.1.100 --function 4 --start 100 --end 110 --delay 100 --output input_scan.mbcap
 
   # Use environment variables
-  MODBUSCTL_IP=192.168.1.100 MODBUSCTL_START=0 MODBUSCTL_END=10 MODBUSCTL_OUTPUT=scan.mcap modbusctl client scan
+  MODBUSCTL_IP=192.168.1.100 MODBUSCTL_START=0 MODBUSCTL_END=10 MODBUSCTL_OUTPUT=scan.mbcap modbusctl client scan
 `,
 }
 
@@ -68,7 +68,7 @@ func init() {
 		return runner.RunClientFormattedWithDebug(cmd, func(d bool) { cfg.Debug = d }, cfg.OutputFormat,
 			func() error { return validate.CheckScanConfig(&cfg) },
 			func(ctx context.Context) (any, error) {
-				r, e := modbus.ScanAndWriteMCAP(ctx, cfg, cmd.ErrOrStderr())
+				r, e := modbus.ScanAndRecord(ctx, cfg, cmd.ErrOrStderr())
 				if e != nil {
 					return nil, modbus.WrapCollectError(e)
 				}

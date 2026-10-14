@@ -534,16 +534,18 @@ func TestCheckConvertConfig_format(t *testing.T) {
 	input := writeFile(t, "in.mcap", "x")
 	check(t, CheckConvertConfig(nil), "convert config is nil")
 
-	for in, want := range map[string]string{"csv": "csv", " JSON ": "json", "Csv": "csv"} {
+	for in, want := range map[string]string{"csv": "csv", " JSONL ": "jsonl", "Mbcap": "mbcap", "wide-csv": "wide-csv"} {
 		cfg := &config.ConvertConfig{InputFile: input, FormatType: in}
 		require.NoError(t, CheckConvertConfig(cfg))
 		assert.Equal(t, want, cfg.FormatType)
 	}
 	for _, in := range []string{"", "xml", "csv,json"} {
 		cfg := &config.ConvertConfig{InputFile: input, FormatType: in}
-		assert.EqualError(t, CheckConvertConfig(cfg), `unsupported format: "`+in+`" (expected csv or json)`)
+		assert.EqualError(t, CheckConvertConfig(cfg), `unsupported format: "`+in+`" (expected mbcap, jsonl, csv or wide-csv)`)
 		assert.Equal(t, in, cfg.FormatType, "a rejected format must be left untouched")
 	}
+	// The v2 json export is gone; say what replaces it.
+	assert.ErrorContains(t, CheckConvertConfig(&config.ConvertConfig{InputFile: input, FormatType: "json"}), "use jsonl")
 }
 
 func TestCheckDiagnosticConfig_more(t *testing.T) {
@@ -604,28 +606,23 @@ func TestCheckDiscoverConfig_more(t *testing.T) {
 
 func TestCheckServerConfigs(t *testing.T) {
 	dir := t.TempDir()
-	input := writeFile(t, "in.mcap", "x")
-	checks := map[string]func(port uint16, fc uint8, in string) error{
-		"static": func(port uint16, fc uint8, in string) error {
-			return CheckStaticServerConfig(config.StaticServerConfig{Port: port, Function: fc, InputFile: in})
-		},
-		"replay": func(port uint16, fc uint8, in string) error {
-			return CheckReplayServerConfig(config.ReplayServerConfig{Port: port, Function: fc, InputFile: in})
-		},
-	}
-	for name, fn := range checks {
-		t.Run(name, func(t *testing.T) {
-			check(t, fn(1502, 0, input), "")
-			for fc := uint8(1); fc <= 4; fc++ {
-				check(t, fn(1502, fc, input), "")
-			}
-			check(t, fn(0, 3, input), "port must be greater than 0")
-			check(t, fn(1502, 3, ""), "file path is required")
-			check(t, fn(1502, 3, filepath.Join(dir, "missing.mcap")), "file not accessible")
-			check(t, fn(1502, 3, dir), "path cannot be a directory")
-			check(t, fn(1502, 5, input), "unsupported function code: 5")
-		})
-	}
+	input := writeFile(t, "in.mbcap", "x")
+	check(t, CheckStaticServerConfig(config.StaticServerConfig{Port: 1502, InputFile: input}), "")
+	check(t, CheckStaticServerConfig(config.StaticServerConfig{Port: 1502, InputFile: input, At: "90s", Missing: "zero"}), "")
+	check(t, CheckStaticServerConfig(config.StaticServerConfig{Port: 0, InputFile: input}), "port must be greater than 0")
+	check(t, CheckStaticServerConfig(config.StaticServerConfig{Port: 1502}), "file path is required")
+	check(t, CheckStaticServerConfig(config.StaticServerConfig{Port: 1502, InputFile: filepath.Join(dir, "missing.mbcap")}), "file not accessible")
+	check(t, CheckStaticServerConfig(config.StaticServerConfig{Port: 1502, InputFile: dir}), "path cannot be a directory")
+	check(t, CheckStaticServerConfig(config.StaticServerConfig{Port: 1502, InputFile: input, Missing: "panic"}), `invalid --missing "panic"`)
+	check(t, CheckStaticServerConfig(config.StaticServerConfig{Port: 1502, InputFile: input, At: "soon"}), `invalid --at "soon"`)
+
+	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 1502, InputFile: input}), "")
+	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 1502, InputFile: input, Speed: "0.5", From: "1m", BeforeFirst: "absent", Missing: "silence"}), "")
+	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 0, InputFile: input}), "port must be greater than 0")
+	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 1502, InputFile: input, Speed: "0"}), `invalid --speed "0"`)
+	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 1502, InputFile: input, Speed: "fast"}), `invalid --speed "fast"`)
+	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 1502, InputFile: input, From: "-1s"}), `invalid --from "-1s"`)
+	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 1502, InputFile: input, BeforeFirst: "later"}), `invalid --before-first "later"`)
 }
 
 func TestCheckSunSpecConfigs_more(t *testing.T) {

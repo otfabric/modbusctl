@@ -1,6 +1,7 @@
 package mcap
 
 import (
+	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
@@ -11,16 +12,16 @@ import (
 
 var freqCmd = &cobra.Command{
 	Use:   "frequencies",
-	Short: "Heuristically detect frequency values in MCAP file",
+	Short: "Heuristically detect frequency values in capture file",
 	Example: `
-  # Scan for potential frequency values in an MCAP file and print to stdout
-  modbusctl mcap frequencies --input file.mcap
+  # Scan for potential frequency values in a capture file and print to stdout
+  modbusctl mcap frequencies --input file.mbcap
 
   # Write detected frequencies to a file
-  modbusctl mcap frequencies --input file.mcap --output freq.txt
+  modbusctl mcap frequencies --input file.mbcap --output freq.txt
 
   # Use environment variables
-  MODBUSCTL_INPUT=file.mcap MODBUSCTL_OUTPUT=freq.txt modbusctl mcap frequencies
+  MODBUSCTL_INPUT=file.mbcap MODBUSCTL_OUTPUT=freq.txt modbusctl mcap frequencies
 `,
 }
 
@@ -44,8 +45,8 @@ func init() {
 		}
 		defer cleanup()
 
-		if err := format.ExportHeuristicFrequency(w, cfg.InputFile); err != nil {
-			return errs.Output(errs.CodeMCAPLoadFailed, err)
+		if err := format.ExportHeuristicFrequency(w, cfg.InputFile, cfg.CaptureSelection); err != nil {
+			return capfile.WrapError(err)
 		}
 		return nil
 	}

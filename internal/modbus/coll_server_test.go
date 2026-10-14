@@ -4,34 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	gomodbus "github.com/otfabric/go-modbus"
+	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/modbusctl/internal/capfile"
+	"github.com/otfabric/modbusctl/internal/capfile/capfiletest"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
-	"github.com/otfabric/modbusctl/internal/mcap"
-	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// collWriteMCAP writes a capture file into a temp dir and returns its path.
-func collWriteMCAP(t *testing.T, fc uint8, records ...types.CaptureRecord) string {
+// collWriteCapture writes c into a temp dir and returns its path.
+func collWriteCapture(t *testing.T, c *capture.Capture) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "capture.mcap")
-	f, err := os.Create(path)
-	require.NoError(t, err)
-	require.NoError(t, mcap.WriteHeader(f, types.CaptureHeader{IP: "10.0.0.1", Port: 502, Unit: 1, Function: fc, StartTime: 1}))
-	for _, rec := range records {
-		require.NoError(t, mcap.AppendRecord(f, rec))
-	}
-	require.NoError(t, f.Close())
-	return path
+	return capfiletest.Write(t, filepath.Join(t.TempDir(), "capture.mbcap"), c)
 }
 
 // collFreePort returns a TCP port that is free on every interface.
@@ -121,453 +114,261 @@ func collRequireException(t *testing.T, err error, want error) {
 	require.ErrorIs(t, err, want)
 }
 
-func collRegRecord(iteration uint32, ts int64, addr uint16, values ...uint16) types.CaptureRecord {
-	data := make([]byte, 0, 2*len(values))
-	for _, v := range values {
-		data = append(data, byte(v>>8), byte(v))
+func regsResp(fc byte, vals ...uint16) []byte {
+	b := []byte{fc, byte(2 * len(vals))}
+	for _, v := range vals {
+		b = append(b, byte(v>>8), byte(v))
 	}
-	return types.CaptureRecord{
-		Iteration: iteration, RequestTimestamp: ts, ResponseTimestamp: ts + 1,
-		StartAddress: addr, RegisterCount: uint16(len(values)), Data: data,
+	return b
+}
+
+func readReq(fc byte, start, qty uint16) []byte {
+	return []byte{fc, byte(start >> 8), byte(start), byte(qty >> 8), byte(qty)}
+}
+
+// collSite is a capture of two devices: an inverter (target 1, unit 21) polled
+// three times a second apart, with an identity read and an exception status,
+// and a meter (target 2, unit 3) with input registers and coils.
+func collSite() *capture.Capture {
+	return &capture.Capture{
+		Header: capture.Header{TickNS: 1000, WallStart: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)},
+		Targets: []capture.Target{
+			{ID: 1, Label: "Inverter A", Transport: capture.TransportTCP, Host: "10.0.0.1", Port: 502, Unit: 21},
+			{ID: 2, Label: "Meter", Transport: capture.TransportTCP, Host: "10.0.0.2", Port: 502, Unit: 3},
+		},
+		Streams: []capture.Stream{{ID: 1, Target: 1, Role: "poll"}, {ID: 2, Target: 1, Role: "identity"}, {ID: 3, Target: 2, Role: "poll"}},
+		Samples: []capture.Sample{
+			{Stream: 1, At: 0, Request: readReq(3, 10, 2), Response: regsResp(3, 1, 2)},
+			{Stream: 3, At: 10, Request: readReq(4, 0, 2), Response: regsResp(4, 100, 200)},
+			{Stream: 3, At: 20, Request: readReq(1, 0, 4), Response: []byte{0x01, 1, 0b0101}},
+			{Stream: 1, At: 1_000_000, Request: readReq(3, 10, 2), Response: regsResp(3, 3, 4)},
+			{Stream: 1, At: 1_000_100, Request: []byte{0x07}, Response: []byte{0x07, 0x6d}},
+			{Stream: 1, At: 1_000_200, Request: []byte{0x0B}, Response: []byte{0x0B, 0x00, 0x00, 0x01, 0x08}},
+			{Stream: 1, At: 1_000_300, Request: []byte{0x0C}, Response: []byte{0x0C, 0x08, 0x00, 0x00, 0x01, 0x08, 0x01, 0x21, 0x20, 0x00}},
+			{Stream: 2, At: 1_500_000, Request: []byte{0x2B, 0x0E, 0x01, 0x00},
+				Response: []byte{0x2B, 0x0E, 0x01, 0x01, 0x00, 0x00, 0x03, 0x00, 0x04, 'A', 'C', 'M', 'E', 0x01, 0x02, 'X', '1', 0x02, 0x03, '1', '.', '0'}},
+			{Stream: 1, At: 2_000_000, Request: readReq(3, 10, 2), Response: regsResp(3, 5, 6)},
+		},
+		End: capture.End{Known: true, At: 3_000_000},
 	}
 }
 
-func TestCollStaticServer_holdingRegisters(t *testing.T) {
-	path := collWriteMCAP(t, 3,
-		collRegRecord(1, 100, 10, 1, 2),
-		collRegRecord(1, 110, 20, 0x00AA),
-		collRegRecord(2, 200, 10, 3, 4),
-	)
+func staticServer(t *testing.T, cfg config.StaticServerConfig) (*collServer, *collSyncBuffer) {
+	t.Helper()
 	var progress collSyncBuffer
 	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		return LoadMCAPAndServeStatic(ctx, config.StaticServerConfig{Port: port, Unit: 5, InputFile: path}, &progress)
+		cfg.Port = port
+		return ServeStatic(ctx, cfg, &progress)
+	})
+	return srv, &progress
+}
+
+func TestCollStaticServer_lastValuesOfEveryTarget(t *testing.T) {
+	srv, progress := staticServer(t, config.StaticServerConfig{InputFile: collWriteCapture(t, collSite())})
+	c := srv.client(t)
+	ctx := context.Background()
+
+	got, err := c.ReadHoldingRegisters(ctx, 21, 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, []uint16{5, 6}, got, "the static server serves the last recorded values")
+	got, err = c.ReadInputRegisters(ctx, 3, 0, 2)
+	require.NoError(t, err)
+	require.Equal(t, []uint16{100, 200}, got, "the second target answers on its own unit")
+	bits, err := c.ReadCoils(ctx, 3, 1, 3)
+	require.NoError(t, err)
+	require.Equal(t, []bool{false, true, false}, bits)
+
+	status, err := c.ReadExceptionStatus(ctx, 21)
+	require.NoError(t, err)
+	require.Equal(t, uint8(0x6d), status)
+	counter, err := c.GetCommEventCounter(ctx, 21)
+	require.NoError(t, err)
+	require.Equal(t, gomodbus.CommEventCounterResponse{Status: 0, EventCount: 0x0108}, *counter)
+	log, err := c.GetCommEventLog(ctx, 21)
+	require.NoError(t, err)
+	require.Equal(t, uint16(0x0121), log.MessageCount)
+	require.Equal(t, []byte{0x20, 0x00}, log.Events)
+	_, err = c.GetCommEventCounter(ctx, 3)
+	collRequireException(t, err, gomodbus.ErrIllegalFunction) // never recorded for the meter
+	err = c.WriteCoil(ctx, 3, 0, true)
+	collRequireException(t, err, gomodbus.ErrIllegalFunction)
+	di, err := c.ReadDeviceIdentification(ctx, 21, gomodbus.ReadDeviceIDBasic, 0)
+	require.NoError(t, err)
+	require.Len(t, di.Objects, 3)
+	require.Equal(t, "ACME", di.Objects[0].Value)
+	require.Equal(t, "1.0", di.Objects[2].Value)
+
+	text := progress.String()
+	assert.Contains(t, text, "Static server ready on port")
+	assert.Contains(t, text, "the last recorded values")
+	assert.Contains(t, text, `Unit 3: target 2 "Meter", 2 samples`)
+	assert.Contains(t, text, `Unit 21: target 1 "Inverter A", 7 samples`)
+}
+
+func TestCollStaticServer_answers(t *testing.T) {
+	path := collWriteCapture(t, collSite())
+	ctx := context.Background()
+
+	srv, _ := staticServer(t, config.StaticServerConfig{InputFile: path})
+	c := srv.client(t)
+	_, err := c.ReadHoldingRegisters(ctx, 21, 10, 3)
+	collRequireException(t, err, gomodbus.ErrIllegalDataAddress) // 12 was never recorded
+	_, err = c.ReadInputRegisters(ctx, 21, 0, 1)
+	collRequireException(t, err, gomodbus.ErrIllegalFunction) // the inverter has no FC04 data
+	_, err = c.ReadDeviceIdentification(ctx, 3, gomodbus.ReadDeviceIDBasic, 0)
+	collRequireException(t, err, gomodbus.ErrIllegalFunction)
+	err = c.WriteRegister(ctx, 21, 10, 9)
+	collRequireException(t, err, gomodbus.ErrIllegalFunction) // a replayed device is read-only
+	_, err = c.ReadHoldingRegisters(ctx, 9, 10, 1)
+	require.Error(t, err, "an unknown unit is not answered with data")
+
+	srv, _ = staticServer(t, config.StaticServerConfig{InputFile: path, Missing: "zero"})
+	got, err := srv.client(t).ReadHoldingRegisters(ctx, 21, 10, 3)
+	require.NoError(t, err)
+	require.Equal(t, []uint16{5, 6, 0}, got)
+
+	srv, _ = staticServer(t, config.StaticServerConfig{InputFile: path, Missing: "silence"})
+	c, err = gomodbus.New(gomodbus.Config{URL: fmt.Sprintf("tcp://127.0.0.1:%d", srv.port), Timeout: 200 * time.Millisecond, Logger: gomodbus.NopLogger()})
+	require.NoError(t, err)
+	require.NoError(t, c.Open())
+	t.Cleanup(func() { _ = c.Close() })
+	_, err = c.ReadHoldingRegisters(ctx, 21, 10, 3)
+	require.ErrorIs(t, err, gomodbus.ErrRequestTimedOut)
+}
+
+func TestCollStaticServer_atAndTargetSelection(t *testing.T) {
+	path := collWriteCapture(t, collSite())
+	ctx := context.Background()
+	srv, progress := staticServer(t, config.StaticServerConfig{InputFile: path, Target: 1, Unit: 1, At: "1500ms"})
+	c := srv.client(t)
+	got, err := c.ReadHoldingRegisters(ctx, 1, 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, []uint16{3, 4}, got, "the values at 1.5 s")
+	_, err = c.ReadInputRegisters(ctx, 3, 0, 1)
+	require.Error(t, err, "the meter is not served")
+	assert.Contains(t, progress.String(), "the values at 1.5s")
+}
+
+func TestCollServer_errors(t *testing.T) {
+	ctx := context.Background()
+	site := collWriteCapture(t, collSite())
+
+	err := ServeStatic(ctx, config.StaticServerConfig{Port: 1, InputFile: filepath.Join(t.TempDir(), "missing.mbcap")}, nil)
+	coreRequireKind(t, err, errs.KindOutput, errs.CodeMCAPLoadFailed)
+
+	v1 := filepath.Join(t.TempDir(), "old.mcap")
+	require.NoError(t, os.WriteFile(v1, []byte("MCAP\x01\x00\x02{}"), 0o600))
+	err = ServeReplay(ctx, config.ReplayServerConfig{Port: 1, InputFile: v1}, nil)
+	coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeCaptureLegacyFormat)
+	require.ErrorIs(t, err, capfile.ErrLegacyMCAP)
+
+	err = ServeStatic(ctx, config.StaticServerConfig{Port: 1, InputFile: site, Target: 9}, nil)
+	coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeInvalidInput)
+	assert.Contains(t, err.Error(), `1 "Inverter A" (unit 21), 2 "Meter" (unit 3)`)
+
+	err = ServeStatic(ctx, config.StaticServerConfig{Port: 1, InputFile: site, Unit: 5}, nil)
+	coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeInvalidFlagCombination)
+
+	same := collSite()
+	same.Targets[1].Unit = 21
+	err = ServeStatic(ctx, config.StaticServerConfig{Port: 1, InputFile: collWriteCapture(t, same)}, nil)
+	coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeInvalidFlagCombination)
+	assert.Contains(t, err.Error(), "both answer on unit 21")
+
+	for _, cfg := range []config.ReplayServerConfig{
+		{Port: 1, InputFile: site, Speed: "fast"},
+		{Port: 1, InputFile: site, Missing: "panic"},
+		{Port: 1, InputFile: site, BeforeFirst: "later"},
+		{Port: 1, InputFile: site, From: "-1s"},
+	} {
+		err := ServeReplay(ctx, cfg, nil)
+		coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeInvalidInput)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.ErrorIs(t, ServeStatic(canceled, config.StaticServerConfig{Port: 1, InputFile: site}, nil), context.Canceled)
+}
+
+func TestCollReplayServer_followsTheRecording(t *testing.T) {
+	path := collWriteCapture(t, collSite())
+	var progress collSyncBuffer
+	// 3 s of capture at 10x: 300 ms per loop, played twice.
+	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
+		return ServeReplay(ctx, config.ReplayServerConfig{Port: port, InputFile: path, Target: 1, Speed: "10", Loops: 2}, &progress)
 	})
 	c := srv.client(t)
 	ctx := context.Background()
 
-	got, err := c.ReadHoldingRegisters(ctx, 5, 10, 2)
-	require.NoError(t, err)
-	require.Equal(t, []uint16{3, 4}, got, "the static server serves the last captured value")
+	seen := map[uint16]bool{}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && len(seen) < 3 {
+		got, err := c.ReadHoldingRegisters(ctx, 21, 10, 2)
+		require.NoError(t, err)
+		seen[got[0]] = true
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.Equal(t, map[uint16]bool{1: true, 3: true, 5: true}, seen, "every recorded value is served in turn")
 
-	got, err = c.ReadHoldingRegisters(ctx, 5, 20, 1)
-	require.NoError(t, err)
-	require.Equal(t, []uint16{0x00AA}, got)
-
-	_, err = c.ReadHoldingRegisters(ctx, 5, 10, 3)
-	collRequireException(t, err, gomodbus.ErrIllegalDataAddress)
-	_, err = c.ReadHoldingRegisters(ctx, 5, 500, 1)
-	collRequireException(t, err, gomodbus.ErrIllegalDataAddress)
-
-	// Only the captured function code is served.
-	_, err = c.ReadInputRegisters(ctx, 5, 10, 2)
-	collRequireException(t, err, gomodbus.ErrIllegalFunction)
-	_, err = c.ReadCoils(ctx, 5, 10, 2)
-	collRequireException(t, err, gomodbus.ErrIllegalFunction)
-	_, err = c.ReadDiscreteInputs(ctx, 5, 10, 2)
-	collRequireException(t, err, gomodbus.ErrIllegalFunction)
-
-	// Other unit IDs are not served.
-	_, err = c.ReadHoldingRegisters(ctx, 6, 10, 2)
-	require.Error(t, err)
-
-	require.Contains(t, progress.String(), "Static server ready")
-	require.Contains(t, progress.String(), "Loaded 3 address entries")
-	require.Contains(t, progress.String(), fmt.Sprintf("port %d for unit 5", srv.port))
-
+	// After two loops (600 ms) the last values stay.
+	time.Sleep(700 * time.Millisecond)
+	for range 5 {
+		got, err := c.ReadHoldingRegisters(ctx, 21, 10, 2)
+		require.NoError(t, err)
+		require.Equal(t, []uint16{5, 6}, got)
+	}
+	assert.Contains(t, progress.String(), "at 10x, looping 2 time(s)")
 	require.ErrorIs(t, srv.stop(t), context.Canceled)
-	_, err = net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", srv.port), 200*time.Millisecond)
-	require.Error(t, err, "the listener must be closed once the context is canceled")
 }
 
-func TestCollStaticServer_otherFunctionCodes(t *testing.T) {
-	// Ten points at address 0: 1,0,1,0,0,1,0,1 then 0,1.
-	bitRecord := types.CaptureRecord{Iteration: 1, RequestTimestamp: 1, ResponseTimestamp: 2, StartAddress: 0, RegisterCount: 10, Data: []byte{0xA5, 0x02}}
-	wantBits := []bool{true, false, true, false, false, true, false, true, false, true}
-	ctx := context.Background()
-
-	t.Run("coils", func(t *testing.T) {
-		path := collWriteMCAP(t, 1, bitRecord)
-		srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-			// An explicit --function that matches the file is accepted.
-			return LoadMCAPAndServeStatic(ctx, config.StaticServerConfig{Port: port, Unit: 1, Function: 1, InputFile: path}, nil)
-		})
-		c := srv.client(t)
-		// The whole block in one request, and every point on its own.
-		all, err := c.ReadCoils(ctx, 1, 0, 10)
-		require.NoError(t, err)
-		require.Equal(t, wantBits, all)
-		for addr, want := range wantBits {
-			got, err := c.ReadCoils(ctx, 1, uint16(addr), 1)
-			require.NoError(t, err)
-			require.Equalf(t, []bool{want}, got, "coil %d", addr)
-		}
-		_, err = c.ReadCoils(ctx, 1, 5, 10)
-		collRequireException(t, err, gomodbus.ErrIllegalDataAddress)
-		_, err = c.ReadCoils(ctx, 2, 0, 1)
-		require.Error(t, err, "other unit IDs are not served")
-		_, err = c.ReadDiscreteInputs(ctx, 1, 0, 10)
-		collRequireException(t, err, gomodbus.ErrIllegalFunction)
-		_, err = c.ReadHoldingRegisters(ctx, 1, 0, 1)
-		collRequireException(t, err, gomodbus.ErrIllegalFunction)
-	})
-
-	t.Run("discrete inputs", func(t *testing.T) {
-		path := collWriteMCAP(t, 2, bitRecord)
-		srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-			return LoadMCAPAndServeStatic(ctx, config.StaticServerConfig{Port: port, Unit: 1, InputFile: path}, nil)
-		})
-		c := srv.client(t)
-		all, err := c.ReadDiscreteInputs(ctx, 1, 2, 8)
-		require.NoError(t, err)
-		require.Equal(t, wantBits[2:], all)
-		for addr, want := range wantBits {
-			got, err := c.ReadDiscreteInputs(ctx, 1, uint16(addr), 1)
-			require.NoError(t, err)
-			require.Equalf(t, []bool{want}, got, "discrete input %d", addr)
-		}
-		_, err = c.ReadDiscreteInputs(ctx, 1, 9, 2)
-		collRequireException(t, err, gomodbus.ErrIllegalDataAddress)
-		_, err = c.ReadDiscreteInputs(ctx, 2, 0, 1)
-		require.Error(t, err, "other unit IDs are not served")
-		_, err = c.ReadCoils(ctx, 1, 0, 10)
-		collRequireException(t, err, gomodbus.ErrIllegalFunction)
-	})
-
-	t.Run("input registers", func(t *testing.T) {
-		path := collWriteMCAP(t, 4, collRegRecord(1, 1, 7, 0xCAFE, 0xF00D))
-		srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-			return LoadMCAPAndServeStatic(ctx, config.StaticServerConfig{Port: port, Unit: 1, InputFile: path}, nil)
-		})
-		c := srv.client(t)
-		got, err := c.ReadInputRegisters(ctx, 1, 7, 2)
-		require.NoError(t, err)
-		require.Equal(t, []uint16{0xCAFE, 0xF00D}, got)
-		_, err = c.ReadInputRegisters(ctx, 1, 8, 2)
-		collRequireException(t, err, gomodbus.ErrIllegalDataAddress)
-		_, err = c.ReadInputRegisters(ctx, 2, 7, 1)
-		require.Error(t, err, "other unit IDs are not served")
-		_, err = c.ReadHoldingRegisters(ctx, 1, 7, 2)
-		collRequireException(t, err, gomodbus.ErrIllegalFunction)
-	})
-}
-
-func TestCollStaticServer_errors(t *testing.T) {
-	good := collWriteMCAP(t, 3, collRegRecord(1, 1, 0, 1))
-
-	t.Run("context already canceled", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		err := LoadMCAPAndServeStatic(ctx, config.StaticServerConfig{Port: 1, InputFile: good}, io.Discard)
-		require.ErrorIs(t, err, context.Canceled)
-	})
-	t.Run("missing file", func(t *testing.T) {
-		err := LoadMCAPAndServeStatic(context.Background(), config.StaticServerConfig{InputFile: filepath.Join(t.TempDir(), "nope.mcap")}, nil)
-		collRequireErr(t, err, errs.KindOutput, errs.CodeMCAPLoadFailed)
-	})
-	t.Run("not an mcap file", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "junk.mcap")
-		require.NoError(t, os.WriteFile(path, []byte("not a capture"), 0o600))
-		err := LoadMCAPAndServeStatic(context.Background(), config.StaticServerConfig{InputFile: path}, nil)
-		collRequireErr(t, err, errs.KindOutput, errs.CodeMCAPLoadFailed)
-	})
-	t.Run("function mismatch", func(t *testing.T) {
-		err := LoadMCAPAndServeStatic(context.Background(), config.StaticServerConfig{Function: 4, InputFile: good}, nil)
-		e := collTypedErr(t, err, errs.KindInvalidInput, errs.CodeInvalidFlagCombination)
-		require.Contains(t, e.Message, "FC=3")
-		require.Contains(t, e.Message, "--function=4")
-	})
-	t.Run("record data does not match its register count", func(t *testing.T) {
-		bad := collWriteMCAP(t, 3, types.CaptureRecord{Iteration: 1, StartAddress: 0, RegisterCount: 2, Data: []byte{1, 2, 3}})
-		err := LoadMCAPAndServeStatic(context.Background(), config.StaticServerConfig{InputFile: bad}, nil)
-		collRequireErr(t, err, errs.KindInvalidInput, errs.CodeInvalidInput)
-	})
-	t.Run("coil record shorter than its point count", func(t *testing.T) {
-		bad := collWriteMCAP(t, 1, types.CaptureRecord{Iteration: 1, StartAddress: 0, RegisterCount: 9, Data: []byte{0xFF}})
-		err := LoadMCAPAndServeStatic(context.Background(), config.StaticServerConfig{InputFile: bad}, nil)
-		collRequireErr(t, err, errs.KindInvalidInput, errs.CodeInvalidInput)
-	})
-	t.Run("port already in use", func(t *testing.T) {
-		ln, err := net.Listen("tcp", ":0")
-		require.NoError(t, err)
-		defer func() { _ = ln.Close() }()
-		port := uint16(ln.Addr().(*net.TCPAddr).Port)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err = LoadMCAPAndServeStatic(ctx, config.StaticServerConfig{Port: port, InputFile: good, Debug: true}, nil)
-		collRequireErr(t, err, errs.KindTransport, errs.CodeTransportConnectFailed)
-		require.NoError(t, ctx.Err(), "a bind failure must be reported immediately")
-	})
-}
-
-func TestCollMemoryStore(t *testing.T) {
-	t.Run("last values win and data is copied", func(t *testing.T) {
-		data := []byte{0x00, 0x01}
-		s, err := newMemoryStoreLastValues([]types.CaptureRecord{
-			{Iteration: 1, StartAddress: 4, RegisterCount: 1, Data: data},
-			{Iteration: 2, StartAddress: 4, RegisterCount: 1, Data: []byte{0x00, 0x02}},
-			{Iteration: 1, StartAddress: 5, RegisterCount: 1, Data: data},
-		}, 3)
-		require.NoError(t, err)
-		data[1] = 0xFF
-		got, err := s.get(3, 4, 2)
-		require.NoError(t, err)
-		require.Equal(t, []byte{0x00, 0x02, 0x00, 0x01}, got)
-		got, err = s.get(4, 5, 1)
-		require.NoError(t, err)
-		require.Equal(t, []byte{0x00, 0x01}, got, "FC03 and FC04 share the register map")
-	})
-
-	t.Run("get errors", func(t *testing.T) {
-		s, err := newMemoryStoreLastValues(nil, 3)
-		require.NoError(t, err)
-		_, err = s.get(3, 0, 1)
-		require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress)
-		_, err = s.get(1, 0, 1)
-		require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress)
-		_, err = s.get(2, 0, 1)
-		require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress)
-		_, err = s.get(5, 0, 1)
-		require.ErrorIs(t, err, gomodbus.ErrIllegalFunction)
-		got, err := s.get(3, 0, 0)
-		require.NoError(t, err)
-		require.Empty(t, got)
-	})
-
-	t.Run("invalid record", func(t *testing.T) {
-		_, err := newMemoryStoreLastValues([]types.CaptureRecord{{StartAddress: 3, RegisterCount: 1, Data: []byte{1}}}, 3)
-		require.Error(t, err)
-		_, err = newMemoryStoreLastValues([]types.CaptureRecord{{StartAddress: 3, RegisterCount: 0}}, 1)
-		require.Error(t, err, "a coil record without points is invalid")
-	})
-
-	t.Run("first values keep the first iteration only", func(t *testing.T) {
-		var warn collSyncBuffer
-		s := newMemoryStoreFirstValues([]types.CaptureRecord{
-			collRegRecord(7, 1, 0, 11),
-			{Iteration: 7, StartAddress: 9, RegisterCount: 2, Data: []byte{1}},
-			collRegRecord(8, 2, 0, 22),
-			collRegRecord(8, 2, 1, 33),
-		}, 3, &warn)
-		got, err := s.get(3, 0, 1)
-		require.NoError(t, err)
-		require.Equal(t, []byte{0, 11}, got)
-		_, err = s.get(3, 1, 1)
-		require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress, "later iterations must not be loaded up front")
-		require.Contains(t, warn.String(), "Failed to write record at address 9")
-
-		require.NoError(t, s.upsertRecord(collRegRecord(8, 2, 1, 33), 3))
-		got, err = s.get(3, 0, 2)
-		require.NoError(t, err)
-		require.Equal(t, []byte{0, 11, 0, 33}, got)
-		require.Error(t, s.upsertRecord(types.CaptureRecord{StartAddress: 1, RegisterCount: 1}, 3))
-	})
-
-	t.Run("first values of an empty capture", func(t *testing.T) {
-		s := newMemoryStoreFirstValues(nil, 3, nil)
-		_, err := s.get(3, 0, 1)
-		require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress)
-	})
-}
-
-// collFailingStore fails every lookup with a fixed error.
-type collFailingStore struct{ err error }
-
-func (s collFailingStore) get(uint8, uint16, uint16) ([]byte, error) { return nil, s.err }
-
-func TestCollStaticHandler_storeErrors(t *testing.T) {
+func TestCollReplayServer_beforeFirst(t *testing.T) {
+	path := collWriteCapture(t, collSite())
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name     string
-		storeErr error
-		want     error
-	}{
-		{name: "illegal function is passed through", storeErr: gomodbus.ErrIllegalFunction, want: gomodbus.ErrIllegalFunction},
-		{name: "anything else becomes illegal data address", storeErr: errors.New("boom"), want: gomodbus.ErrIllegalDataAddress},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			handler := func(fc uint8) *StaticHandler {
-				return &StaticHandler{Store: collFailingStore{err: tc.storeErr}, Cfg: ServerConfig{Unit: 1, Function: fc}}
-			}
-			_, err := handler(1).HandleCoils(ctx, &gomodbus.CoilsRequest{UnitID: 1, Quantity: 1})
-			assert.ErrorIs(t, err, tc.want)
-			_, err = handler(2).HandleDiscreteInputs(ctx, &gomodbus.DiscreteInputsRequest{UnitID: 1, Quantity: 1})
-			assert.ErrorIs(t, err, tc.want)
-			_, err = handler(3).HandleHoldingRegisters(ctx, &gomodbus.HoldingRegistersRequest{UnitID: 1, Quantity: 1})
-			assert.ErrorIs(t, err, tc.want)
-			_, err = handler(4).HandleInputRegisters(ctx, &gomodbus.InputRegistersRequest{UnitID: 1, Quantity: 1})
-			assert.ErrorIs(t, err, tc.want)
+		before string
+		ok     bool
+	}{{"hold", true}, {"absent", false}} {
+		srv := collStartServer(t, func(ctx context.Context, port uint16) error {
+			// Speed 0.001: the replay stays near the start, before the identity read at 1.5 s.
+			return ServeReplay(ctx, config.ReplayServerConfig{Port: port, InputFile: path, Speed: "0.001", BeforeFirst: tc.before}, nil)
 		})
-	}
-
-	t.Run("wrong unit", func(t *testing.T) {
-		store, err := newMemoryStoreLastValues(nil, 3)
-		require.NoError(t, err)
-		for fc := uint8(1); fc <= 4; fc++ {
-			h := &StaticHandler{Store: store, Cfg: ServerConfig{Unit: 1, Function: fc}}
-			switch fc {
-			case 1:
-				_, err = h.HandleCoils(ctx, &gomodbus.CoilsRequest{UnitID: 2, Quantity: 1})
-			case 2:
-				_, err = h.HandleDiscreteInputs(ctx, &gomodbus.DiscreteInputsRequest{UnitID: 2, Quantity: 1})
-			case 3:
-				_, err = h.HandleHoldingRegisters(ctx, &gomodbus.HoldingRegistersRequest{UnitID: 2, Quantity: 1})
-			default:
-				_, err = h.HandleInputRegisters(ctx, &gomodbus.InputRegistersRequest{UnitID: 2, Quantity: 1})
-			}
-			assert.ErrorIsf(t, err, gomodbus.ErrBadUnitID, "FC%d", fc)
+		_, err := srv.client(t).ReadDeviceIdentification(ctx, 21, gomodbus.ReadDeviceIDBasic, 0)
+		if tc.ok {
+			require.NoError(t, err, tc.before)
+		} else {
+			collRequireException(t, err, gomodbus.ErrIllegalDataAddress)
 		}
-	})
+	}
 }
 
-func TestCollReplayServer_holdsFirstIterationUntilItsTimeComes(t *testing.T) {
-	// Ten minutes of capture time separate the iterations: with interval 0 the replay keeps that spacing.
-	gap := int64(10 * time.Minute)
-	path := collWriteMCAP(t, 3,
-		collRegRecord(1, 1000, 0, 100, 101),
-		collRegRecord(2, 1000+gap, 0, 200, 201),
-	)
-	var progress collSyncBuffer
-	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		return LoadMCAPAndServeReplay(ctx, config.ReplayServerConfig{Port: port, Unit: 2, Loops: 1, InputFile: path}, &progress)
-	})
+func TestCollServer_truncatedCapture(t *testing.T) {
+	path := collWriteCapture(t, collSite())
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	cut := filepath.Join(t.TempDir(), "cut.mbcap")
+	require.NoError(t, os.WriteFile(cut, b[:len(b)-30], 0o600))
+	srv, progress := staticServer(t, config.StaticServerConfig{InputFile: cut})
+	got, err := srv.client(t).ReadHoldingRegisters(context.Background(), 21, 10, 2)
+	require.NoError(t, err)
+	require.Equal(t, []uint16{5, 6}, got)
+	assert.True(t, strings.Contains(progress.String(), "truncated"), progress.String())
+}
+
+// With --debug the server names every request the capture holds nothing for,
+// and on shutdown it reports what it served (go-modbus ServerMetrics).
+func TestCollServer_debugAndStats(t *testing.T) {
+	srv, progress := staticServer(t, config.StaticServerConfig{InputFile: collWriteCapture(t, collSite()), Debug: true})
 	c := srv.client(t)
 	ctx := context.Background()
-
-	require.Eventually(t, func() bool {
-		return len(progress.String()) > 0 && collContainsAll(progress.String(), "Processing iteration 2")
-	}, 2*time.Second, 5*time.Millisecond)
-	got, err := c.ReadHoldingRegisters(ctx, 2, 0, 2)
+	_, err := c.ReadHoldingRegisters(ctx, 21, 10, 2)
 	require.NoError(t, err)
-	require.Equal(t, []uint16{100, 101}, got)
-
-	_, err = c.ReadInputRegisters(ctx, 2, 0, 2)
-	collRequireException(t, err, gomodbus.ErrIllegalFunction)
-	_, err = c.ReadHoldingRegisters(ctx, 3, 0, 2)
-	require.Error(t, err, "other unit IDs are not served")
-
-	out := progress.String()
-	require.Contains(t, out, "Replay server ready")
-	require.Contains(t, out, "Loaded 2 address entries")
-	require.Contains(t, out, "Starting replay loop 1/1")
-	require.Contains(t, out, "Processing iteration 1 with 1 records")
-
-	// Cancel interrupts the pending wait and stops the server.
+	_, err = c.ReadHoldingRegisters(ctx, 21, 10, 3)
+	require.Error(t, err)
+	_, err = c.GetCommEventCounter(ctx, 3)
+	require.Error(t, err)
 	require.ErrorIs(t, srv.stop(t), context.Canceled)
-}
-
-func collContainsAll(s string, subs ...string) bool {
-	for _, sub := range subs {
-		found := false
-		for i := 0; i+len(sub) <= len(s); i++ {
-			if s[i:i+len(sub)] == sub {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
-}
-
-func TestCollReplayServer_advancesThroughIterations(t *testing.T) {
-	path := collWriteMCAP(t, 4,
-		collRegRecord(1, 1000, 0, 1),
-		collRegRecord(2, 2000, 0, 2),
-		collRegRecord(2, 2001, 1, 22),
-		collRegRecord(3, 3000, 0, 3),
-	)
-	var progress collSyncBuffer
-	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		// Function matches the file; a fixed 1 ms interval replaces the captured spacing.
-		return LoadMCAPAndServeReplay(ctx, config.ReplayServerConfig{Port: port, Unit: 1, Function: 4, Loops: 2, Interval: 1, InputFile: path}, &progress)
-	})
-	c := srv.client(t)
-
-	require.Eventually(t, func() bool {
-		return collContainsAll(progress.String(), "Starting replay loop 2/2")
-	}, 3*time.Second, 5*time.Millisecond, "the replay must loop twice")
-
-	// After the last loop the store holds the last iteration, plus everything seen before it.
-	require.Eventually(t, func() bool {
-		got, err := c.ReadInputRegisters(context.Background(), 1, 0, 2)
-		return err == nil && len(got) == 2 && got[0] == 3 && got[1] == 22
-	}, 3*time.Second, 5*time.Millisecond)
-
-	require.NotContains(t, progress.String(), "Starting replay loop 3/2")
-	require.ErrorIs(t, srv.stop(t), context.Canceled)
-}
-
-func TestCollReplayServer_reportsBadRecords(t *testing.T) {
-	path := collWriteMCAP(t, 3,
-		collRegRecord(1, 1000, 0, 5),
-		types.CaptureRecord{Iteration: 1, RequestTimestamp: 1001, StartAddress: 40, RegisterCount: 2, Data: []byte{9}},
-	)
-	var progress collSyncBuffer
-	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		return LoadMCAPAndServeReplay(ctx, config.ReplayServerConfig{Port: port, Unit: 1, Loops: 1, InputFile: path}, &progress)
-	})
-	c := srv.client(t)
-
-	got, err := c.ReadHoldingRegisters(context.Background(), 1, 0, 1)
-	require.NoError(t, err)
-	require.Equal(t, []uint16{5}, got)
-	_, err = c.ReadHoldingRegisters(context.Background(), 1, 40, 1)
-	collRequireException(t, err, gomodbus.ErrIllegalDataAddress)
-	require.Contains(t, progress.String(), "Failed to write record at address 40")
-}
-
-func TestCollReplayServer_errors(t *testing.T) {
-	good := collWriteMCAP(t, 3, collRegRecord(1, 1, 0, 1))
-
-	t.Run("context already canceled", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		err := LoadMCAPAndServeReplay(ctx, config.ReplayServerConfig{Port: 1, InputFile: good}, io.Discard)
-		require.ErrorIs(t, err, context.Canceled)
-	})
-	t.Run("missing file", func(t *testing.T) {
-		err := LoadMCAPAndServeReplay(context.Background(), config.ReplayServerConfig{InputFile: filepath.Join(t.TempDir(), "nope.mcap")}, nil)
-		collRequireErr(t, err, errs.KindOutput, errs.CodeMCAPLoadFailed)
-	})
-	t.Run("function mismatch", func(t *testing.T) {
-		err := LoadMCAPAndServeReplay(context.Background(), config.ReplayServerConfig{Function: 1, InputFile: good}, nil)
-		e := collTypedErr(t, err, errs.KindInvalidInput, errs.CodeInvalidFlagCombination)
-		require.Contains(t, e.Message, "FC=3")
-		require.Contains(t, e.Message, "--function=1")
-	})
-	t.Run("port already in use", func(t *testing.T) {
-		ln, err := net.Listen("tcp", ":0")
-		require.NoError(t, err)
-		defer func() { _ = ln.Close() }()
-		port := uint16(ln.Addr().(*net.TCPAddr).Port)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err = LoadMCAPAndServeReplay(ctx, config.ReplayServerConfig{Port: port, Loops: 1, InputFile: good}, nil)
-		collRequireErr(t, err, errs.KindTransport, errs.CodeTransportConnectFailed)
-		require.NoError(t, ctx.Err(), "a bind failure must be reported immediately")
-	})
-}
-
-// With --loops 0 the replay repeats until it is canceled.
-func TestCollReplayServer_loopsForeverUntilCanceled(t *testing.T) {
-	path := collWriteMCAP(t, 3, collRegRecord(1, 1000, 0, 1), collRegRecord(2, 2000, 0, 2))
-	var progress collSyncBuffer
-	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		return LoadMCAPAndServeReplay(ctx, config.ReplayServerConfig{Port: port, Unit: 1, Interval: 1, InputFile: path}, &progress)
-	})
-	require.Eventually(t, func() bool {
-		return collContainsAll(progress.String(), "Starting replay loop 3/0")
-	}, 3*time.Second, 2*time.Millisecond)
-	require.ErrorIs(t, srv.stop(t), context.Canceled)
-
-	// The replay goroutine must stop too: its output settles.
-	require.Eventually(t, func() bool {
-		before := progress.String()
-		time.Sleep(20 * time.Millisecond)
-		return before == progress.String()
-	}, 2*time.Second, time.Millisecond)
+	text := progress.String()
+	assert.Contains(t, text, "DEBUG [serve] unit 21 FC03 10 x3: not in the capture")
+	assert.Contains(t, text, "DEBUG [serve] unit 3 FC11: not in the capture")
+	assert.Contains(t, text, "📊 Served 3 requests: 1 answered, 2 with an exception, 0 left unanswered; 2 asked for data the capture does not hold")
 }

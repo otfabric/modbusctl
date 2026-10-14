@@ -116,7 +116,7 @@ func TestCoreCollectRead_outputDirectory(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, dir, filepath.Dir(res.McapOutputPath))
-	assert.Regexp(t, `^modbusctl_read_\d{8}_\d{6}\.mcap$`, filepath.Base(res.McapOutputPath))
+	assert.Regexp(t, `^modbusctl_read_\d{8}_\d{6}\.mbcap$`, filepath.Base(res.McapOutputPath))
 	records, _ := coreLoadMcap(t, res.McapOutputPath)
 	require.Len(t, records, 1)
 	assert.Equal(t, []byte{0x00, 0x07}, records[0].Data)
@@ -124,13 +124,13 @@ func TestCoreCollectRead_outputDirectory(t *testing.T) {
 
 func TestCoreReadCaptureMcapPath(t *testing.T) {
 	assert.Equal(t, "/x/y.mcap", readCaptureMcapPath(config.ReadConfig{OutputFile: "/x/y.mcap"}))
-	assert.Regexp(t, `^/x/modbusctl_read_\d{8}_\d{6}\.mcap$`, readCaptureMcapPath(config.ReadConfig{OutputFile: "/x/"}))
+	assert.Regexp(t, `^/x/modbusctl_read_\d{8}_\d{6}\.mbcap$`, readCaptureMcapPath(config.ReadConfig{OutputFile: "/x/"}))
 	// No output file: an auto-named capture in the current directory.
-	assert.Regexp(t, `^modbusctl_read_\d{8}_\d{6}\.mcap$`, readCaptureMcapPath(config.ReadConfig{}))
+	assert.Regexp(t, `^modbusctl_read_\d{8}_\d{6}\.mbcap$`, readCaptureMcapPath(config.ReadConfig{}))
 }
 
 func TestCoreAutoCaptureMcapPath_defaultKind(t *testing.T) {
-	assert.Regexp(t, `^d/modbusctl_capture_\d{8}_\d{6}\.mcap$`, AutoCaptureMcapPath("d", ""))
+	assert.Regexp(t, `^d/modbusctl_capture_\d{8}_\d{6}\.mbcap$`, AutoCaptureMcapPath("d", ""))
 }
 
 func TestCoreCollectRead_failures(t *testing.T) {

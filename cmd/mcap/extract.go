@@ -1,6 +1,7 @@
 package mcap
 
 import (
+	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/cli"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
@@ -11,13 +12,13 @@ import (
 
 var extractCmd = &cobra.Command{
 	Use:   "extract",
-	Short: "Extract address blocks from MCAP file to JSON",
+	Short: "Extract address blocks from capture file to JSON",
 	Example: `
-  # Extract address blocks from an MCAP file and output to stdout
-  modbusctl mcap extract --input input.mcap --output register-ranges.json
+  # Extract address blocks from a capture file and output to stdout
+  modbusctl mcap extract --input input.mbcap --output register-ranges.json
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_INPUT=input.mcap MODBUSCTL_OUTPUT=register-ranges.json modbusctl mcap extract
+  MODBUSCTL_INPUT=input.mbcap MODBUSCTL_OUTPUT=register-ranges.json modbusctl mcap extract
 `,
 }
 
@@ -41,8 +42,8 @@ func init() {
 		}
 		defer cleanup()
 
-		if err := mcapfile.ExportAddressBlocks(w, cfg.InputFile); err != nil {
-			return errs.Output(errs.CodeMCAPLoadFailed, err)
+		if err := mcapfile.ExportAddressBlocks(w, cfg.InputFile, cfg.CaptureSelection); err != nil {
+			return capfile.WrapError(err)
 		}
 		return nil
 	}

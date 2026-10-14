@@ -19,4 +19,6 @@
 
 **Streaming commands:** `client poll` writes one record per poll and keeps going after a failed poll, which it reports as a record carrying an `error`. It exits `0` when every poll succeeded and `7` when at least one failed. Stopping it with Ctrl-C (SIGINT) or SIGTERM ends the stream normally and does not change the exit code. Failing to connect in the first place is fatal (`4`).
 
+**Capture files:** an MCAP v1 file from modbusctl 2.x (`capture_legacy_format`), and a `--target`/`--function` selection that matches several or no targets and functions of a capture (`capture_selection_ambiguous`, `capture_selection_empty`), exit `3`. A capture file that cannot be read, or is corrupt or truncated where a command needs it complete (`mcap_load_failed`), exits `10`; `server static` and `server replay` serve a truncated capture as far as it goes. Failing to write a capture (`mcap_write_failed`) exits `10`.
+
 **Writes:** `client write` validates everything before sending; a rejected command exits `3` and has sent nothing. A Modbus exception returned by the device exits `6`, a timeout `5`. A write is never retried.

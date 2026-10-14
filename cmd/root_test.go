@@ -126,6 +126,11 @@ func refusedURL(t *testing.T) string {
 func TestRootCommandTree(t *testing.T) {
 	var got []string
 	for _, c := range rootCmd.Commands() {
+		// cobra adds help and __complete to the root on its first Execute; with
+		// -count > 1 an earlier run in this process has already done so.
+		if c.Name() == "help" || strings.HasPrefix(c.Name(), "__") {
+			continue
+		}
 		got = append(got, c.Name())
 	}
 	want := []string{"client", "completion", "discover", "mcap", "server", "version"}
@@ -216,7 +221,7 @@ func TestExecute_endToEnd(t *testing.T) {
 		t.Fatalf("holding = %v", got)
 	}
 
-	capture := filepath.Join(tmp, "read.mcap")
+	capture := filepath.Join(tmp, "read.mbcap")
 	code, stdout, stderr = execute(t, "client", "read", "--url", url, "--start", "100", "--count", "3", "--output", capture, "--format", "json")
 	if code != errs.ExitOK {
 		t.Fatalf("read: exit %d\n%s\n%s", code, stdout, stderr)
@@ -232,12 +237,12 @@ func TestExecute_endToEnd(t *testing.T) {
 	if code != errs.ExitOK {
 		t.Fatalf("mcap info: exit %d\n%s\n%s", code, stdout, stderr)
 	}
-	wantContains(t, stdout, "Function:  3", "Total Registers: 3", "Address Range: 100 → 102")
+	wantContains(t, stdout, "Functions: FC03 x1", "Samples:   1", "snapshot")
 	code, stdout, _ = execute(t, "mcap", "convert", "--input", capture, "--format", "csv")
 	if code != errs.ExitOK {
 		t.Fatalf("mcap convert: exit %d", code)
 	}
-	wantContains(t, stdout, "start_address,register_count,data_hex", "100,3,000a0014001e")
+	wantContains(t, stdout, "t,at,s,fc,req,resp", ",03,0300640003,0306000a0014001e,")
 
 	code, stdout, stderr = execute(t, "client", "poll", "--url", url, "--start", "100", "--polls", "2", "--interval", "1", "--format", "json")
 	if code != errs.ExitOK {
@@ -283,7 +288,7 @@ func TestExecute_partialExit(t *testing.T) {
 func TestExecute_fatal(t *testing.T) {
 	d := mbtest.NewDevice().SetHolding(100, 1)
 	url := "tcp://" + d.ServeTCP(t)
-	out := filepath.Join(t.TempDir(), "x.mcap")
+	out := filepath.Join(t.TempDir(), "x.mbcap")
 
 	// Text mode: the error goes to stderr, stdout stays empty.
 	code, stdout, stderr := execute(t, "client", "read", "--start", "100", "--output", out)

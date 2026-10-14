@@ -255,3 +255,10 @@ func TestDevice_requestsLog(t *testing.T) {
 	assert.Equal(t, uint8(0x03), d.Requests()[0].PDU[0])
 	assert.Equal(t, uint8(2), d.Requests()[1].Unit)
 }
+
+func TestDevice_replyOverride(t *testing.T) {
+	d := testDevice()
+	d.OnRequest = func(Request) Action { return Action{Reply: []byte{0x03, 0x02, 0xBE}} }
+	r := d.handle(1, []byte{0x03, 0x00, 0x64, 0x00, 0x01})
+	assert.Equal(t, []byte{0x03, 0x02, 0xBE}, r.pdu, "the override is sent as it is, malformed or not")
+}

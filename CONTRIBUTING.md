@@ -73,7 +73,9 @@ Examples:
 ### Testing
 
 - Add tests for new functionality in the appropriate `_test.go` file
-- Use [`internal/mbtest`](internal/mbtest) for anything that talks to a device. It is an in-memory Modbus slave that can be served over TCP, UDP, RTU or ASCII framing over TCP, and RTU or ASCII on a pseudo-terminal that stands in for a serial port (Linux and macOS; those tests skip elsewhere). It can also inject exceptions, timeouts and dropped connections.
+- Use [`internal/mbtest`](internal/mbtest) for anything that talks to a device. It is an in-memory Modbus slave that can be served over TCP, UDP, RTU or ASCII framing over TCP, and RTU or ASCII on a pseudo-terminal that stands in for a serial port (Linux and macOS; those tests skip elsewhere). It can also inject exceptions, timeouts, dropped connections, late answers and malformed replies.
+- Use [`internal/capfile/capfiletest`](internal/capfile/capfiletest) to build capture fixtures and read captures back as register-block records.
+- Code that records or serves captures has, besides unit tests, an end-to-end pipeline test (`internal/modbus/e2e_capture_test.go`: scan → extract → record → static and replay, over every network transport), chaos tests (`chaos_capture_test.go`: a device that fails at random, abusive clients, damaged capture files) and parallel tests (`parallel_capture_test.go`). Extend them when you change these paths, and check that a planted bug makes them fail.
 - Assert behaviour (output, exit code, device state), not just that the code ran
 - Tests must not write files into the repository: pass `--output` (or the equivalent config field) under `t.TempDir()`
 - Keep tests fast and race-clean; CI runs them with `-race` and a 120 s per-package timeout
@@ -115,11 +117,13 @@ For larger changes, please open an issue first to discuss the approach.
 cmd/                   Root command, version, completion
 cmd/client/            Client commands (identify, read, decode, poll, write, scan, record, sunspec, …)
 cmd/discover/          Subnet device discovery
-cmd/mcap/              MCAP file commands (convert, decode, extract, info, strings, frequencies)
+cmd/mcap/              Capture file commands (info, verify, convert, decode, extract, strings, frequencies)
 cmd/server/            Static and replay servers
 internal/config/       Flag and environment binding, Modbus URL parsing, serial settings
-internal/modbus/       Collectors, poll and write, scan strategies, servers
-internal/mcap/         MCAP binary codec and exports
+internal/modbus/       Collectors, poll and write, scan strategies, recording, capture servers
+internal/capfile/      Capture recorder (go-modbus PDU tap), loader, register-block adapter, error mapping
+internal/replay/       Replay core: sample-and-hold lookup per address, request and identity object; replay clock
+internal/mcap/         Capture info, verify, convert, blocks export, profile decode
 internal/format/       Output formatting (text, JSON, table, streaming)
 internal/types/        Output data models
 internal/validate/     Input validation

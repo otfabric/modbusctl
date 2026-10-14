@@ -2,462 +2,201 @@ package mcap
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/modbusctl/internal/capfile"
+	"github.com/otfabric/modbusctl/internal/capfile/capfiletest"
+	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestWriteAndReadHeader(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "mcap_test_*.mcap")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Remove(tmpfile.Name()) }()
-	defer func() { _ = tmpfile.Close() }()
+var testHeader = types.CaptureHeader{IP: "10.0.0.7", Port: 1502, Unit: 9, Function: 4, StartTime: 1_700_000_000_123_456_789}
 
-	original := types.CaptureHeader{
-		IP:        "127.0.0.1",
-		Port:      502,
-		Unit:      1,
-		Function:  4,
-		StartTime: time.Now().UnixNano(),
-	}
-
-	if err := WriteHeader(tmpfile, original); err != nil {
-		t.Fatalf("WriteHeader failed: %v", err)
-	}
-
-	// Seek back to start to read
-	if _, err := tmpfile.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	result, err := ReadHeader(tmpfile)
-	if err != nil {
-		t.Fatalf("ReadHeader failed: %v", err)
-	}
-
-	if result.IP != original.IP || result.Port != original.Port || result.Unit != original.Unit {
-		t.Errorf("Header mismatch: got %+v, want %+v", result, original)
-	}
+func writeCapture(t *testing.T, records ...types.CaptureRecord) string {
+	t.Helper()
+	return capfiletest.WriteRecords(t, capfiletest.Path(t, "capture.mbcap"), testHeader, records...)
 }
 
-func TestAppendReadAndCountRecords(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "mcap_test_records_*.mcap")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Remove(tmpfile.Name()) }()
-	defer func() { _ = tmpfile.Close() }()
-
-	header := types.CaptureHeader{
-		IP:        "192.168.1.100",
-		Port:      502,
-		Unit:      1,
-		Function:  4,
-		StartTime: time.Now().UnixNano(),
-	}
-
-	if err := WriteHeader(tmpfile, header); err != nil {
-		t.Fatalf("WriteHeader failed: %v", err)
-	}
-
-	now := time.Now().UnixNano()
-	records := []types.CaptureRecord{
-		{Iteration: 0, RequestTimestamp: now, ResponseTimestamp: now, StartAddress: 100, RegisterCount: 2, Data: []byte{0x01, 0x02, 0x03, 0x04}},
-		{Iteration: 0, RequestTimestamp: now, ResponseTimestamp: now, StartAddress: 200, RegisterCount: 1, Data: []byte{0x05, 0x06}},
-		{Iteration: 0, RequestTimestamp: now, ResponseTimestamp: now, StartAddress: 300, RegisterCount: 3, Data: []byte{0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C}},
-	}
-
-	for _, rec := range records {
-		if err := AppendRecord(tmpfile, rec); err != nil {
-			t.Fatalf("AppendRecord failed: %v", err)
-		}
-	}
-
-	// Seek to start before reading
-	if _, err := tmpfile.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = ReadHeader(tmpfile)
-	if err != nil {
-		t.Fatalf("ReadHeader failed: %v", err)
-	}
-
-	for i := 0; i < len(records); i++ {
-		readRec, err := ReadRecord(tmpfile)
-		if err != nil {
-			t.Fatalf("ReadRecord #%d failed: %v", i, err)
-		}
-		if readRec.StartAddress != records[i].StartAddress || readRec.RegisterCount != records[i].RegisterCount {
-			t.Errorf("Record #%d mismatch: got %+v, want %+v", i, readRec, records[i])
-		}
-		if len(readRec.Data) != len(records[i].Data) {
-			t.Errorf("Record #%d data length mismatch", i)
-		}
-	}
-
-	// Validate CountRecords
-	count, err := CountRecords(tmpfile.Name())
-	if err != nil {
-		t.Fatalf("CountRecords failed: %v", err)
-	}
-	if count != len(records) {
-		t.Errorf("Expected %d records, got %d", len(records), count)
-	}
+func writeBytes(t *testing.T, name string, content []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	require.NoError(t, os.WriteFile(path, content, 0o600))
+	return path
 }
 
-func TestLoadRecordsFromMCAP(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "mcap_test_load_*.mcap")
-	if err != nil {
-		t.Fatal(err)
+// twoTargets is a capture with FC03 samples of target 1 and FC04 samples of target 2.
+func twoTargets(t *testing.T) string {
+	c := &capture.Capture{
+		Header:  capture.Header{TickNS: 1000, WallStart: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), Producer: "test"},
+		Targets: []capture.Target{{ID: 1, Label: "A", Unit: 1}, {ID: 2, Label: "B", Unit: 2}},
+		Streams: []capture.Stream{{ID: 1, Target: 1, Role: "poll"}, {ID: 2, Target: 2, Role: "poll"}},
+		Samples: []capture.Sample{
+			{Stream: 1, At: 0, Request: []byte{0x03, 0, 10, 0, 1}, Response: []byte{0x03, 2, 0, 1}},
+			{Stream: 2, At: 5, Request: []byte{0x04, 0, 20, 0, 1}, Response: []byte{0x04, 2, 0, 2}},
+			{Stream: 1, At: 1_000_000, Request: []byte{0x03, 0, 10, 0, 1}, Response: []byte{0x03, 2, 0, 3}},
+		},
+		End: capture.End{Known: true, At: 2_000_000},
 	}
-	path := tmpfile.Name()
-	defer func() { _ = os.Remove(path) }()
-	defer func() { _ = tmpfile.Close() }()
-
-	header := types.CaptureHeader{
-		IP: "10.0.0.1", Port: 502, Unit: 2, Function: 3,
-		StartTime: time.Now().UnixNano(),
-	}
-	if err := WriteHeader(tmpfile, header); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UnixNano()
-	want := types.CaptureRecord{
-		Iteration: 1, RequestTimestamp: now, ResponseTimestamp: now + 1,
-		StartAddress: 0, RegisterCount: 1, Data: []byte{0xab, 0xcd},
-	}
-	if err := AppendRecord(tmpfile, want); err != nil {
-		t.Fatal(err)
-	}
-	_ = tmpfile.Close()
-
-	loaded, hdr, err := LoadRecordsFromMCAP(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hdr.IP != header.IP || hdr.Unit != header.Unit {
-		t.Fatalf("header %+v vs %+v", hdr, header)
-	}
-	if len(loaded) != 1 {
-		t.Fatalf("records %d", len(loaded))
-	}
-	got := loaded[0]
-	if got.StartAddress != want.StartAddress || got.RegisterCount != want.RegisterCount {
-		t.Fatalf("record mismatch %+v vs %+v", got, want)
-	}
-	if string(got.Data) != string(want.Data) {
-		t.Fatalf("data %x vs %x", got.Data, want.Data)
-	}
-	if got.Iteration != want.Iteration {
-		t.Fatalf("iteration %d vs %d", got.Iteration, want.Iteration)
-	}
+	return capfiletest.Write(t, capfiletest.Path(t, "two.mbcap"), c)
 }
 
-func TestMillionRecordsPerformance(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "mcap_perf_*.mcap")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("Test file: %s", tmpfile.Name())
-	defer func() { _ = tmpfile.Close() }()
-	defer func() { _ = os.Remove(tmpfile.Name()) }()
+func TestLoadRecords_selection(t *testing.T) {
+	path := twoTargets(t)
+	_, _, err := LoadRecords(path, config.CaptureSelection{})
+	require.ErrorContains(t, err, "--target 1 --function 3 (2 samples); --target 2 --function 4 (1 samples)")
 
-	header := types.CaptureHeader{
-		IP:        "127.0.0.1",
-		Port:      502,
-		Unit:      1,
-		Function:  3,
-		StartTime: time.Now().UnixNano(),
-	}
-	if err := WriteHeader(tmpfile, header); err != nil {
-		t.Fatalf("WriteHeader failed: %v", err)
-	}
+	recs, h, err := LoadRecords(path, config.CaptureSelection{Target: 1})
+	require.NoError(t, err)
+	require.Len(t, recs, 2)
+	assert.Equal(t, uint8(3), h.Function)
+	assert.Equal(t, uint8(1), h.Unit)
+	assert.Equal(t, []uint32{0, 1}, []uint32{recs[0].Iteration, recs[1].Iteration}, "the n-th poll of a block is iteration n")
+	assert.Equal(t, []byte{0, 3}, recs[1].Data)
 
-	// Create a fixed 10-register data block (20 bytes)
-	data := make([]byte, 20)
-	for i := range data {
-		data[i] = byte(i)
-	}
+	recs, _, err = LoadRecords(path, config.CaptureSelection{Function: 4})
+	require.NoError(t, err)
+	require.Len(t, recs, 1)
 
-	t.Log("Writing 1,000,000 records...")
-	start := time.Now()
-	var i uint32
-	for i = 0; i < uint32(1_000_000); i++ {
-		now := time.Now().UnixNano()
-		rec := types.CaptureRecord{
-			Iteration:         i,
-			RequestTimestamp:  now,
-			ResponseTimestamp: now,
-			StartAddress:      1000,
-			RegisterCount:     10,
-			Data:              data,
-		}
-		if err := AppendRecord(tmpfile, rec); err != nil {
-			t.Fatalf("AppendRecord #%d failed: %v", i, err)
-		}
-	}
-	elapsedWrite := time.Since(start)
-	t.Logf("Write completed in %v", elapsedWrite)
-
-	info, err := tmpfile.Stat()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("File size: %.2f MB", float64(info.Size())/(1024*1024))
-
-	t.Log("Counting records...")
-	if _, err := tmpfile.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	start = time.Now()
-	count, err := CountRecords(tmpfile.Name())
-	if err != nil {
-		t.Fatalf("CountRecords failed: %v", err)
-	}
-	elapsedRead := time.Since(start)
-	t.Logf("Counted %d records in %v", count, elapsedRead)
+	_, _, err = LoadRecords(path, config.CaptureSelection{Target: 2, Function: 3})
+	require.ErrorContains(t, err, "no FC01-04 samples for target 2 and function 3")
 }
 
-func TestExportCSV(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "mcap_export_csv_*.mcap")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Remove(tmpfile.Name()) }()
-	defer func() { _ = tmpfile.Close() }()
-
-	header := types.CaptureHeader{
-		IP:        "10.0.0.1",
-		Port:      502,
-		Unit:      1,
-		Function:  3,
-		StartTime: time.Now().UnixNano(),
-	}
-	if err := WriteHeader(tmpfile, header); err != nil {
-		t.Fatalf("WriteHeader failed: %v", err)
-	}
-
-	now := time.Now().UnixNano()
-	records := []types.CaptureRecord{
-		{Iteration: 0, RequestTimestamp: now, ResponseTimestamp: now, StartAddress: 10, RegisterCount: 2, Data: []byte{0x01, 0x02, 0x03, 0x04}},
-		{Iteration: 0, RequestTimestamp: now, ResponseTimestamp: now, StartAddress: 20, RegisterCount: 1, Data: []byte{0x05, 0x06}},
-	}
-
-	for _, rec := range records {
-		if err := AppendRecord(tmpfile, rec); err != nil {
-			t.Fatalf("AppendRecord failed: %v", err)
-		}
-	}
-
-	var buf bytes.Buffer
-	if err := ExportCSV(&buf, tmpfile.Name()); err != nil {
-		t.Fatalf("ExportCSV failed: %v", err)
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, "ip,port,unit,function,iteration,request_timestamp,response_timestamp,start_address,register_count,data_hex") {
-		t.Error("CSV header missing or incorrect")
-	}
-	if !strings.Contains(output, "10.0.0.1") {
-		t.Error("CSV does not contain expected IP")
-	}
-	if !strings.Contains(output, "10") || !strings.Contains(output, "20") {
-		t.Error("CSV missing expected start addresses")
-	}
-}
-
-func TestExportJSON(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "mcap_export_json_*.mcap")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Remove(tmpfile.Name()) }()
-	defer func() { _ = tmpfile.Close() }()
-
-	header := types.CaptureHeader{
-		IP:        "10.0.0.2",
-		Port:      502,
-		Unit:      2,
-		Function:  4,
-		StartTime: time.Now().UnixNano(),
-	}
-	if err := WriteHeader(tmpfile, header); err != nil {
-		t.Fatalf("WriteHeader failed: %v", err)
-	}
-
-	now := time.Now().UnixNano()
-	records := []types.CaptureRecord{
-		{Iteration: 0, RequestTimestamp: now, ResponseTimestamp: now, StartAddress: 30, RegisterCount: 1, Data: []byte{0x0A, 0x0B}},
-	}
-
-	for _, rec := range records {
-		if err := AppendRecord(tmpfile, rec); err != nil {
-			t.Fatalf("AppendRecord failed: %v", err)
-		}
-	}
-
-	var buf bytes.Buffer
-	if err := ExportJSON(&buf, tmpfile.Name()); err != nil {
-		t.Fatalf("ExportJSON failed: %v", err)
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, `"ip": "10.0.0.2"`) {
-		t.Error("JSON output missing header IP")
-	}
-	if !strings.Contains(output, `"start_address": 30`) {
-		t.Error("JSON output missing record data")
-	}
-}
-
-func TestExportAddressBlocks(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "mcap_export_blocks_*.mcap")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Remove(tmpfile.Name()) }()
-	defer func() { _ = tmpfile.Close() }()
-
-	header := types.CaptureHeader{
-		IP:        "10.0.0.3",
-		Port:      502,
-		Unit:      3,
-		Function:  4,
-		StartTime: time.Now().UnixNano(),
-	}
-	if err := WriteHeader(tmpfile, header); err != nil {
-		t.Fatalf("WriteHeader failed: %v", err)
-	}
-
-	now := time.Now().UnixNano()
-	records := []types.CaptureRecord{
-		{Iteration: 0, RequestTimestamp: now, ResponseTimestamp: now, StartAddress: 40, RegisterCount: 2, Data: []byte{0x01, 0x02, 0x03, 0x04}},
-		{Iteration: 0, RequestTimestamp: now, ResponseTimestamp: now, StartAddress: 50, RegisterCount: 1, Data: []byte{0x05, 0x06}},
-		{Iteration: 1, RequestTimestamp: now, ResponseTimestamp: now, StartAddress: 40, RegisterCount: 2, Data: []byte{0x07, 0x08, 0x09, 0x0A}}, // duplicate block
-	}
-
-	for _, rec := range records {
-		if err := AppendRecord(tmpfile, rec); err != nil {
-			t.Fatalf("AppendRecord failed: %v", err)
-		}
-	}
-
-	var buf bytes.Buffer
-	if err := ExportAddressBlocks(&buf, tmpfile.Name()); err != nil {
-		t.Fatalf("ExportAddressBlocks failed: %v", err)
-	}
-
-	var blocks []types.AddressBlock
-	if err := json.Unmarshal(buf.Bytes(), &blocks); err != nil {
-		t.Fatalf("Failed to parse exported JSON: %v", err)
-	}
-
-	found40 := false
-	found50 := false
-	for _, b := range blocks {
-		if b.StartAddress == 40 && b.RegisterCount == 2 {
-			found40 = true
-		}
-		if b.StartAddress == 50 && b.RegisterCount == 1 {
-			found50 = true
-		}
-	}
-
-	if !found40 {
-		t.Error("Output does not contain expected address block 40 with count 2")
-	}
-	if !found50 {
-		t.Error("Output does not contain expected address block 50 with count 1")
-	}
-	if len(blocks) != 2 {
-		t.Errorf("Expected 2 unique address blocks, got %d", len(blocks))
-	}
+func TestLoadRecords_legacyAndBadFiles(t *testing.T) {
+	_, _, err := LoadRecords(writeBytes(t, "old.mcap", []byte("MCAP\x01\x00\x02{}")), config.CaptureSelection{})
+	require.ErrorIs(t, err, capfile.ErrLegacyMCAP)
+	_, _, err = LoadRecords(writeBytes(t, "x.txt", []byte("hello")), config.CaptureSelection{})
+	require.ErrorIs(t, err, capture.ErrCorrupt)
+	_, _, err = LoadRecords(filepath.Join(t.TempDir(), "missing.mbcap"), config.CaptureSelection{})
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestExportInfo(t *testing.T) {
-	cases := []struct {
-		name     string
-		records  []types.CaptureRecord
-		expected []string
-	}{
-		{
-			name: "1 iteration, 1 block",
-			records: []types.CaptureRecord{
-				{Iteration: 0, RequestTimestamp: time.Now().UnixNano(), ResponseTimestamp: time.Now().UnixNano(), StartAddress: 100, RegisterCount: 1, Data: []byte{0x01, 0x02}},
-			},
-			expected: []string{"Iterations: 1", "Blocks: 1", "Total Registers: 1", "Address Range: 100 → 100"},
-		},
-		{
-			name: "1 iteration, multiple blocks",
-			records: []types.CaptureRecord{
-				{Iteration: 0, RequestTimestamp: time.Now().UnixNano(), ResponseTimestamp: time.Now().UnixNano(), StartAddress: 100, RegisterCount: 2, Data: []byte{0x01, 0x02, 0x03, 0x04}},
-				{Iteration: 0, RequestTimestamp: time.Now().Add(1 * time.Second).UnixNano(), ResponseTimestamp: time.Now().Add(1 * time.Second).UnixNano(), StartAddress: 102, RegisterCount: 2, Data: []byte{0x05, 0x06, 0x07, 0x08}},
-			},
-			expected: []string{"Iterations: 1", "Blocks: 2", "Total Registers: 4", "Address Range: 100 → 103"},
-		},
-		{
-			name: "multiple iterations, 1 block each",
-			records: []types.CaptureRecord{
-				{Iteration: 0, RequestTimestamp: time.Now().UnixNano(), ResponseTimestamp: time.Now().UnixNano(), StartAddress: 200, RegisterCount: 1, Data: []byte{0x01, 0x02}},
-				{Iteration: 1, RequestTimestamp: time.Now().Add(1 * time.Second).UnixNano(), ResponseTimestamp: time.Now().Add(1 * time.Second).UnixNano(), StartAddress: 300, RegisterCount: 2, Data: []byte{0x03, 0x04, 0x05, 0x06}},
-			},
-			expected: []string{"Iterations: 2", "Iteration 0:", "Iteration 1:", "Blocks: 1", "Total Registers: 1", "Total Registers: 2"},
-		},
-		{
-			name: "multiple iterations, multiple blocks",
-			records: []types.CaptureRecord{
-				{Iteration: 0, RequestTimestamp: time.Now().UnixNano(), ResponseTimestamp: time.Now().UnixNano(), StartAddress: 400, RegisterCount: 2, Data: []byte{0x01, 0x02, 0x03, 0x04}},
-				{Iteration: 0, RequestTimestamp: time.Now().Add(1 * time.Second).UnixNano(), ResponseTimestamp: time.Now().Add(1 * time.Second).UnixNano(), StartAddress: 402, RegisterCount: 2, Data: []byte{0x05, 0x06, 0x07, 0x08}},
-				{Iteration: 1, RequestTimestamp: time.Now().Add(2 * time.Second).UnixNano(), ResponseTimestamp: time.Now().Add(2 * time.Second).UnixNano(), StartAddress: 500, RegisterCount: 1, Data: []byte{0x09, 0x0A}},
-				{Iteration: 1, RequestTimestamp: time.Now().Add(3 * time.Second).UnixNano(), ResponseTimestamp: time.Now().Add(3 * time.Second).UnixNano(), StartAddress: 502, RegisterCount: 3, Data: []byte{0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}},
-			},
-			expected: []string{"Iterations: 2", "Iteration 0:", "Iteration 1:", "Blocks: 2", "Total Registers: 4", "Total Registers: 4", "Address Range: 400 → 403", "Address Range: 500 → 504"},
-		},
+	var buf bytes.Buffer
+	require.NoError(t, ExportInfo(&buf, twoTargets(t)))
+	out := buf.String()
+	for _, want := range []string{
+		"(mbcap)", "Producer:  test", "Start:     2026-10-14T12:00:00Z", "Tick:      1µs", "Mode:      full capture",
+		"End:       2s", "Samples:   3 (0 exception responses)", "Functions: FC03 x2, FC04 x1",
+		`1  "A"  unknown  unit 1`, `1  target 1  poll  -  2 samples, 0s to 1s, every 1s`,
+	} {
+		assert.Contains(t, out, want)
 	}
+}
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			tmpfile, err := os.CreateTemp("", "mcap_info_*.mcap")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = os.Remove(tmpfile.Name()) }()
-			defer func() { _ = tmpfile.Close() }()
+func TestConvertAndVerify(t *testing.T) {
+	src := twoTargets(t)
+	want := capfiletest.Load(t, src).Capture
+	dir := t.TempDir()
+	prev := src
+	for _, f := range []string{"jsonl", "csv", "mbcap"} {
+		out := filepath.Join(dir, "c."+f)
+		file, err := os.Create(out)
+		require.NoError(t, err)
+		require.NoError(t, Convert(file, prev, f))
+		require.NoError(t, file.Close())
+		got := capfiletest.Load(t, out).Capture
+		require.Empty(t, capture.Diff(want, got), f)
 
-			header := types.CaptureHeader{
-				IP:        "192.168.9.99",
-				Port:      502,
-				Unit:      1,
-				Function:  3,
-				StartTime: time.Now().UnixNano(),
-			}
-			if err := WriteHeader(tmpfile, header); err != nil {
-				t.Fatalf("WriteHeader failed: %v", err)
-			}
-
-			for _, rec := range c.records {
-				if err := AppendRecord(tmpfile, rec); err != nil {
-					t.Fatalf("AppendRecord failed: %v", err)
-				}
-			}
-
-			var buf bytes.Buffer
-			if err := ExportInfo(&buf, tmpfile.Name()); err != nil {
-				t.Fatalf("ExportInfo failed: %v", err)
-			}
-
-			output := buf.String()
-			for _, expect := range c.expected {
-				if !strings.Contains(output, expect) {
-					t.Errorf("Expected output to contain %q\nFull output:\n%s", expect, output)
-				}
-			}
-		})
+		var v bytes.Buffer
+		require.NoError(t, Verify(&v, out))
+		assert.Contains(t, v.String(), ": ok ("+f+", 2 targets, 2 streams, 3 samples, end at 2s)")
+		prev = out
 	}
+	var wide bytes.Buffer
+	require.NoError(t, Convert(&wide, src, "wide-csv"))
+	assert.Equal(t, "at,1/03/10,2/04/20\n0,1,\n5,1,2\n1000000,3,2\n", wide.String())
+	require.ErrorContains(t, Convert(&wide, src, "xml"), "unsupported format")
+
+	b, err := os.ReadFile(src)
+	require.NoError(t, err)
+	cut := writeBytes(t, "cut.mbcap", b[:len(b)-30])
+	require.ErrorIs(t, Verify(&bytes.Buffer{}, cut), capture.ErrTruncated)
+}
+
+func TestExportAddressBlocks_exact(t *testing.T) {
+	path := writeCapture(t,
+		types.CaptureRecord{Iteration: 0, StartAddress: 300, RegisterCount: 2, Data: []byte{0, 0, 0, 0}},
+		types.CaptureRecord{Iteration: 0, StartAddress: 100, RegisterCount: 1, Data: []byte{0, 0}},
+		types.CaptureRecord{Iteration: 1, StartAddress: 300, RegisterCount: 2, Data: []byte{0, 0, 0, 0}},
+		types.CaptureRecord{Iteration: 1, StartAddress: 100, RegisterCount: 1, Data: []byte{0, 0}},
+	)
+	var buf bytes.Buffer
+	require.NoError(t, ExportAddressBlocks(&buf, path, config.CaptureSelection{}))
+	assert.Equal(t,
+		"[\n  {\n    \"start_address\": 100,\n    \"register_count\": 1\n  },\n  {\n    \"start_address\": 300,\n    \"register_count\": 2\n  }\n]\n",
+		buf.String())
+
+	buf.Reset()
+	require.NoError(t, ExportAddressBlocks(&buf, writeCapture(t), config.CaptureSelection{}))
+	assert.Equal(t, "null\n", buf.String())
+}
+
+func TestExportDeviceProfileDecode(t *testing.T) {
+	capture := writeCapture(t,
+		// Registers 100-103, then 110; register 101 is overwritten by a later poll.
+		types.CaptureRecord{Iteration: 0, StartAddress: 100, RegisterCount: 4, Data: []byte{0xFF, 0xFE, 0x00, 0x00, 0x3F, 0xC0, 0x00, 0x00}},
+		types.CaptureRecord{Iteration: 0, StartAddress: 110, RegisterCount: 1, Data: []byte{0x12, 0x34}},
+		types.CaptureRecord{Iteration: 1, StartAddress: 101, RegisterCount: 1, Data: []byte{0x01, 0xF4}},
+		// The data of one register: only register 120 is known.
+		types.CaptureRecord{Iteration: 1, StartAddress: 120, RegisterCount: 2, Data: []byte{0x00, 0x07}},
+	)
+	profile := writeBytes(t, "profile.json", []byte(`{"protocolData":{"registers":[
+		{"controlledPropertyId":"signed","valueScaleFactor":1,"start":100,"size":1,"format":">h"},
+		{"controlledPropertyId":"scaled","valueScaleFactor":0.1,"start":101,"size":1,"format":">H"},
+		{"controlledPropertyId":"float","valueScaleFactor":2,"start":102,"size":2,"format":">f"},
+		{"controlledPropertyId":"little","valueScaleFactor":1,"start":110,"size":1,"format":"<H"},
+		{"controlledPropertyId":"not.used","valueScaleFactor":1,"start":9999,"size":1,"format":">H"},
+		{"controlledPropertyId":"absent","valueScaleFactor":1,"start":500,"size":2,"format":">i"},
+		{"controlledPropertyId":"half","valueScaleFactor":1,"start":120,"size":2,"format":">i"},
+		{"controlledPropertyId":"odd","valueScaleFactor":1,"start":100,"size":1,"format":"u16"},
+		{"controlledPropertyId":"short","valueScaleFactor":1,"start":110,"size":1,"format":">i"},
+		{"controlledPropertyId":"unscaled","start":110,"size":1,"format":">H"},
+		{"controlledPropertyId":"wide","valueScaleFactor":1,"start":100,"size":4,"format":">h"}
+	]}}`))
+
+	var buf bytes.Buffer
+	require.NoError(t, ExportDeviceProfileDecode(&buf, capture, profile, config.CaptureSelection{}))
+	assert.Equal(t,
+		"Decoded Values:\n"+
+			"signed = -2.000000\n"+
+			"scaled = 50.000000\n"+
+			"float = 3.000000\n"+
+			"little = 13330.000000\n"+
+			"⚠️  Missing data for absent at 500 (size 2)\n"+
+			"⚠️  Missing data for half at 120 (size 2)\n"+
+			"❌ Unsupported format for odd: u16\n"+
+			"❌ Not enough bytes for short: have 2, need 4\n"+
+			"unscaled = 0.000000\n"+
+			"wide = -2.000000\n",
+		buf.String())
+}
+
+func TestExportDeviceProfileDecode_errors(t *testing.T) {
+	capture := writeCapture(t)
+	var buf bytes.Buffer
+
+	err := ExportDeviceProfileDecode(&buf, capture, filepath.Join(t.TempDir(), "missing.json"), config.CaptureSelection{})
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	assert.ErrorContains(t, err, "failed to open device profile")
+
+	err = ExportDeviceProfileDecode(&buf, capture, writeBytes(t, "bad.json", []byte("{not json")), config.CaptureSelection{})
+	assert.ErrorContains(t, err, "failed to decode device profile")
+	assert.Empty(t, buf.String())
+
+	// An empty profile over an empty capture still prints the heading.
+	require.NoError(t, ExportDeviceProfileDecode(&buf, capture, writeBytes(t, "empty.json", []byte(`{}`)), config.CaptureSelection{}))
+	assert.Equal(t, "Decoded Values:\n", buf.String())
+
+	// Coils cannot be decoded as registers.
+	coils := capfiletest.WriteRecords(t, capfiletest.Path(t, "coils.mbcap"), types.CaptureHeader{Unit: 1, Function: 1},
+		types.CaptureRecord{StartAddress: 0, RegisterCount: 8, Data: []byte{0xFF}})
+	err = ExportDeviceProfileDecode(&buf, coils, writeBytes(t, "e.json", []byte(`{}`)), config.CaptureSelection{})
+	assert.True(t, strings.Contains(err.Error(), "needs register samples"), err.Error())
 }

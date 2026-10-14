@@ -1,65 +1,21 @@
+// Package mcap implements the modbusctl mcap commands on MBCAP capture files
+// (see github.com/otfabric/go-modbus-capture): info, verify, convert, and the
+// register-block analyses decode, strings, frequencies and extract.
 package mcap
 
 import (
-	"fmt"
-	"io"
-	"os"
-
+	"github.com/otfabric/modbusctl/internal/capfile"
+	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
-// CountRecords opens the given MCAP file and counts the number of valid CaptureRecord entries.
-// It skips and counts records following the initial file header.
-func CountRecords(path string) (int, error) {
-	f, err := os.Open(path)
+// LoadRecords reads a capture file and returns the FC01-04 samples of the
+// selected target and function as register-block records (see
+// [capfile.Records]).
+func LoadRecords(path string, sel config.CaptureSelection) ([]types.CaptureRecord, types.CaptureHeader, error) {
+	l, err := capfile.Load(path)
 	if err != nil {
-		return 0, err
+		return nil, types.CaptureHeader{}, err
 	}
-	defer func() { _ = f.Close() }()
-
-	_, err = ReadHeader(f)
-	if err != nil {
-		return 0, err
-	}
-
-	count := 0
-	for {
-		_, err := ReadRecord(f)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return count, err
-		}
-		count++
-	}
-	return count, nil
-}
-
-// LoadRecordsFromMCAP reads the header and all records from a .mcap file.
-func LoadRecordsFromMCAP(path string) ([]types.CaptureRecord, types.CaptureHeader, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, types.CaptureHeader{}, fmt.Errorf("failed to open mcap file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	header, err := ReadHeader(f)
-	if err != nil {
-		return nil, types.CaptureHeader{}, fmt.Errorf("failed to read header: %w", err)
-	}
-
-	var records []types.CaptureRecord
-	for {
-		rec, err := ReadRecord(f)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, types.CaptureHeader{}, fmt.Errorf("failed to read record: %w", err)
-		}
-		records = append(records, *rec)
-	}
-
-	return records, header, nil
+	return capfile.Records(l, capfile.Selection{Target: sel.Target, Function: sel.Function})
 }

@@ -258,7 +258,7 @@ func TestCheckConvertConfig(t *testing.T) {
 
 	validCfg := config.ConvertConfig{
 		InputFile:  inputTmp.Name(),
-		FormatType: "json",
+		FormatType: "jsonl",
 		OutputFile: outputTmp.Name(),
 	}
 	assert.NoError(t, CheckConvertConfig(&validCfg))

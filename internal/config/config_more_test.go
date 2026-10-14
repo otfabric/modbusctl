@@ -238,7 +238,7 @@ func TestEnumValueLists(t *testing.T) {
 	assert.Equal(t, []string{"5", "6", "15", "16"}, WriteFunctionCodes())
 	assert.Equal(t, []string{"none", "even", "odd"}, Parities())
 	assert.Equal(t, []string{"1", "2", "3", "4"}, FunctionCodes())
-	assert.Equal(t, []string{"csv", "json"}, ConvertFormats())
+	assert.Equal(t, []string{"mbcap", "jsonl", "csv", "wide-csv"}, ConvertFormats())
 	assert.Equal(t, []string{"holding", "input"}, SunspecRegtypes())
 	assert.Equal(t, []string{"safe", "smart", "deep", "stepped", "linear", "boundary", "sunspec"}, ScanAlgorithms())
 
@@ -309,10 +309,10 @@ func TestRegisterOtherCompletions(t *testing.T) {
 	cmd.Flags().String("regtype", "", "")
 	RegisterConvertFormatCompletion(cmd)
 	RegisterRegtypeCompletion(cmd)
-	assert.Equal(t, []string{"csv\tcomma-separated values", "json\tJSON export"}, complete(t, cmd, "format", ""))
-	assert.Equal(t, []string{"json\tJSON export"}, complete(t, cmd, "format", "J"))
+	assert.Equal(t, []string{"csv\tMBCAP long CSV (lossless)", "jsonl\tMBCAP JSON Lines (lossless)", "mbcap\tMBCAP binary (lossless)", "wide-csv\traw values per address over time (view)"}, complete(t, cmd, "format", ""))
+	assert.Equal(t, []string{"jsonl\tMBCAP JSON Lines (lossless)"}, complete(t, cmd, "format", "J"))
 	assert.Equal(t, []string{"input"}, complete(t, cmd, "regtype", "in"))
-	assert.Equal(t, ConvertFormats(), []string{"csv", "json"})
+	assert.Equal(t, ConvertFormats(), []string{"mbcap", "jsonl", "csv", "wide-csv"})
 	for _, f := range ConvertFormats() {
 		assert.NotEmpty(t, ConvertFormatDescriptions[f])
 	}

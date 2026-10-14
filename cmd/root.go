@@ -12,6 +12,7 @@ import (
 	"github.com/otfabric/modbusctl/cmd/discover"
 	"github.com/otfabric/modbusctl/cmd/mcap"
 	"github.com/otfabric/modbusctl/cmd/server"
+	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/runner"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,9 @@ func SetBuildMeta(version, tag, commit, buildDate string) {
 	buildMeta.tag = tag
 	buildMeta.commit = commit
 	buildMeta.buildDate = buildDate
+	if v := strings.TrimSpace(version); v != "" {
+		capfile.Producer = "modbusctl " + v
+	}
 }
 
 var rootCmd = &cobra.Command{

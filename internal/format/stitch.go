@@ -7,7 +7,7 @@ import (
 )
 
 // stitchAdjacentRecords merges adjacent capture rows within the same iteration when addresses are contiguous.
-// Records are grouped by Iteration, sorted by StartAddress, then stitched so multi-iteration MCAPs cannot merge across iterations.
+// Records are grouped by Iteration, sorted by StartAddress, then stitched so captures with several polls cannot merge across iterations.
 func stitchAdjacentRecords(records []types.CaptureRecord) []types.CaptureRecord {
 	if len(records) == 0 {
 		return nil
