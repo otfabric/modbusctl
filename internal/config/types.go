@@ -194,6 +194,7 @@ type VerifyConfig struct {
 }
 
 type StaticServerConfig struct {
+	Listen     string `env:"MODBUSCTL_LISTEN" desc:"Address to listen on, e.g. 127.0.0.1 (default: every interface)" flag:"listen"`
 	Port       uint16 `env:"MODBUSCTL_PORT" desc:"Port for the static server" flag:"port"`
 	Unit       uint8  `env:"MODBUSCTL_UNIT" desc:"Serve the target as this unit id (0 = the unit id recorded for each target)" flag:"unit"`
 	Target     uint32 `env:"MODBUSCTL_TARGET" desc:"Capture target to serve (0 = every target, each on its recorded unit id)" flag:"target"`
@@ -205,6 +206,7 @@ type StaticServerConfig struct {
 }
 
 type ReplayServerConfig struct {
+	Listen      string `env:"MODBUSCTL_LISTEN" desc:"Address to listen on, e.g. 127.0.0.1 (default: every interface)" flag:"listen"`
 	Port        uint16 `env:"MODBUSCTL_PORT" desc:"Port for the replay server" flag:"port"`
 	Unit        uint8  `env:"MODBUSCTL_UNIT" desc:"Serve the target as this unit id (0 = the unit id recorded for each target)" flag:"unit"`
 	Target      uint32 `env:"MODBUSCTL_TARGET" desc:"Capture target to serve (0 = every target, each on its recorded unit id)" flag:"target"`

@@ -14,6 +14,7 @@ import (
 	"github.com/otfabric/go-modbus/codec"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/modbus"
+	"github.com/otfabric/modbusctl/internal/plan"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
@@ -264,7 +265,7 @@ func CheckRecordConfig(cfg config.RecordConfig) error {
 	if cfg.Duration < cfg.Interval {
 		return fmt.Errorf("duration (%d) must be greater than or equal to interval (%d)", cfg.Duration, cfg.Interval)
 	}
-	if err := validateAddressBlockFile(cfg.BlocksFile); err != nil {
+	if err := validateAddressBlockFile(cfg.BlocksFile, cfg.Function); err != nil {
 		return err
 	}
 	return validateFile(cfg.OutputFile, false)
@@ -447,9 +448,27 @@ func CheckDiscoverConfig(cfg config.DiscoverConfig) error {
 	return nil
 }
 
+// checkListen accepts an empty listen address (every interface), an IP
+// address or a host name, without a port.
+func checkListen(host string) error {
+	if host == "" || net.ParseIP(host) != nil {
+		return nil
+	}
+	for _, r := range host {
+		hostChar := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.'
+		if !hostChar {
+			return fmt.Errorf("invalid --listen %q: use an IP address or host name without a port, e.g. 127.0.0.1", host)
+		}
+	}
+	return nil
+}
+
 func CheckStaticServerConfig(cfg config.StaticServerConfig) error {
 	if cfg.Port == 0 {
 		return fmt.Errorf("port must be greater than 0")
+	}
+	if err := checkListen(cfg.Listen); err != nil {
+		return err
 	}
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
@@ -463,6 +482,9 @@ func CheckStaticServerConfig(cfg config.StaticServerConfig) error {
 func CheckReplayServerConfig(cfg config.ReplayServerConfig) error {
 	if cfg.Port == 0 {
 		return fmt.Errorf("port must be greater than 0")
+	}
+	if err := checkListen(cfg.Listen); err != nil {
+		return err
 	}
 	if err := validateFile(cfg.InputFile, true); err != nil {
 		return err
@@ -617,7 +639,10 @@ func checkSunSpecBaseConfig(cfg *config.SunSpecBaseConfig) error {
 	return nil
 }
 
-func validateAddressBlockFile(path string) error {
+// validateAddressBlockFile checks the recording plan at path: address blocks
+// read with defaultFC, or requests of any supported read function (see
+// package plan).
+func validateAddressBlockFile(path string, defaultFC uint8) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("blocks file path is required (--blocks-file / MODBUSCTL_BLOCKS_FILE)")
 	}
@@ -628,25 +653,8 @@ func validateAddressBlockFile(path string) error {
 	if info.IsDir() {
 		return fmt.Errorf("blocks file cannot be a directory")
 	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("failed to read blocks file: %w", err)
-	}
-	var blocks []types.AddressBlock
-	if err := json.Unmarshal(content, &blocks); err != nil {
-		return fmt.Errorf("blocks file does not contain valid address-block JSON: %w", err)
-	}
-	if len(blocks) == 0 {
-		return fmt.Errorf("blocks file contains no address blocks")
-	}
-	for _, b := range blocks {
-		if b.RegisterCount == 0 ||
-			b.StartAddress > maxModbusRegister ||
-			uint32(b.StartAddress)+uint32(b.RegisterCount) > maxModbusRegister+1 {
-			return fmt.Errorf("invalid address block: start=%d, count=%d", b.StartAddress, b.RegisterCount)
-		}
-	}
-	return nil
+	_, err = plan.Read(path, defaultFC)
+	return err
 }
 
 func validateDeviceProfileFile(path string) error {

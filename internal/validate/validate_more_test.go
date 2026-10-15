@@ -422,21 +422,21 @@ func TestValidateAddressBlockFile(t *testing.T) {
 	}{
 		{"valid", `[{"start_address":100,"register_count":125}]`, ""},
 		{"block ending at the top", `[{"start_address":65535,"register_count":1}]`, ""},
-		{"not json", `start,count`, "blocks file does not contain valid address-block JSON"},
-		{"wrong shape", `{"start_address":1}`, "blocks file does not contain valid address-block JSON"},
-		{"address out of range", `[{"start_address":65536,"register_count":1}]`, "blocks file does not contain valid address-block JSON"},
+		{"not json", `start,count`, "blocks file does not contain valid plan JSON"},
+		{"wrong shape", `{"start_address":1}`, "blocks file does not contain valid plan JSON"},
+		{"address out of range", `[{"start_address":65536,"register_count":1}]`, "blocks file does not contain valid plan JSON"},
 		{"empty list", `[]`, "blocks file contains no address blocks"},
 		{"zero count", `[{"start_address":1,"register_count":0}]`, "invalid address block: start=1, count=0"},
 		{"block past the top", `[{"start_address":1,"register_count":2},{"start_address":65535,"register_count":2}]`, "invalid address block: start=65535, count=2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			check(t, validateAddressBlockFile(writeFile(t, "blocks.json", tt.content)), tt.want)
+			check(t, validateAddressBlockFile(writeFile(t, "blocks.json", tt.content), 3), tt.want)
 		})
 	}
-	check(t, validateAddressBlockFile(""), "blocks file path is required")
-	check(t, validateAddressBlockFile(filepath.Join(dir, "missing.json")), "blocks file not accessible")
-	check(t, validateAddressBlockFile(dir), "blocks file cannot be a directory")
+	check(t, validateAddressBlockFile("", 3), "blocks file path is required")
+	check(t, validateAddressBlockFile(filepath.Join(dir, "missing.json"), 3), "blocks file not accessible")
+	check(t, validateAddressBlockFile(dir, 3), "blocks file cannot be a directory")
 }
 
 func TestValidateDeviceProfileFile(t *testing.T) {
@@ -692,7 +692,7 @@ func TestValidateJSONFiles_unreadable(t *testing.T) {
 	}
 	path := writeFile(t, "locked.json", `[]`)
 	require.NoError(t, os.Chmod(path, 0o000))
-	check(t, validateAddressBlockFile(path), "failed to read blocks file")
+	check(t, validateAddressBlockFile(path, 3), "failed to read blocks file")
 	check(t, validateDeviceProfileFile(path), "failed to read device profile file")
 }
 
@@ -706,5 +706,14 @@ func TestValidateFile_parentIsRegularFile(t *testing.T) {
 		require.Error(t, err, path)
 		assert.Contains(t, err.Error(), "output directory is not a directory: "+file)
 		assert.NotContains(t, err.Error(), "%!w")
+	}
+}
+
+func TestCheckListen(t *testing.T) {
+	for _, ok := range []string{"", "127.0.0.1", "::1", "0.0.0.0", "localhost", "my-host.example"} {
+		require.NoErrorf(t, checkListen(ok), "%q", ok)
+	}
+	for _, bad := range []string{"127.0.0.1:502", "a b", "host/x"} {
+		require.ErrorContainsf(t, checkListen(bad), "invalid --listen", "%q", bad)
 	}
 }

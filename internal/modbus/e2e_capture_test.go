@@ -164,8 +164,8 @@ func TestE2ECapture_scanExtractRecordServe(t *testing.T) {
 			// 5. Replay once at 4x: register 100 walks through the recorded values in order
 			// and stays on the last one.
 			var progress collSyncBuffer
-			rs := collStartServer(t, func(ctx context.Context, port uint16) error {
-				return ServeReplay(ctx, config.ReplayServerConfig{Port: port, InputFile: rec, Speed: "4", Loops: 1}, &progress)
+			rs := collStartServer(t, func(ctx context.Context, a collAddr) error {
+				return ServeReplay(ctx, config.ReplayServerConfig{Port: a.Port, Listen: a.Listen, InputFile: rec, Speed: "4", Loops: 1}, a.Progress(&progress))
 			})
 			rc := rs.client(t)
 			recorded := map[uint16]bool{}

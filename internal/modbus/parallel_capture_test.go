@@ -232,8 +232,8 @@ func TestParallelCapture_concurrentRecordings(t *testing.T) {
 // loop each client's register 100 never goes back.
 func TestParallelCapture_replayClients(t *testing.T) {
 	path := chaosReplayCapture(t)
-	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		return ServeReplay(ctx, config.ReplayServerConfig{Port: port, InputFile: path, Speed: "2", Loops: 1, MaxClients: 20}, nil)
+	srv := collStartServer(t, func(ctx context.Context, a collAddr) error {
+		return ServeReplay(ctx, config.ReplayServerConfig{Port: a.Port, Listen: a.Listen, InputFile: path, Speed: "2", Loops: 1, MaxClients: 20}, a.Progress(nil))
 	})
 	var wg sync.WaitGroup
 	for w := 0; w < 16; w++ {

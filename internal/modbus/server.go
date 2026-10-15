@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -429,7 +430,9 @@ func describeDevices(w io.Writer, devices map[uint8]*replay.Device) {
 
 // ServerConfig configures the Modbus TCP listener.
 type ServerConfig struct {
-	Port uint16
+	// Listen is the address to listen on; empty is every interface.
+	Listen string
+	Port   uint16
 	// MaxClients limits concurrent client connections; 0 is the go-modbus
 	// default (10).
 	MaxClients uint16
@@ -458,8 +461,12 @@ func newModbusServer(ctx context.Context, handler modbus.RequestHandler, metrics
 	if cfg.Debug {
 		logger = modbus.NewStdLogger(nil)
 	}
+	host := cfg.Listen
+	if host == "" {
+		host = "0.0.0.0"
+	}
 	server, err := modbus.NewServer(&modbus.ServerConfig{
-		URL:        fmt.Sprintf("tcp://0.0.0.0:%d", cfg.Port),
+		URL:        "tcp://" + net.JoinHostPort(host, strconv.Itoa(int(cfg.Port))),
 		Timeout:    0,
 		MaxClients: uint(cfg.MaxClients),
 		Logger:     logger,
@@ -468,9 +475,14 @@ func newModbusServer(ctx context.Context, handler modbus.RequestHandler, metrics
 	if err != nil {
 		return errs.New(errs.KindTransport, errs.CodeTransportConnectFailed, "failed to start modbus server: "+err.Error(), err)
 	}
-	_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on port %d\n", cfg.Port)
 	if err := server.Start(); err != nil {
 		return errs.New(errs.KindTransport, errs.CodeTransportConnectFailed, "modbus server failed: "+err.Error(), err)
+	}
+	// Printed once the listener is bound: from here on clients reach this server.
+	if cfg.Listen == "" {
+		_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on port %d\n", cfg.Port)
+	} else {
+		_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on %s port %d\n", cfg.Listen, cfg.Port)
 	}
 	// Block until context canceled (e.g. SIGINT/SIGTERM via root Execute).
 	<-ctx.Done()
@@ -512,7 +524,7 @@ func ServeStatic(ctx context.Context, cfg config.StaticServerConfig, progress io
 	_, _ = fmt.Fprintf(progress, "✅ Static server ready on port %d with %s of %s\n", cfg.Port, when, cfg.InputFile)
 	describeDevices(progress, devices)
 	h := &captureHandler{devices: devices, now: func() capture.Ticks { return t }, missing: missing}
-	return serve(ctx, h, ServerConfig{Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
+	return serve(ctx, h, ServerConfig{Listen: cfg.Listen, Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
 }
 
 // ServeReplay replays a capture: the served values follow the recorded ones
@@ -557,5 +569,5 @@ func ServeReplay(ctx context.Context, cfg config.ReplayServerConfig, progress io
 	describeDevices(progress, devices)
 	start := time.Now()
 	h := &captureHandler{devices: devices, now: func() capture.Ticks { return clock.At(time.Since(start)) }, missing: missing}
-	return serve(ctx, h, ServerConfig{Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
+	return serve(ctx, h, ServerConfig{Listen: cfg.Listen, Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
 }

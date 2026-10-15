@@ -212,8 +212,8 @@ func TestChaosCapture_replayServerUnderAbuse(t *testing.T) {
 	path := chaosReplayCapture(t)
 	baseline := runtime.NumGoroutine()
 	var progress collSyncBuffer
-	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		return ServeReplay(ctx, config.ReplayServerConfig{Port: port, InputFile: path, Speed: "1"}, &progress)
+	srv := collStartServer(t, func(ctx context.Context, a collAddr) error {
+		return ServeReplay(ctx, config.ReplayServerConfig{Port: a.Port, Listen: a.Listen, InputFile: path, Speed: "1"}, a.Progress(&progress))
 	})
 	addr := fmt.Sprintf("127.0.0.1:%d", srv.port)
 

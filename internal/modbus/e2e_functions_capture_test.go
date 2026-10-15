@@ -91,11 +91,17 @@ func (d *e2eFunctionsDevice) HandleReadFIFOQueue(_ context.Context, req *gomodbu
 // e2eFunctionsServe serves h on a free TCP port with go-modbus and returns its URL.
 func e2eFunctionsServe(t *testing.T, h gomodbus.RequestHandler) string {
 	t.Helper()
-	url := fmt.Sprintf("tcp://127.0.0.1:%d", collFreePort(t))
-	srv, err := gomodbus.NewServer(&gomodbus.ServerConfig{URL: url, Logger: gomodbus.NopLogger()}, h)
-	require.NoError(t, err)
-	require.NoError(t, srv.Start())
-	t.Cleanup(func() { _ = srv.Stop() })
+	var url string
+	collListen(t, func(port uint16) error {
+		url = fmt.Sprintf("tcp://127.0.0.1:%d", port)
+		srv, err := gomodbus.NewServer(&gomodbus.ServerConfig{URL: url, Logger: gomodbus.NopLogger()}, h)
+		require.NoError(t, err)
+		if err := srv.Start(); err != nil {
+			return err
+		}
+		t.Cleanup(func() { _ = srv.Stop() })
+		return nil
+	})
 	return url
 }
 
@@ -248,8 +254,8 @@ func TestE2EFunctionsCapture_static(t *testing.T) {
 func TestE2EFunctionsCapture_replay(t *testing.T) {
 	const rounds, gap = 4, 50 * time.Millisecond
 	path, recorded := e2eFunctionsRecord(t, rounds, gap)
-	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		return ServeReplay(ctx, config.ReplayServerConfig{Port: port, InputFile: path, Speed: "1", Loops: 1}, nil)
+	srv := collStartServer(t, func(ctx context.Context, a collAddr) error {
+		return ServeReplay(ctx, config.ReplayServerConfig{Port: a.Port, Listen: a.Listen, InputFile: path, Speed: "1", Loops: 1}, a.Progress(nil))
 	})
 	var served e2eExchanges
 	c := e2eFunctionsClient(t, fmt.Sprintf("tcp://127.0.0.1:%d", srv.port), &served)
