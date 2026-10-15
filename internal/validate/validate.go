@@ -271,24 +271,6 @@ func CheckRecordConfig(cfg config.RecordConfig) error {
 	return validateFile(cfg.OutputFile, false)
 }
 
-func CheckConvertConfig(cfg *config.ConvertConfig) error {
-	if cfg == nil {
-		return fmt.Errorf("convert config is nil")
-	}
-	if err := validateFile(cfg.InputFile, true); err != nil {
-		return err
-	}
-	canon, err := canonicalConvertFormat(cfg.FormatType)
-	if err != nil {
-		return err
-	}
-	cfg.FormatType = canon
-	if strings.TrimSpace(cfg.OutputFile) != "" {
-		return validateFile(cfg.OutputFile, false)
-	}
-	return nil
-}
-
 func CheckDeviceProfileDecodeConfig(cfg config.DeviceProfileDecodeConfig) error {
 	if err := checkSelection(cfg.CaptureSelection); err != nil {
 		return err
@@ -331,23 +313,9 @@ func CheckStringsConfig(cfg config.StringsConfig) error {
 	return nil
 }
 
-func CheckVerifyConfig(cfg config.VerifyConfig) error {
-	return validateFile(cfg.InputFile, true)
-}
-
 func checkSelection(sel config.CaptureSelection) error {
 	if sel.Function > 4 {
 		return fmt.Errorf("invalid --function %d: use 1-4 (0 = the only one in the capture)", sel.Function)
-	}
-	return nil
-}
-
-func CheckInfoConfig(cfg config.InfoConfig) error {
-	if err := validateFile(cfg.InputFile, true); err != nil {
-		return err
-	}
-	if strings.TrimSpace(cfg.OutputFile) != "" {
-		return validateFile(cfg.OutputFile, false)
 	}
 	return nil
 }
@@ -572,18 +540,6 @@ func validateInclusiveScanRange(start, end uint16) error {
 		return fmt.Errorf("start address (%d) must be less than end address (%d)", start, end)
 	}
 	return nil
-}
-
-func canonicalConvertFormat(format string) (string, error) {
-	s := strings.ToLower(strings.TrimSpace(format))
-	switch s {
-	case "mbcap", "jsonl", "csv", "wide-csv":
-		return s, nil
-	case "json":
-		return "", fmt.Errorf("unsupported format: %q: modbusctl 3 writes MBCAP; use jsonl (one JSON object per line)", format)
-	default:
-		return "", fmt.Errorf("unsupported format: %q (expected mbcap, jsonl, csv or wide-csv)", format)
-	}
 }
 
 // CheckSunSpecDetectConfig validates SunSpec detect config (address, unit, regtype, bases).

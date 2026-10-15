@@ -274,13 +274,13 @@ func TestDiagnosticResult_table(t *testing.T) {
 }
 
 func TestRecordSummaryResult(t *testing.T) {
-	r := &types.RecordSummaryResult{Target: "tcp://h:502", BlocksRecorded: 12, Iterations: 4, McapOutputPath: "out.mcap"}
-	assert.Equal(t, "📦 Total recorded blocks: 12\n🔄 Total iterations: 4\n✅ Output written to out.mcap\n", text(t, r))
+	r := &types.RecordSummaryResult{Target: "tcp://h:502", BlocksRecorded: 12, Iterations: 4, CaptureOutputPath: "out.mbcap"}
+	assert.Equal(t, "📦 Total recorded blocks: 12\n🔄 Total iterations: 4\n✅ Output written to out.mbcap\n", text(t, r))
 	assert.Equal(t, [][]string{
 		{"target", "tcp://h:502"},
 		{"blocks_recorded", "12"},
 		{"iterations", "4"},
-		{"mcap_output_path", "out.mcap"},
+		{"capture_output_path", "out.mbcap"},
 	}, r.TableRows())
 }
 

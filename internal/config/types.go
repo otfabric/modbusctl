@@ -94,10 +94,10 @@ type PollConfig struct {
 type RecordConfig struct {
 	DeviceConfig
 	Timeout      uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in milliseconds per Modbus request and TCP dial cap (0 = 10000)" flag:"timeout"`
-	Function     uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code (3=holding, 4=input)" flag:"function"`
+	Function     uint8  `env:"MODBUSCTL_FUNCTION" desc:"Function code for address blocks without one: 1=coils, 2=discrete inputs, 3=holding, 4=input" flag:"function"`
 	Interval     uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between reads" flag:"interval"`
 	Duration     uint32 `env:"MODBUSCTL_DURATION" desc:"Total duration to record in milliseconds" flag:"duration"`
-	BlocksFile   string `env:"MODBUSCTL_BLOCKS_FILE" desc:"JSON file of address blocks [{start_address, register_count}, ...]" flag:"blocks-file"`
+	BlocksFile   string `env:"MODBUSCTL_BLOCKS_FILE" desc:"JSON recording plan: address blocks [{start_address, register_count}, ...] read with --function, and/or requests of any read function [{function, ...}] (see README)" flag:"blocks-file"`
 	OutputFile   string `env:"MODBUSCTL_OUTPUT" desc:"Output capture file (.mbcap) or directory" flag:"output"`
 	Exceptions   bool   `env:"MODBUSCTL_RECORD_EXCEPTIONS" desc:"Also record exception responses in the capture" flag:"record-exceptions"`
 	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
@@ -159,12 +159,6 @@ type ScanConfig struct {
 	NormalizedAlgo ScanAlgorithm `json:"-"`
 }
 
-type ConvertConfig struct {
-	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
-	FormatType string `env:"MODBUSCTL_FORMAT" desc:"Output encoding: mbcap, jsonl, csv (lossless) or wide-csv (view)" flag:"format"`
-	OutputFile string `env:"MODBUSCTL_OUTPUT" desc:"Output file (default: stdout)" flag:"output"`
-}
-
 // CaptureSelection picks the FC01-04 samples of one target and one function from a
 // capture, for the commands that work on register blocks.
 type CaptureSelection struct {
@@ -182,15 +176,6 @@ type StringsConfig struct {
 	CaptureSelection
 	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
 	OutputFile string `env:"MODBUSCTL_OUTPUT" desc:"Output file or directory" flag:"output"`
-}
-
-type InfoConfig struct {
-	InputFile  string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
-	OutputFile string `env:"MODBUSCTL_OUTPUT" desc:"Output file or directory" flag:"output"`
-}
-
-type VerifyConfig struct {
-	InputFile string `env:"MODBUSCTL_INPUT" desc:"Capture file (.mbcap, .mbcap.jsonl or .mbcap.csv)" flag:"input"`
 }
 
 type StaticServerConfig struct {

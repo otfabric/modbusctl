@@ -168,8 +168,8 @@ func TestCheckReadConfig_more(t *testing.T) {
 		{"vendor function", func(c *config.ReadConfig) { c.Function = 65 }, "unsupported function code: 65"},
 		{"zero count", func(c *config.ReadConfig) { c.RegisterCount = 0 }, "register count must be between 1 and 125"},
 		{"count too large", func(c *config.ReadConfig) { c.RegisterCount = 126 }, "register count must be between 1 and 125"},
-		{"output in missing directory", func(c *config.ReadConfig) { c.OutputFile = filepath.Join(t.TempDir(), "nope", "out.mcap") }, "output directory not accessible"},
-		{"output in existing directory", func(c *config.ReadConfig) { c.OutputFile = filepath.Join(t.TempDir(), "out.mcap") }, ""},
+		{"output in missing directory", func(c *config.ReadConfig) { c.OutputFile = filepath.Join(t.TempDir(), "nope", "out.mbcap") }, "output directory not accessible"},
+		{"output in existing directory", func(c *config.ReadConfig) { c.OutputFile = filepath.Join(t.TempDir(), "out.mbcap") }, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -372,9 +372,9 @@ func TestCheckScanConfig_more(t *testing.T) {
 		{name: "sunspec bad bases", mod: func(c *config.ScanConfig) { c.Algo = "sunspec"; c.SunSpecBases = "0,x" }, want: `sunspec bases: invalid base address "x"`, wantAlgo: config.ScanAlgoSunspec},
 		{name: "sunspec output in missing directory", mod: func(c *config.ScanConfig) {
 			c.Algo = "sunspec"
-			c.OutputFile = filepath.Join(t.TempDir(), "nope", "o.mcap")
+			c.OutputFile = filepath.Join(t.TempDir(), "nope", "o.mbcap")
 		}, want: "output directory not accessible", wantAlgo: config.ScanAlgoSunspec},
-		{name: "output in missing directory", mod: func(c *config.ScanConfig) { c.OutputFile = filepath.Join(t.TempDir(), "nope", "o.mcap") }, want: "output directory not accessible", wantAlgo: config.ScanAlgoSafe},
+		{name: "output in missing directory", mod: func(c *config.ScanConfig) { c.OutputFile = filepath.Join(t.TempDir(), "nope", "o.mbcap") }, want: "output directory not accessible", wantAlgo: config.ScanAlgoSafe},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -402,7 +402,7 @@ func TestCheckRecordConfig_more(t *testing.T) {
 		{"vendor function", func(c *config.RecordConfig) { c.Function = 65 }, "unsupported function code: 65"},
 		{"duration shorter than interval", func(c *config.RecordConfig) { c.Duration = 999 }, "duration (999) must be greater than or equal to interval (1000)"},
 		{"no blocks file", func(c *config.RecordConfig) { c.BlocksFile = " " }, "blocks file path is required (--blocks-file / MODBUSCTL_BLOCKS_FILE)"},
-		{"output in missing directory", func(c *config.RecordConfig) { c.OutputFile = filepath.Join(t.TempDir(), "nope", "o.mcap") }, "output directory not accessible"},
+		{"output in missing directory", func(c *config.RecordConfig) { c.OutputFile = filepath.Join(t.TempDir(), "nope", "o.mbcap") }, "output directory not accessible"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -468,7 +468,7 @@ func TestValidateDeviceProfileFile(t *testing.T) {
 }
 
 func TestCheckDeviceProfileDecodeConfig_more(t *testing.T) {
-	input := writeFile(t, "in.mcap", "x")
+	input := writeFile(t, "in.mbcap", "x")
 	profile := writeFile(t, "p.json", `{"protocolData":{"registers":[{"controlledPropertyId":"p","start":1,"size":1,"format":">h"}]}}`)
 	check(t, CheckDeviceProfileDecodeConfig(config.DeviceProfileDecodeConfig{InputFile: input, DeviceProfile: profile}), "")
 	check(t, CheckDeviceProfileDecodeConfig(config.DeviceProfileDecodeConfig{DeviceProfile: profile}), "file path is required")
@@ -478,7 +478,7 @@ func TestCheckDeviceProfileDecodeConfig_more(t *testing.T) {
 
 func TestValidateFile(t *testing.T) {
 	dir := t.TempDir()
-	file := writeFile(t, "in.mcap", "x")
+	file := writeFile(t, "in.mbcap", "x")
 
 	t.Run("must exist", func(t *testing.T) {
 		check(t, validateFile(file, true), "")
@@ -490,13 +490,13 @@ func TestValidateFile(t *testing.T) {
 	t.Run("output", func(t *testing.T) {
 		check(t, validateFile("", false), "")
 		check(t, validateFile("   ", false), "")
-		check(t, validateFile(filepath.Join(dir, "new.mcap"), false), "")
+		check(t, validateFile(filepath.Join(dir, "new.mbcap"), false), "")
 		check(t, validateFile(file, false), "")
 		check(t, validateFile(dir, false), "path cannot be a directory: "+dir)
 		check(t, validateFile(dir+"/", false), "")
 		check(t, validateFile(dir+`\/`, false), "")
 		check(t, validateFile(filepath.Join(dir, "missing")+"/", false), "output directory not accessible")
-		check(t, validateFile(filepath.Join(dir, "missing", "out.mcap"), false), "output directory not accessible")
+		check(t, validateFile(filepath.Join(dir, "missing", "out.mbcap"), false), "output directory not accessible")
 		check(t, validateFile("./", false), "")
 	})
 }
@@ -504,7 +504,7 @@ func TestValidateFile(t *testing.T) {
 // The input-file commands share one rule: the input must exist, the output is optional.
 func TestCheckInputFileConfigs(t *testing.T) {
 	dir := t.TempDir()
-	input := writeFile(t, "in.mcap", "x")
+	input := writeFile(t, "in.mbcap", "x")
 	badOut := filepath.Join(dir, "nope", "out")
 
 	checks := map[string]func(in, out string) error{
@@ -513,10 +513,6 @@ func TestCheckInputFileConfigs(t *testing.T) {
 		},
 		"strings": func(in, out string) error {
 			return CheckStringsConfig(config.StringsConfig{InputFile: in, OutputFile: out})
-		},
-		"info": func(in, out string) error { return CheckInfoConfig(config.InfoConfig{InputFile: in, OutputFile: out}) },
-		"convert": func(in, out string) error {
-			return CheckConvertConfig(&config.ConvertConfig{InputFile: in, OutputFile: out, FormatType: "csv"})
 		},
 	}
 	for name, fn := range checks {
@@ -531,24 +527,6 @@ func TestCheckInputFileConfigs(t *testing.T) {
 			check(t, fn(input, badOut), "output directory not accessible")
 		})
 	}
-}
-
-func TestCheckConvertConfig_format(t *testing.T) {
-	input := writeFile(t, "in.mcap", "x")
-	check(t, CheckConvertConfig(nil), "convert config is nil")
-
-	for in, want := range map[string]string{"csv": "csv", " JSONL ": "jsonl", "Mbcap": "mbcap", "wide-csv": "wide-csv"} {
-		cfg := &config.ConvertConfig{InputFile: input, FormatType: in}
-		require.NoError(t, CheckConvertConfig(cfg))
-		assert.Equal(t, want, cfg.FormatType)
-	}
-	for _, in := range []string{"", "xml", "csv,json"} {
-		cfg := &config.ConvertConfig{InputFile: input, FormatType: in}
-		assert.EqualError(t, CheckConvertConfig(cfg), `unsupported format: "`+in+`" (expected mbcap, jsonl, csv or wide-csv)`)
-		assert.Equal(t, in, cfg.FormatType, "a rejected format must be left untouched")
-	}
-	// The v2 json export is gone; say what replaces it.
-	assert.ErrorContains(t, CheckConvertConfig(&config.ConvertConfig{InputFile: input, FormatType: "json"}), "use jsonl")
 }
 
 func TestCheckDiagnosticConfig_more(t *testing.T) {
@@ -701,7 +679,7 @@ func TestValidateFile_parentIsRegularFile(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "plain")
 	require.NoError(t, os.WriteFile(file, []byte("x"), 0o600))
 
-	for _, path := range []string{filepath.Join(file, "out.mcap"), file + "/"} {
+	for _, path := range []string{filepath.Join(file, "out.mbcap"), file + "/"} {
 		err := validateFile(path, false)
 		require.Error(t, err, path)
 		assert.Contains(t, err.Error(), "output directory is not a directory: "+file)

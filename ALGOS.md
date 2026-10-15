@@ -362,7 +362,7 @@ Only **successful** reads are written to the capture file. The strategy decides 
 - Tail binary search: `tailLow`, `tailHigh`, `tailBest` (search for max count C such that read(blockEnd, C) succeeds). After tail search, the **confirmed readable region** is [blockStart, blockEnd + tailBest) (blockEnd is not updated during tail; tailBest is the largest successful count at blockEnd).
 - `done` — set when probeStart > end and we exit Probe.
 - **`hasGapProbe`** (bool) — true when a gap probe is pending (do not use address as sentinel: **address 0 is valid**). **`gapProbeAddr`** (uint16) — when hasGapProbe is true, the address to probe (task is (gapProbeAddr, 1)).
-- **`lastTaskWasGapProbe`** (bool) — true when the last task returned by Next() was the gap probe; OnResult must then **not** update probe/forward/backward/tail state (the gap probe is observation-only for the strategy; the executor still records success to MCAP).
+- **`lastTaskWasGapProbe`** (bool) — true when the last task returned by Next() was the gap probe; OnResult must then **not** update probe/forward/backward/tail state (the gap probe is observation-only for the strategy; the executor still records success to the capture).
 
 ### 6.4 Init
 
@@ -396,7 +396,7 @@ Only **successful** reads are written to the capture file. The strategy decides 
 
 ### 6.9 OnResult — Probe
 
-- If **lastTaskWasGapProbe** is true: clear lastTaskWasGapProbe and return (no state change; the gap probe result is recorded by the executor only). **Example:** After a block [100,225) and tailBest=0, probeStart=350; a gap probe (225,1) is emitted. If it succeeds, the executor writes that one register to MCAP, but the strategy does not update blockStart, blockEnd, or phase — the next Next() returns the normal 125-block at 350.
+- If **lastTaskWasGapProbe** is true: clear lastTaskWasGapProbe and return (no state change; the gap probe result is recorded by the executor only). **Example:** After a block [100,225) and tailBest=0, probeStart=350; a gap probe (225,1) is emitted. If it succeeds, the executor writes that one register to the capture, but the strategy does not update blockStart, blockEnd, or phase — the next Next() returns the normal 125-block at 350.
 - If **success**:
   - If `hadProbeFailure`: set `phase = Backward`, `originalBlockStart = probeStart`, `blockEnd = probeStart + task.Count`. Set `backwardLow = 1`, `backwardHigh = min(125, originalBlockStart - start)`, `backwardBest = 0`.
   - Else: set `phase = Forward`, `blockStart = probeStart`, `blockEnd = probeStart + task.Count`.
@@ -430,7 +430,7 @@ Only **successful** reads are written to the capture file. The strategy decides 
 ### 6.15 Example
 
 - start=0, end=400. Probe (0,125) fail, (125,125) fail, (250,125) success. hadProbeFailure=true → Backward. originalBlockStart=250, blockEnd=375. backwardLow=1, backwardHigh=min(125,250)=125. Mid=63, try (187,63); success → backwardBest=63, backwardLow=64. Mid=95, try (155,95); fail → backwardHigh=94. … Eventually blockStart=250−best, blockEnd=375, phase=Forward. Try (375,125); fail → Tail. Binary search for max count at 375 in [1, 25] (since end=400). Then probeStart = 375+tailBest or 500, phase=Probe, continue.
-- **Gap-probe path:** Suppose block [100,225), tail search yields tailBest=10 (so only 10 registers readable at blockEnd=225). Then probeStart = 225+10 = 235. Since 235 > 225+1, a **gap probe** is pending at 225. Next() returns (225,1); the executor runs it and, if successful, writes that one register to MCAP. OnResult(Probe) sees lastTaskWasGapProbe and returns without changing state. Next() then returns the normal 125-block at 235.
+- **Gap-probe path:** Suppose block [100,225), tail search yields tailBest=10 (so only 10 registers readable at blockEnd=225). Then probeStart = 225+10 = 235. Since 235 > 225+1, a **gap probe** is pending at 225. Next() returns (225,1); the executor runs it and, if successful, writes that one register to the capture. OnResult(Probe) sees lastTaskWasGapProbe and returns without changing state. Next() then returns the normal 125-block at 235.
 
 ---
 
@@ -532,7 +532,7 @@ SunSpec protocol-aware scan. Detects the SunSpec base address, then walks the mo
 
 ### 8.6 Executor compatibility
 
-The executor works unchanged. Header tasks are `{Start, Count: 2}` (4 bytes); body tasks are `{Start, Count: min(125, remaining)}`. On success the executor records each payload in MCAP — the result is a complete capture of the SunS marker, all model headers, and all model register data. The `--delay` and `--retry-timeout` flags apply between tasks as usual. The scan banner prints `SunSpec discovery with function code N (algo: sunspec)` instead of the generic address range message.
+The executor works unchanged. Header tasks are `{Start, Count: 2}` (4 bytes); body tasks are `{Start, Count: min(125, remaining)}`. On success the executor records each payload in the capture — the result is a complete capture of the SunS marker, all model headers, and all model register data. The `--delay` and `--retry-timeout` flags apply between tasks as usual. The scan banner prints `SunSpec discovery with function code N (algo: sunspec)` instead of the generic address range message.
 
 ### 8.7 Worst-case
 
@@ -573,7 +573,7 @@ With `rangeLen = EndAddress − StartAddress + 1`, `initialChunks = ceil(rangeLe
 - **stepped** — Range is huge; cheap first pass; triage many devices. Not a final mapper.
 - **linear** — Suspect long contiguous maps; PLC-style devices; speed over fragmentation tolerance.
 - **boundary** — You have one known-good (start, count); you want the maximal readable interval around it. Use `--seed-start` and `--seed-count`.
-- **sunspec** — SunSpec-compliant device (inverters, meters, energy). Protocol-aware detection + model-chain walk; captures headers to MCAP. No `--start`/`--end` needed.
+- **sunspec** — SunSpec-compliant device (inverters, meters, energy). Protocol-aware detection + model-chain walk; captures headers to the capture file. No `--start`/`--end` needed.
 
 ---
 

@@ -7,18 +7,37 @@
 
 ### Summary
 
-Minor release: **`server static`** and **`server replay`** now answer every read function of the Modbus specification that a capture can hold: FC08, FC17, FC20 and FC24 join FC01–04, FC07, FC11, FC12 and FC43 device identification. Vendor and unknown function codes are not supported: they are not recorded, a capture holding them is refused, and the servers answer them with Illegal Function. Adopts **go-modbus v1.7.0**. No changes to flags or JSON output.
+Minor release: modbusctl records and replays **every read function of the Modbus specification**: FC01–04, FC07, FC08 (sub-functions that return data), FC11, FC12, FC17, FC20, FC24 and FC43 Read Device Identification. **`client record`** takes them in its plan file, and **`server static`** and **`server replay`** answer them from the capture. Vendor and unknown function codes are not supported anywhere. The **`mcap`** command group is renamed **`capture`**. Its `info`, `verify` and `convert` commands are removed in favour of [`mbcapctl`](https://github.com/otfabric/go-modbus-capture/blob/main/docs/cli.md) of go-modbus-capture. Adopts **go-modbus v1.7.0**.
+
+### Breaking changes (scripts)
+
+- **`modbusctl mcap …` is now `modbusctl capture …`**, with `decode`, `extract`, `strings` and `frequencies`.
+- **`mcap info`, `mcap verify` and `mcap convert` are removed.** Use `mbcapctl info`, `mbcapctl verify` and `mbcapctl convert IN OUT` (encoding from the file name; `--format wide-csv` for the wide view). Install with `go install github.com/otfabric/go-modbus-capture/cmd/mbcapctl@latest`. **`MODBUSCTL_FORMAT`** is no longer read.
+- **JSON output:** `mcap_output_path` in the summaries of `client read`, `scan` and `record` is now **`capture_output_path`**.
+- **Error codes:** `mcap_load_failed` is now **`capture_load_failed`** and `mcap_write_failed` is now **`capture_write_failed`**; exit codes are unchanged.
+- **Docker:** the image volume is **`/captures`** (was `/mcap`); `docker-compose.yml` mounts it there and names `.mbcap` files.
 
 ### Added
 
-- **FC08, FC17, FC20 and FC24 are served:** FC08 Diagnostics (sub-functions that return data: Return Query Data, Return Diagnostic Register and the counters 0x0B–0x12), FC17 Report Server ID, FC20 Read File Record and FC24 Read FIFO Queue are answered with the data of the response recorded for exactly that request. A request the capture does not hold is answered according to `--missing`, as for the other functions.
-- **Error code `capture_unsupported_function`** (exit 3): a capture file holding a sample outside the supported read functions (a vendor or unknown function code, an FC08 sub-function that changes device state, an FC43 MEI type other than device identification) is refused when loaded.
+- **Recording every spec read function:** a `--blocks-file` entry may name a `function`. FC01–04 blocks work as before (entries without `function` use `--function`). FC07, FC11, FC12 and FC17 take no fields. FC08 takes `sub_function` (0x00, 0x02 or 0x0B–0x12) and `data`. FC20 takes `file_records`, FC24 `fifo_address`, and FC43 `device_id_code` and `object_id`. Each request is retried like a read (busy device, dropped connection); a failed or retried attempt leaves no sample.
+- **Serving FC08, FC17, FC20 and FC24:** both servers answer them with the data of the response recorded for exactly that request, as they already did for FC07, FC11 and FC12. FC08 sub-functions that change device state are answered with Illegal Function.
+- **`--listen`** on both servers (`MODBUSCTL_LISTEN`): the address to listen on, for example `127.0.0.1`; the default is every interface, as before. The `🚀 Serving Modbus TCP …` line is now printed once the listener is bound.
+- **Error code `capture_unsupported_function`** (exit 3): a capture file holding a sample outside the supported reads is refused when loaded.
 
 ### Changed
 
-- **Function codes outside the supported reads** (vendor and unknown ones, FC08 sub-functions that change device state, and FC21, FC22 and FC23 writes) are answered with Illegal Function by both servers.
-- **Recording** refuses to write a sample outside the supported reads. `client read`, `scan` and `record` already accept only FC01–04 for `--function`.
+- **Unsupported functions:** a plan entry with any other function code, or an FC08 sub-function that changes device state, is refused before anything is sent. The recorder never writes such a sample. Both servers answer such requests, and the writes FC21, FC22 and FC23, with Illegal Function.
+- **Shorter 2.x message:** a modbusctl 2.x capture file (`.mcap`) is still refused (`capture_legacy_format`), with a shorter message.
 - **go-modbus:** Requires **`github.com/otfabric/go-modbus` v1.7.0** (was v1.6.1).
+
+### Fixed
+
+- **`client record` examples** gave `--interval` and `--duration` in seconds; both are milliseconds.
+- **Flaky server tests:** tests picked a free port, released it and then started a server listening on every interface. Under load another socket could take the port in between. The bind then failed, or (on macOS) succeeded next to another test's loopback listener, and the test talked to the wrong device. Test servers now listen on `127.0.0.1` with `--listen`, wait for the server to report its bound listener, and choose another port only when the bind fails with "address already in use".
+
+### Tests
+
+- Record → file → replay round trips for every supported function. The sources are a go-modbus v1.7.0 server and the in-memory test device over TCP, RTU over TCP and UDP. Each file is checked with `mbcapctl verify` and converted to JSON Lines and CSV with `mbcapctl convert`. The static and replay servers answer byte for byte. There are chaos variants (busy, dropped, closed, truncated and late answers) and parallel variants (several recordings and many clients at once).
 
 ## v3.0.0
 

@@ -1,4 +1,4 @@
-package mcap
+package capture
 
 import (
 	"github.com/otfabric/modbusctl/internal/capfile"
@@ -15,13 +15,13 @@ var stringsCmd = &cobra.Command{
 	Short: "Extract ASCII strings from capture file",
 	Example: `
   # Extract strings from a capture file and print to stdout
-  modbusctl mcap strings --input file.mbcap
+  modbusctl capture strings --input file.mbcap
 
   # Extract strings and write output to a file
-  modbusctl mcap strings --input file.mbcap --output strings.txt
+  modbusctl capture strings --input file.mbcap --output strings.txt
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_INPUT=file.mbcap MODBUSCTL_OUTPUT=strings.txt modbusctl mcap strings
+  MODBUSCTL_INPUT=file.mbcap MODBUSCTL_OUTPUT=strings.txt modbusctl capture strings
 `,
 }
 
@@ -33,7 +33,7 @@ func init() {
 	config.MustLoadFromEnv(&cfg)
 	config.RegisterFlags(stringsCmd, &cfg)
 	cli.MustMarkFlagRequired(stringsCmd, "input")
-	McapCmd.AddCommand(stringsCmd)
+	CaptureCmd.AddCommand(stringsCmd)
 
 	stringsCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if err := validate.CheckStringsConfig(cfg); err != nil {

@@ -8,14 +8,14 @@ import (
 func TestReadResult_textAndTable(t *testing.T) {
 	t.Parallel()
 	r := &ReadResult{
-		Target:         "t",
-		UnitID:         1,
-		Function:       3,
-		StartAddress:   40001,
-		RegisterCount:  2,
-		RawByteCount:   4,
-		RawDataHex:     "AA BB CC DD",
-		McapOutputPath: "/tmp/x.mcap",
+		Target:            "t",
+		UnitID:            1,
+		Function:          3,
+		StartAddress:      40001,
+		RegisterCount:     2,
+		RawByteCount:      4,
+		RawDataHex:        "AA BB CC DD",
+		CaptureOutputPath: "/tmp/x.mbcap",
 	}
 	s, err := r.MarshalTextOutput()
 	if err != nil || !strings.Contains(s, "Read 4 bytes") || !strings.Contains(s, "AA BB CC DD") {
@@ -54,7 +54,7 @@ func TestScanSummaryResult_textAndTable(t *testing.T) {
 		RegistersCaptured:   30,
 		AvgResponseMs:       12,
 		Duration:            "1s",
-		McapOutputPath:      "/o.mcap",
+		CaptureOutputPath:   "/o.mbcap",
 	}
 	s, err := r.MarshalTextOutput()
 	if err != nil || !strings.Contains(s, "Exceptions:") {
@@ -113,7 +113,7 @@ func TestDiagnosticResult_textAndTable(t *testing.T) {
 func TestRecordSummaryResult_textAndTable(t *testing.T) {
 	t.Parallel()
 	r := &RecordSummaryResult{
-		Target: "t", BlocksRecorded: 3, Iterations: 2, McapOutputPath: "/r.mcap",
+		Target: "t", BlocksRecorded: 3, Iterations: 2, CaptureOutputPath: "/r.mbcap",
 	}
 	s, err := r.MarshalTextOutput()
 	if err != nil || !strings.Contains(s, "blocks") {

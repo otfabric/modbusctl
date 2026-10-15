@@ -193,7 +193,7 @@ func (l *deviceLink) commit(tok uint64, err error) error {
 		return nil
 	}
 	if cerr := l.rec.Commit(tok, l.stream, err); cerr != nil {
-		return errs.Output(errs.CodeMcapWriteFailed, cerr)
+		return errs.Output(errs.CodeCaptureWriteFailed, cerr)
 	}
 	return nil
 }
@@ -484,7 +484,7 @@ func CollectRead(ctx context.Context, cfg config.ReadConfig, progress io.Writer)
 		return nil, err
 	}
 	defer link.Close()
-	rec, err := startCapture(readCaptureMcapPath(cfg), modbusURL, cfg.DeviceConfig, false,
+	rec, err := startCapture(readCapturePath(cfg), modbusURL, cfg.DeviceConfig, false,
 		capture.Stream{ID: 1, Target: 1, Role: capture.RoleSnapshot, Label: fmt.Sprintf("read FC%d %d x%d", cfg.Function, cfg.StartAddress, cfg.RegisterCount)})
 	if err != nil {
 		return nil, err
@@ -508,11 +508,11 @@ func startCapture(path, modbusURL string, dev config.DeviceConfig, exceptions bo
 	}
 	if err := rec.AddTarget(capfile.TargetFor(1, modbusURL, dev.Unit, dev.SerialConfig, "")); err != nil {
 		_ = rec.Close()
-		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
+		return nil, errs.Output(errs.CodeCaptureWriteFailed, err)
 	}
 	if err := rec.AddStream(stream); err != nil {
 		_ = rec.Close()
-		return nil, errs.Output(errs.CodeMcapWriteFailed, err)
+		return nil, errs.Output(errs.CodeCaptureWriteFailed, err)
 	}
 	return rec, nil
 }
@@ -521,7 +521,7 @@ func startCapture(path, modbusURL string, dev config.DeviceConfig, exceptions bo
 // *errp unless an earlier error is already there.
 func finishCapture(rec *capfile.Recorder, errp *error) {
 	if cerr := rec.Close(); cerr != nil && *errp == nil {
-		*errp = errs.Output(errs.CodeMcapWriteFailed, cerr)
+		*errp = errs.Output(errs.CodeCaptureWriteFailed, cerr)
 	}
 }
 
@@ -540,7 +540,7 @@ func ScanAndRecord(ctx context.Context, cfg config.ScanConfig, progress io.Write
 		if dir == "" {
 			dir = "./"
 		}
-		out = AutoCaptureMcapPath(dir, "scan")
+		out = AutoCapturePath(dir, "scan")
 	}
 	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, 1)
 	if err != nil {
@@ -586,7 +586,7 @@ func ScanAndRecord(ctx context.Context, cfg config.ScanConfig, progress io.Write
 			_, _ = fmt.Fprintf(progress, "DEBUG [exec] next task: start=%d count=%d end=%d\n", task.Start, task.Count, end)
 		}
 		result := executeReadTask(ctx, link, cfg, task, progress)
-		if e, ok := errs.As(result.Err); ok && e.Code == errs.CodeMcapWriteFailed {
+		if e, ok := errs.As(result.Err); ok && e.Code == errs.CodeCaptureWriteFailed {
 			return nil, result.Err
 		}
 		// Milestone B: retry once on timeout/transport if configured
@@ -662,7 +662,7 @@ func ScanAndRecord(ctx context.Context, cfg config.ScanConfig, progress io.Write
 		BlocksCaptured:      stats.BlocksCaptured,
 		RegistersCaptured:   stats.RegistersCaptured,
 		Duration:            durStr,
-		McapOutputPath:      out,
+		CaptureOutputPath:   out,
 	}
 	if stats.SuccessCount > 0 {
 		summary.AvgResponseMs = (stats.ResponseTimeNanos / int64(stats.SuccessCount)) / 1e6
@@ -699,7 +699,7 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 		if dir == "" {
 			dir = "./"
 		}
-		out = AutoCaptureMcapPath(dir, "record")
+		out = AutoCapturePath(dir, "record")
 	}
 	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, 1)
 	if err != nil {
@@ -726,7 +726,7 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 		for k := range reqs {
 			r := &reqs[k]
 			if err := sendPlanRequest(ctx, link, cfg.Unit, r, 5, progress); err != nil {
-				if e, ok := errs.As(err); ok && e.Code == errs.CodeMcapWriteFailed || ctx.Err() != nil {
+				if e, ok := errs.As(err); ok && e.Code == errs.CodeCaptureWriteFailed || ctx.Err() != nil {
 					return nil, err
 				}
 				if r.Function <= 4 {
@@ -752,10 +752,10 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 	}
 
 	return &types.RecordSummaryResult{
-		Target:         modbusURL,
-		BlocksRecorded: blockCount,
-		Iterations:     i,
-		McapOutputPath: rec.Path(),
+		Target:            modbusURL,
+		BlocksRecorded:    blockCount,
+		Iterations:        i,
+		CaptureOutputPath: rec.Path(),
 	}, nil
 }
 

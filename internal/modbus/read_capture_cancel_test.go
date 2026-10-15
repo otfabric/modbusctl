@@ -16,7 +16,7 @@ func TestCollectRead_rejectedWhenContextPreCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	tmp, err := os.CreateTemp("", "read_cancel_*.mcap")
+	tmp, err := os.CreateTemp("", "read_cancel_*.mbcap")
 	if err != nil {
 		t.Fatal(err)
 	}

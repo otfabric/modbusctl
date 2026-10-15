@@ -8,9 +8,9 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/otfabric/modbusctl/cmd/capture"
 	"github.com/otfabric/modbusctl/cmd/client"
 	"github.com/otfabric/modbusctl/cmd/discover"
-	"github.com/otfabric/modbusctl/cmd/mcap"
 	"github.com/otfabric/modbusctl/cmd/server"
 	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/runner"
@@ -45,7 +45,7 @@ func init() {
 	rootCmd.SilenceErrors = true
 	rootCmd.AddCommand(client.ClientCmd)
 	rootCmd.AddCommand(discover.DiscoverCmd)
-	rootCmd.AddCommand(mcap.McapCmd)
+	rootCmd.AddCommand(capture.CaptureCmd)
 	rootCmd.AddCommand(server.ServerCmd)
 	rootCmd.AddCommand(versionCmd)
 }

@@ -1,4 +1,4 @@
-package mcap
+package capture
 
 import (
 	"github.com/otfabric/modbusctl/internal/capfile"
@@ -15,13 +15,13 @@ var freqCmd = &cobra.Command{
 	Short: "Heuristically detect frequency values in capture file",
 	Example: `
   # Scan for potential frequency values in a capture file and print to stdout
-  modbusctl mcap frequencies --input file.mbcap
+  modbusctl capture frequencies --input file.mbcap
 
   # Write detected frequencies to a file
-  modbusctl mcap frequencies --input file.mbcap --output freq.txt
+  modbusctl capture frequencies --input file.mbcap --output freq.txt
 
   # Use environment variables
-  MODBUSCTL_INPUT=file.mbcap MODBUSCTL_OUTPUT=freq.txt modbusctl mcap frequencies
+  MODBUSCTL_INPUT=file.mbcap MODBUSCTL_OUTPUT=freq.txt modbusctl capture frequencies
 `,
 }
 
@@ -33,7 +33,7 @@ func init() {
 	config.MustLoadFromEnv(&cfg)
 	config.RegisterFlags(freqCmd, &cfg)
 	cli.MustMarkFlagRequired(freqCmd, "input")
-	McapCmd.AddCommand(freqCmd)
+	CaptureCmd.AddCommand(freqCmd)
 
 	freqCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if err := validate.CheckStringsConfig(cfg); err != nil {

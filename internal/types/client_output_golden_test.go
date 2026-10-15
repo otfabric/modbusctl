@@ -124,11 +124,11 @@ func TestReportServerIDResult_jsonStructure(t *testing.T) {
 
 func TestScanSummaryResult_jsonStructure(t *testing.T) {
 	res := &types.ScanSummaryResult{
-		Target:         "tcp://h:502",
-		Algo:           "safe",
-		TotalRequests:  10,
-		Duration:       "1s",
-		McapOutputPath: "/tmp/x.mcap",
+		Target:            "tcp://h:502",
+		Algo:              "safe",
+		TotalRequests:     10,
+		Duration:          "1s",
+		CaptureOutputPath: "/tmp/x.mbcap",
 	}
 	var buf bytes.Buffer
 	if err := format.Write(&buf, format.FormatJSON, res); err != nil {
@@ -138,7 +138,7 @@ func TestScanSummaryResult_jsonStructure(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"target", "algo", "total_requests", "duration", "mcap_output_path"} {
+	for _, key := range []string{"target", "algo", "total_requests", "duration", "capture_output_path"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("missing json key %q", key)
 		}
@@ -147,10 +147,10 @@ func TestScanSummaryResult_jsonStructure(t *testing.T) {
 
 func TestRecordSummaryResult_jsonStructure(t *testing.T) {
 	res := &types.RecordSummaryResult{
-		Target:         "tcp://h:502",
-		BlocksRecorded: 3,
-		Iterations:     2,
-		McapOutputPath: "/tmp/r.mcap",
+		Target:            "tcp://h:502",
+		BlocksRecorded:    3,
+		Iterations:        2,
+		CaptureOutputPath: "/tmp/r.mbcap",
 	}
 	var buf bytes.Buffer
 	if err := format.Write(&buf, format.FormatJSON, res); err != nil {
@@ -160,7 +160,7 @@ func TestRecordSummaryResult_jsonStructure(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"target", "blocks_recorded", "iterations", "mcap_output_path"} {
+	for _, key := range []string{"target", "blocks_recorded", "iterations", "capture_output_path"} {
 		if _, ok := m[key]; !ok {
 			t.Errorf("missing json key %q", key)
 		}

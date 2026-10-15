@@ -97,21 +97,6 @@ func TestRegisterRegtypeCompletion(t *testing.T) {
 	}
 }
 
-func TestRegisterConvertFormatCompletion(t *testing.T) {
-	t.Parallel()
-	cmd := &cobra.Command{}
-	cmd.Flags().String("format", "", "")
-	RegisterConvertFormatCompletion(cmd)
-	fn, ok := cmd.GetFlagCompletionFunc("format")
-	if !ok {
-		t.Fatal("missing")
-	}
-	out, _ := fn(cmd, nil, "c")
-	if len(out) != 1 || !strings.HasPrefix(out[0], "csv") {
-		t.Fatalf("got %v", out)
-	}
-}
-
 func TestDiagnosticSubFunctions_ParseDiagnosticSubFunction(t *testing.T) {
 	t.Parallel()
 	names := DiagnosticSubFunctions()

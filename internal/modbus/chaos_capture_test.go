@@ -23,12 +23,13 @@ import (
 
 	gomodbus "github.com/otfabric/go-modbus"
 	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/go-modbus-capture/jsonl"
+	"github.com/otfabric/modbusctl/internal/analysis"
 	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/capfile/capfiletest"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/mbtest"
-	"github.com/otfabric/modbusctl/internal/mcap"
 	"github.com/otfabric/modbusctl/internal/replay"
 	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/stretchr/testify/require"
@@ -293,7 +294,10 @@ func TestChaosCapture_damagedFiles(t *testing.T) {
 	good, err := os.ReadFile(rec)
 	require.NoError(t, err)
 	var jl bytes.Buffer
-	require.NoError(t, mcap.Convert(&jl, rec, "jsonl"))
+	l := capfiletest.Load(t, rec)
+	jw, err := jsonl.NewWriter(&jl, l.Header)
+	require.NoError(t, err)
+	require.NoError(t, l.WriteTo(jw))
 
 	rng := rand.New(rand.NewSource(42))
 	dir := t.TempDir()
@@ -336,11 +340,7 @@ func TestChaosCapture_damagedFiles(t *testing.T) {
 			}
 		}
 		for _, f := range []func() error{
-			func() error { return mcap.ExportInfo(&bytes.Buffer{}, path) },
-			func() error { return mcap.Verify(&bytes.Buffer{}, path) },
-			func() error { return mcap.Convert(&bytes.Buffer{}, path, "csv") },
-			func() error { return mcap.Convert(&bytes.Buffer{}, path, "wide-csv") },
-			func() error { return mcap.ExportAddressBlocks(&bytes.Buffer{}, path, config.CaptureSelection{}) },
+			func() error { return analysis.ExportAddressBlocks(&bytes.Buffer{}, path, config.CaptureSelection{}) },
 		} {
 			if err := f(); err != nil {
 				_, typed := errs.As(capfile.WrapError(err))

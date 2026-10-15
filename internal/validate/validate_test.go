@@ -247,34 +247,8 @@ func TestCheckRecordConfig(t *testing.T) {
 	assert.Error(t, CheckRecordConfig(invalidCfg))
 }
 
-func TestCheckConvertConfig(t *testing.T) {
-	inputTmp, err := os.CreateTemp("", "input_*.mcap")
-	assert.NoError(t, err)
-	defer func() { _ = os.Remove(inputTmp.Name()) }()
-
-	outputTmp, err := os.CreateTemp("", "output_*.json")
-	assert.NoError(t, err)
-	defer func() { _ = os.Remove(outputTmp.Name()) }()
-
-	validCfg := config.ConvertConfig{
-		InputFile:  inputTmp.Name(),
-		FormatType: "jsonl",
-		OutputFile: outputTmp.Name(),
-	}
-	assert.NoError(t, CheckConvertConfig(&validCfg))
-
-	upper := validCfg
-	upper.FormatType = "CSV"
-	assert.NoError(t, CheckConvertConfig(&upper))
-	assert.Equal(t, "csv", upper.FormatType)
-
-	invalidCfg := validCfg
-	invalidCfg.FormatType = "unsupported"
-	assert.Error(t, CheckConvertConfig(&invalidCfg))
-}
-
 func TestCheckExtractConfig(t *testing.T) {
-	inputTmp, err := os.CreateTemp("", "valid_input_*.mcap")
+	inputTmp, err := os.CreateTemp("", "valid_input_*.mbcap")
 	assert.NoError(t, err)
 	defer func() { _ = os.Remove(inputTmp.Name()) }()
 
@@ -294,7 +268,7 @@ func TestCheckExtractConfig(t *testing.T) {
 }
 
 func TestCheckDeviceProfileDecodeConfig(t *testing.T) {
-	inputTmp, err := os.CreateTemp("", "valid_input_*.mcap")
+	inputTmp, err := os.CreateTemp("", "valid_input_*.mbcap")
 	assert.NoError(t, err)
 	defer func() { _ = os.Remove(inputTmp.Name()) }()
 

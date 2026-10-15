@@ -18,6 +18,6 @@ ARG TARGETPLATFORM
 COPY --from=builder /app/bin/modbusctl /bin/modbusctl
 COPY --from=builder /usr/bin/healthcheck /bin/healthcheck
 
-VOLUME ["/mcap"]
+VOLUME ["/captures"]
 
 ENTRYPOINT ["/bin/modbusctl", "server"]

@@ -74,7 +74,7 @@ func TestMain_exitCodes(t *testing.T) {
 	d.Identification = map[uint8]string{0: "Acme", 1: "P1", 2: "1.0"}
 	d.Units = []uint8{1}
 	url := "tcp://" + d.ServeTCP(t)
-	out := filepath.Join(t.TempDir(), "read.mcap")
+	out := filepath.Join(t.TempDir(), "read.mbcap")
 
 	// 0: success.
 	code, stdout, stderr := runMain(t, "client", "read", "--url", url, "--start", "100", "--count", "2", "--output", out, "--format", "json")

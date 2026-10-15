@@ -1,4 +1,4 @@
-package mcap
+package analysis
 
 import (
 	"bytes"
@@ -69,55 +69,12 @@ func TestLoadRecords_selection(t *testing.T) {
 }
 
 func TestLoadRecords_legacyAndBadFiles(t *testing.T) {
-	_, _, err := LoadRecords(writeBytes(t, "old.mcap", []byte("MCAP\x01\x00\x02{}")), config.CaptureSelection{})
-	require.ErrorIs(t, err, capfile.ErrLegacyMCAP)
+	_, _, err := LoadRecords(writeBytes(t, "old.mbcap", []byte("MCAP\x01\x00\x02{}")), config.CaptureSelection{})
+	require.ErrorIs(t, err, capfile.ErrLegacyFormat)
 	_, _, err = LoadRecords(writeBytes(t, "x.txt", []byte("hello")), config.CaptureSelection{})
 	require.ErrorIs(t, err, capture.ErrCorrupt)
 	_, _, err = LoadRecords(filepath.Join(t.TempDir(), "missing.mbcap"), config.CaptureSelection{})
 	require.ErrorIs(t, err, os.ErrNotExist)
-}
-
-func TestExportInfo(t *testing.T) {
-	var buf bytes.Buffer
-	require.NoError(t, ExportInfo(&buf, twoTargets(t)))
-	out := buf.String()
-	for _, want := range []string{
-		"(mbcap)", "Producer:  test", "Start:     2026-10-14T12:00:00Z", "Tick:      1µs", "Mode:      full capture",
-		"End:       2s", "Samples:   3 (0 exception responses)", "Functions: FC03 x2, FC04 x1",
-		`1  "A"  unknown  unit 1`, `1  target 1  poll  -  2 samples, 0s to 1s, every 1s`,
-	} {
-		assert.Contains(t, out, want)
-	}
-}
-
-func TestConvertAndVerify(t *testing.T) {
-	src := twoTargets(t)
-	want := capfiletest.Load(t, src).Capture
-	dir := t.TempDir()
-	prev := src
-	for _, f := range []string{"jsonl", "csv", "mbcap"} {
-		out := filepath.Join(dir, "c."+f)
-		file, err := os.Create(out)
-		require.NoError(t, err)
-		require.NoError(t, Convert(file, prev, f))
-		require.NoError(t, file.Close())
-		got := capfiletest.Load(t, out).Capture
-		require.Empty(t, capture.Diff(want, got), f)
-
-		var v bytes.Buffer
-		require.NoError(t, Verify(&v, out))
-		assert.Contains(t, v.String(), ": ok ("+f+", 2 targets, 2 streams, 3 samples, end at 2s)")
-		prev = out
-	}
-	var wide bytes.Buffer
-	require.NoError(t, Convert(&wide, src, "wide-csv"))
-	assert.Equal(t, "at,1/03/10,2/04/20\n0,1,\n5,1,2\n1000000,3,2\n", wide.String())
-	require.ErrorContains(t, Convert(&wide, src, "xml"), "unsupported format")
-
-	b, err := os.ReadFile(src)
-	require.NoError(t, err)
-	cut := writeBytes(t, "cut.mbcap", b[:len(b)-30])
-	require.ErrorIs(t, Verify(&bytes.Buffer{}, cut), capture.ErrTruncated)
 }
 
 func TestExportAddressBlocks_exact(t *testing.T) {

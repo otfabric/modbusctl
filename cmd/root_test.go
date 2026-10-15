@@ -133,7 +133,7 @@ func TestRootCommandTree(t *testing.T) {
 		}
 		got = append(got, c.Name())
 	}
-	want := []string{"client", "completion", "discover", "mcap", "server", "version"}
+	want := []string{"capture", "client", "completion", "discover", "server", "version"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("root subcommands %v, want %v", got, want)
 	}
@@ -228,21 +228,16 @@ func TestExecute_endToEnd(t *testing.T) {
 	}
 	var rd types.ReadResult
 	decodeJSON(t, stdout, &rd)
-	if rd.RawDataHex != "00 0A 00 14 00 1E" || rd.McapOutputPath != capture {
+	if rd.RawDataHex != "00 0A 00 14 00 1E" || rd.CaptureOutputPath != capture {
 		t.Fatalf("unexpected read result: %+v", rd)
 	}
 
-	// The capture written by "client read" is readable by the mcap commands.
-	code, stdout, stderr = execute(t, "mcap", "info", "--input", capture)
+	// The capture written by "client read" is readable by the capture commands.
+	code, stdout, stderr = execute(t, "capture", "extract", "--input", capture)
 	if code != errs.ExitOK {
-		t.Fatalf("mcap info: exit %d\n%s\n%s", code, stdout, stderr)
+		t.Fatalf("capture extract: exit %d\n%s\n%s", code, stdout, stderr)
 	}
-	wantContains(t, stdout, "Functions: FC03 x1", "Samples:   1", "snapshot")
-	code, stdout, _ = execute(t, "mcap", "convert", "--input", capture, "--format", "csv")
-	if code != errs.ExitOK {
-		t.Fatalf("mcap convert: exit %d", code)
-	}
-	wantContains(t, stdout, "t,at,s,fc,req,resp", ",03,0300640003,0306000a0014001e,")
+	wantContains(t, stdout, `"start_address": 100`, `"register_count": 3`)
 
 	code, stdout, stderr = execute(t, "client", "poll", "--url", url, "--start", "100", "--polls", "2", "--interval", "1", "--format", "json")
 	if code != errs.ExitOK {
@@ -340,7 +335,7 @@ func TestExecute_help(t *testing.T) {
 	if code != errs.ExitOK || stderr != "" {
 		t.Fatalf("--help: exit %d, stderr %q", code, stderr)
 	}
-	wantContains(t, stdout, "Modbusctl CLI application", "client", "discover", "mcap", "server", "version", "completion", "--debug")
+	wantContains(t, stdout, "Modbusctl CLI application", "client", "discover", "capture", "server", "version", "completion", "--debug")
 
 	code, stdout, _ = execute(t)
 	if code != errs.ExitOK {

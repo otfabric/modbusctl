@@ -35,24 +35,24 @@ func TestRead_formats(t *testing.T) {
 	_, url := newDevice(t)
 	tmp := t.TempDir()
 
-	out := filepath.Join(tmp, "text.mcap")
+	out := filepath.Join(tmp, "text.mbcap")
 	r := run(t, "client", "read", "--url", url, "--start", "100", "--count", "3", "--output", out)
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "Reading 3 registers starting from address 100 using function code 3", "00 01 00 02 00 03", out)
 	wantFile(t, out)
 
-	out = filepath.Join(tmp, "json.mcap")
+	out = filepath.Join(tmp, "json.mbcap")
 	r = run(t, "client", "read", "--url", url, "--start", "100", "--count", "3", "--output", out, "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var res types.ReadResult
 	decodeJSON(t, r.stdout, &res)
-	want := types.ReadResult{Target: url, UnitID: 1, Function: 3, StartAddress: 100, RegisterCount: 3, RawByteCount: 6, RawDataHex: "00 01 00 02 00 03", McapOutputPath: out}
+	want := types.ReadResult{Target: url, UnitID: 1, Function: 3, StartAddress: 100, RegisterCount: 3, RawByteCount: 6, RawDataHex: "00 01 00 02 00 03", CaptureOutputPath: out}
 	if res != want {
 		t.Fatalf("read result %+v, want %+v", res, want)
 	}
 	wantFile(t, out)
 
-	out = filepath.Join(tmp, "table.mcap")
+	out = filepath.Join(tmp, "table.mbcap")
 	r = run(t, "client", "read", "--url", url, "--start", "100", "--count", "3", "--output", out, "--format", "table")
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "raw_data_hex", "00 01 00 02 00 03", "register_count")
@@ -69,7 +69,7 @@ func TestRead_functionsAndEndpoints(t *testing.T) {
 
 	// Input registers through --ip/--port instead of --url.
 	r := run(t, "client", "read", "--ip", host, "--port", port, "--function", "4", "--start", "0", "--count", "2",
-		"--output", filepath.Join(tmp, "in.mcap"), "--format", "json")
+		"--output", filepath.Join(tmp, "in.mbcap"), "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var res types.ReadResult
 	decodeJSON(t, r.stdout, &res)
@@ -79,7 +79,7 @@ func TestRead_functionsAndEndpoints(t *testing.T) {
 
 	// Coils: 1,0,1 packs into 0x05.
 	r = run(t, "client", "read", "--url", url, "--function", "1", "--start", "8", "--count", "3",
-		"--output", filepath.Join(tmp, "coils.mcap"), "--format", "json")
+		"--output", filepath.Join(tmp, "coils.mbcap"), "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	decodeJSON(t, r.stdout, &res)
 	if res.Function != 1 || res.RawDataHex != "05" {
@@ -88,7 +88,7 @@ func TestRead_functionsAndEndpoints(t *testing.T) {
 
 	// Discrete inputs, with root --debug enabled.
 	r = run(t, "--debug", "client", "read", "--url", url, "--function", "2", "--start", "0", "--count", "2",
-		"--output", filepath.Join(tmp, "di.mcap"), "--format", "json", "--timeout", "500")
+		"--output", filepath.Join(tmp, "di.mbcap"), "--format", "json", "--timeout", "500")
 	wantExit(t, r, errs.ExitOK)
 	decodeJSON(t, r.stdout, &res)
 	if res.Function != 2 || res.RawDataHex != "03" {
@@ -98,7 +98,7 @@ func TestRead_functionsAndEndpoints(t *testing.T) {
 
 func TestRead_failures(t *testing.T) {
 	d, url := newDevice(t)
-	out := filepath.Join(t.TempDir(), "x.mcap")
+	out := filepath.Join(t.TempDir(), "x.mbcap")
 
 	wantKind(t, run(t, "client", "read", "--url", url, "--start", "100", "--format", "xml"), errs.KindInvalidInput)
 	wantKind(t, run(t, "client", "read", "--start", "100", "--output", out), errs.KindInvalidInput)
@@ -132,7 +132,7 @@ func TestRead_failures(t *testing.T) {
 func TestRead_timeout(t *testing.T) {
 	d, url := newDevice(t)
 	d.OnRequest = func(mbtest.Request) mbtest.Action { return mbtest.Action{Drop: true} }
-	r := run(t, "client", "read", "--url", url, "--start", "100", "--timeout", "200", "--output", filepath.Join(t.TempDir(), "x.mcap"))
+	r := run(t, "client", "read", "--url", url, "--start", "100", "--timeout", "200", "--output", filepath.Join(t.TempDir(), "x.mbcap"))
 	if r.err == nil {
 		t.Fatalf("expected a timeout, got success:\n%s", r.stdout)
 	}
@@ -428,7 +428,7 @@ func TestWrite_transports(t *testing.T) {
 			t.Fatalf("holding = %v", got)
 		}
 		// Read back over the same serial line.
-		out := filepath.Join(t.TempDir(), "serial.mcap")
+		out := filepath.Join(t.TempDir(), "serial.mbcap")
 		r = run(t, "client", "read", "--url", "rtu://"+path, "--baud", "9600", "--parity", "even", "--unit", "3",
 			"--start", "0", "--count", "2", "--output", out, "--format", "json")
 		wantExit(t, r, errs.ExitOK)
@@ -640,7 +640,7 @@ func TestScan(t *testing.T) {
 	}
 	for i, tc := range cases {
 		algo := tc.algo
-		out := filepath.Join(tmp, fmt.Sprintf("%s-%d.mcap", algo, i))
+		out := filepath.Join(tmp, fmt.Sprintf("%s-%d.mbcap", algo, i))
 		args := append([]string{"client", "scan", "--url", url, "--start", tc.start, "--end", "110", "--algo", algo, "--output", out, "--format", "json"}, tc.extra...)
 		r := run(t, args...)
 		if r.err != nil {
@@ -650,7 +650,7 @@ func TestScan(t *testing.T) {
 		wantExit(t, r, errs.ExitPartial)
 		var res types.ScanSummaryResult
 		decodeJSON(t, r.stdout, &res)
-		if res.Algo != algo || res.Target != url || res.McapOutputPath != out {
+		if res.Algo != algo || res.Target != url || res.CaptureOutputPath != out {
 			t.Fatalf("scan --algo %s: unexpected result %+v", algo, res)
 		}
 		// Refining algos re-read overlapping blocks, so only smart has an exact register count.
@@ -668,7 +668,7 @@ func TestScan(t *testing.T) {
 	}
 
 	// A range the device fully covers is a clean success (safe is the default algo).
-	out := filepath.Join(tmp, "full.mcap")
+	out := filepath.Join(tmp, "full.mbcap")
 	r := run(t, "client", "scan", "--url", url, "--start", "100", "--end", "104", "--output", out)
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "Algo: safe", "Registers captured: 5", "Failed: 0", out)
@@ -676,21 +676,21 @@ func TestScan(t *testing.T) {
 	wantFile(t, out)
 
 	// The safe algo over a range with gaps finds the block and reports the failed probes.
-	out = filepath.Join(tmp, "safe-gaps.mcap")
+	out = filepath.Join(tmp, "safe-gaps.mbcap")
 	r = run(t, "client", "scan", "--url", url, "--start", "95", "--end", "110", "--algo", "safe", "--output", out)
 	wantExit(t, r, errs.ExitPartial)
 	wantContains(t, r.stdout, "Algo: safe", "Exceptions:", out)
 	wantContains(t, r.stderr, "Block: Start: 100")
 	wantFile(t, out)
 
-	r = run(t, "client", "scan", "--url", url, "--start", "100", "--end", "104", "--algo", "smart", "--output", filepath.Join(tmp, "table.mcap"), "--format", "table")
+	r = run(t, "client", "scan", "--url", url, "--start", "100", "--end", "104", "--algo", "smart", "--output", filepath.Join(tmp, "table.mbcap"), "--format", "table")
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "smart")
 
-	wantKind(t, run(t, "client", "scan", "--url", url, "--algo", "boundary", "--output", filepath.Join(tmp, "b.mcap")), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "scan", "--url", url, "--algo", "boundary", "--output", filepath.Join(tmp, "b.mbcap")), errs.KindInvalidInput)
 
 	// linear reads whole blocks: it captures a fully mapped range in one request.
-	r = run(t, "client", "scan", "--url", url, "--start", "100", "--end", "104", "--algo", "linear", "--output", filepath.Join(tmp, "linear.mcap"), "--format", "json")
+	r = run(t, "client", "scan", "--url", url, "--start", "100", "--end", "104", "--algo", "linear", "--output", filepath.Join(tmp, "linear.mbcap"), "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var lin types.ScanSummaryResult
 	decodeJSON(t, r.stdout, &lin)
@@ -699,7 +699,7 @@ func TestScan(t *testing.T) {
 	}
 
 	// Input registers, with a delay between requests.
-	out = filepath.Join(tmp, "input.mcap")
+	out = filepath.Join(tmp, "input.mbcap")
 	r = run(t, "client", "scan", "--url", url, "--function", "4", "--start", "0", "--end", "1", "--algo", "smart", "--delay", "1", "--output", out, "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var res types.ScanSummaryResult
@@ -712,7 +712,7 @@ func TestScan(t *testing.T) {
 func TestScan_sunspec(t *testing.T) {
 	d := mbtest.NewDevice().SetHolding(40000, 0x5375, 0x6E53, 1, 4, 11, 12, 13, 14, 103, 2, 21, 22, 0xFFFF, 0)
 	url := "tcp://" + d.ServeTCP(t)
-	out := filepath.Join(t.TempDir(), "sunspec.mcap")
+	out := filepath.Join(t.TempDir(), "sunspec.mbcap")
 	r := run(t, "client", "scan", "--url", url, "--algo", "sunspec", "--sunspec-base", "40000", "--output", out, "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var res types.ScanSummaryResult
@@ -724,7 +724,7 @@ func TestScan_sunspec(t *testing.T) {
 	wantFile(t, out)
 
 	// Probing the default bases hits addresses the device does not have: partial.
-	r = run(t, "client", "scan", "--url", url, "--algo", "sunspec", "--output", filepath.Join(t.TempDir(), "s.mcap"), "--format", "json")
+	r = run(t, "client", "scan", "--url", url, "--algo", "sunspec", "--output", filepath.Join(t.TempDir(), "s.mbcap"), "--format", "json")
 	wantExit(t, r, errs.ExitPartial)
 	decodeJSON(t, r.stdout, &res)
 	if res.RegistersCaptured != 14 || res.FailCount == 0 {
@@ -734,7 +734,7 @@ func TestScan_sunspec(t *testing.T) {
 
 func TestScan_failures(t *testing.T) {
 	_, url := newDevice(t)
-	out := filepath.Join(t.TempDir(), "x.mcap")
+	out := filepath.Join(t.TempDir(), "x.mbcap")
 	wantKind(t, run(t, "client", "scan", "--url", url, "--algo", "bogus", "--output", out), errs.KindInvalidInput)
 	wantKind(t, run(t, "client", "scan", "--url", url, "--start", "200", "--end", "100", "--output", out), errs.KindInvalidInput)
 	wantKind(t, run(t, "client", "scan", "--url", url, "--function", "9", "--output", out), errs.KindInvalidInput)
@@ -754,12 +754,12 @@ func TestRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := filepath.Join(tmp, "rec.mcap")
+	out := filepath.Join(tmp, "rec.mbcap")
 	r := run(t, "client", "record", "--url", url, "--blocks-file", blocks, "--interval", "10", "--duration", "25", "--output", out, "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var res types.RecordSummaryResult
 	decodeJSON(t, r.stdout, &res)
-	if res.Target != url || res.McapOutputPath != out || res.Iterations < 1 || res.BlocksRecorded != 2*int(res.Iterations) {
+	if res.Target != url || res.CaptureOutputPath != out || res.Iterations < 1 || res.BlocksRecorded != 2*int(res.Iterations) {
 		t.Fatalf("unexpected record result: %+v", res)
 	}
 	if n := d.RequestCount(0x03); n != res.BlocksRecorded {
@@ -768,13 +768,13 @@ func TestRecord(t *testing.T) {
 	wantFile(t, out)
 	wantContains(t, r.stderr, "Recorded block: Start 100, Count 3", "Recorded block: Start 103, Count 2")
 
-	out = filepath.Join(tmp, "rec-text.mcap")
+	out = filepath.Join(tmp, "rec-text.mbcap")
 	r = run(t, "client", "record", "--url", url, "--blocks-file", blocks, "--interval", "10", "--duration", "15", "--output", out)
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "Total recorded blocks:", "Total iterations:", out)
 	wantFile(t, out)
 
-	out = filepath.Join(tmp, "rec-table.mcap")
+	out = filepath.Join(tmp, "rec-table.mbcap")
 	r = run(t, "client", "record", "--url", url, "--blocks-file", blocks, "--interval", "10", "--duration", "15", "--output", out, "--format", "table")
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "blocks_recorded", "iterations", out)
@@ -784,7 +784,7 @@ func TestRecord(t *testing.T) {
 func TestRecord_failures(t *testing.T) {
 	_, url := newDevice(t)
 	tmp := t.TempDir()
-	out := filepath.Join(tmp, "x.mcap")
+	out := filepath.Join(tmp, "x.mbcap")
 	blocks := filepath.Join(tmp, "blocks.json")
 	if err := os.WriteFile(blocks, []byte(`[{"start_address":100,"register_count":3}]`), 0o600); err != nil {
 		t.Fatal(err)

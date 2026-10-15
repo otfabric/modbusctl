@@ -117,13 +117,14 @@ For larger changes, please open an issue first to discuss the approach.
 cmd/                   Root command, version, completion
 cmd/client/            Client commands (identify, read, decode, poll, write, scan, record, sunspec, …)
 cmd/discover/          Subnet device discovery
-cmd/mcap/              Capture file commands (info, verify, convert, decode, extract, strings, frequencies)
+cmd/capture/           Capture analysis commands (decode, extract, strings, frequencies)
 cmd/server/            Static and replay servers
 internal/config/       Flag and environment binding, Modbus URL parsing, serial settings
 internal/modbus/       Collectors, poll and write, scan strategies, recording, capture servers
 internal/capfile/      Capture recorder (go-modbus PDU tap), loader, register-block adapter, error mapping
 internal/replay/       Replay core: sample-and-hold lookup per address, request and identity object; replay clock
-internal/mcap/         Capture info, verify, convert, blocks export, profile decode
+internal/analysis/     Blocks export and profile decode of capture files
+internal/plan/         Recording plans (the requests of client record)
 internal/format/       Output formatting (text, JSON, table, streaming)
 internal/types/        Output data models
 internal/validate/     Input validation
