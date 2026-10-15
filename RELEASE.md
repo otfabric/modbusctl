@@ -1,5 +1,24 @@
 # modbusctl Releases
 
+## v3.1.0
+
+**Date:** 2026-10-15  
+**Previous release:** v3.0.0
+
+### Summary
+
+Minor release: **`server static`** and **`server replay`** now answer every function a capture holds, not only FC01–04, FC07, FC11, FC12 and FC43 device identification. Adopts **go-modbus v1.7.0**, whose server dispatches every function code. No changes to flags or JSON output.
+
+### Added
+
+- **Every recorded function is served:** FC08 Diagnostics, FC17 Report Server ID, FC20 Read File Record, FC24 Read FIFO Queue, FC43 MEI types other than device identification and vendor function codes are answered with the response recorded for exactly that request, byte for byte. A request the capture does not hold is answered according to `--missing`, as for the other functions.
+
+### Changed
+
+- **FC07, FC11 and FC12** are served the same way: the recorded response PDU is returned as it is instead of being decoded and re-encoded.
+- **Writes** through FC21 Write File Record, FC22 Mask Write Register and FC23 Read/Write Multiple Registers are refused with Illegal Function, like the other writes.
+- **go-modbus:** Requires **`github.com/otfabric/go-modbus` v1.7.0** (was v1.6.1).
+
 ## v3.0.0
 
 **Date:** 2026-10-14  

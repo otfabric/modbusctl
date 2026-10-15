@@ -2,7 +2,6 @@ package modbus
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -84,7 +83,9 @@ func ParseOffset(flag, s string) (time.Duration, error) {
 }
 
 // captureHandler serves the targets of a capture, one per unit id, as of the
-// replay time now() returns. It answers reads only. It is safe for concurrent
+// replay time now() returns: FC01–04 per address, FC43 device identification
+// per object, and every other function with the recorded response PDU
+// (go-modbus RawRequestHandler). It answers reads only. It is safe for concurrent
 // use: the devices are immutable and the counters atomic.
 type captureHandler struct {
 	devices map[uint8]*replay.Device
@@ -212,49 +213,31 @@ func (h *captureHandler) HandleInputRegisters(_ context.Context, req *modbus.Inp
 	return h.values(req.UnitID, 4, req.Addr, req.Quantity)
 }
 
-// response returns the payload of the recorded response to a request without
-// data (FC07, FC0B, FC0C), when it holds at least n bytes.
-func (h *captureHandler) response(unit, fc uint8, n int) ([]byte, error) {
-	d, err := h.device(unit)
+// isWrite reports whether fc changes device state: FC21 Write File Record,
+// FC22 Mask Write Register and FC23 Read/Write Multiple Registers reach
+// HandleRawRequest; FC05, FC06, FC15 and FC16 arrive with IsWrite set.
+func isWrite(fc uint8) bool { return fc == 0x15 || fc == 0x16 || fc == 0x17 }
+
+// HandleRawRequest answers every function go-modbus does not decode for the
+// handler (FC07, FC08, FC0B, FC0C, FC11, FC12, FC14, FC18, FC2B other than
+// device identification, vendor functions) with the response recorded for
+// exactly this request PDU, byte for byte.
+func (h *captureHandler) HandleRawRequest(_ context.Context, req *modbus.RawRequest) ([]byte, error) {
+	fc := uint8(req.FunctionCode)
+	if isWrite(fc) {
+		return nil, modbus.ErrIllegalFunction // a replayed device is read-only
+	}
+	d, err := h.device(req.UnitID)
 	if err != nil {
 		return nil, err
 	}
-	resp, ok := d.Response(h.now(), []byte{fc})
-	if ok && len(resp) >= 1+n {
+	resp, ok := d.Response(h.now(), append([]byte{fc}, req.Payload...))
+	if ok && len(resp) >= 1 && resp[0] == fc {
 		return resp[1:], nil
 	}
-	h.unrecorded(unit, fc, 0, 0)
+	h.unrecorded(req.UnitID, fc, 0, 0)
 	_, err = h.absent(d, fc, 0)
 	return nil, err
-}
-
-func (h *captureHandler) HandleExceptionStatus(_ context.Context, req *modbus.ExceptionStatusRequest) (uint8, error) {
-	p, err := h.response(req.UnitID, 0x07, 1)
-	if err != nil {
-		return 0, err
-	}
-	return p[0], nil
-}
-
-func (h *captureHandler) HandleCommEventCounter(_ context.Context, req *modbus.CommEventCounterRequest) (*modbus.CommEventCounterResponse, error) {
-	p, err := h.response(req.UnitID, 0x0B, 4)
-	if err != nil {
-		return nil, err
-	}
-	return &modbus.CommEventCounterResponse{Status: binary.BigEndian.Uint16(p), EventCount: binary.BigEndian.Uint16(p[2:])}, nil
-}
-
-func (h *captureHandler) HandleCommEventLog(_ context.Context, req *modbus.CommEventLogRequest) (*modbus.CommEventLogResponse, error) {
-	p, err := h.response(req.UnitID, 0x0C, 7)
-	if err != nil {
-		return nil, err
-	}
-	// p = byte count, status, event count, message count, events.
-	if int(p[0]) != len(p)-1 {
-		return nil, modbus.ErrServerDeviceFailure
-	}
-	return &modbus.CommEventLogResponse{Status: binary.BigEndian.Uint16(p[1:]), EventCount: binary.BigEndian.Uint16(p[3:]),
-		MessageCount: binary.BigEndian.Uint16(p[5:]), Events: append([]byte(nil), p[7:]...)}, nil
 }
 
 func (h *captureHandler) HandleDeviceIdentification(_ context.Context, req *modbus.DeviceIdentificationRequest) (*modbus.DeviceIdentificationResponse, error) {

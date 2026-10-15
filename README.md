@@ -908,7 +908,7 @@ Both servers:
 
 - accept up to `--max-clients` concurrent connections (default 10) and close further ones;
 - print a summary when stopped (`📊 Served N requests: …`), counting the answers, exceptions, silences and requests for data the capture does not hold; with `--debug` they also name each such request and log the Modbus frames;
-- answer **FC01–04** from the values recorded per address (any range whose addresses were all recorded, even one never requested as such), **FC07**, **FC11** and **FC12** with the recorded response, and **FC43** device identification from the recorded objects;
+- answer **FC01–04** from the values recorded per address (any range whose addresses were all recorded, even one never requested as such), **FC43** device identification from the recorded objects, and every other recorded function (**FC07**, **FC08**, **FC11**, **FC12**, **FC17**, **FC20**, **FC24**, other FC43 MEI types and vendor functions) with the response recorded for exactly that request, byte for byte;
 - refuse writes (Illegal Function): a replayed device is read-only;
 - answer what the capture does not hold according to `--missing`: **exception** (default: Illegal Function for a function never recorded, Illegal Data Address otherwise), **zero** (unrecorded registers and coils read 0), or **silence** (no answer: the client times out);
 - before an address is first sampled, serve its first sample (`--before-first hold`, default) or treat it as unrecorded (`--before-first absent`; replay only).
