@@ -25,6 +25,9 @@ func IsTLSURL(modbusURL string) bool {
 	return ok && scheme == "tcp+tls"
 }
 
+// systemCertPool is x509.SystemCertPool; tests replace it to reach the error path.
+var systemCertPool = x509.SystemCertPool
+
 // Load reads the client key pair and the CA bundle. Without --tls-key the key is read from
 // the --tls-cert file; without --tls-ca the system roots are used.
 func (c TLSConfig) Load() (*tls.Certificate, *x509.CertPool, error) {
@@ -46,7 +49,7 @@ func (c TLSConfig) Load() (*tls.Certificate, *x509.CertPool, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("load TLS CA certificates: %w", err)
 		}
-	} else if roots, err = x509.SystemCertPool(); err != nil {
+	} else if roots, err = systemCertPool(); err != nil {
 		return nil, nil, fmt.Errorf("load system root certificates (set --tls-ca): %w", err)
 	}
 	return &cert, roots, nil
