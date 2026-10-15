@@ -85,8 +85,8 @@ func TestCoreEmbeddedErrorInfo_typedErrors(t *testing.T) {
 	})
 
 	t.Run("cause text when there is no message", func(t *testing.T) {
-		err := errs.New(errs.KindOutput, errs.CodeMcapWriteFailed, "", os.ErrPermission)
-		assert.Equal(t, &types.ErrorInfo{Kind: "output", Code: errs.CodeMcapWriteFailed, Message: os.ErrPermission.Error()}, EmbeddedErrorInfo(err))
+		err := errs.New(errs.KindOutput, errs.CodeCaptureWriteFailed, "", os.ErrPermission)
+		assert.Equal(t, &types.ErrorInfo{Kind: "output", Code: errs.CodeCaptureWriteFailed, Message: os.ErrPermission.Error()}, EmbeddedErrorInfo(err))
 	})
 
 	t.Run("neither message nor cause", func(t *testing.T) {

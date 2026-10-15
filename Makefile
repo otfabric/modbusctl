@@ -150,4 +150,4 @@ clean: ## Clean the build artifacts
 	@rm -rf $(BIN_DIR)
 	@rm -f $(BOOTSTRAP_NAME)
 	@rm -f $(RELEASE_DIR)/*
-	@rm -f *.{json,csv,log,mcap} results/*.{json,csv,log,mcap}
+	@rm -f *.{json,csv,log,mbcap} results/*.{json,csv,log,mbcap}

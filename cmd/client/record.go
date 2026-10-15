@@ -14,19 +14,24 @@ import (
 
 var recordCmd = &cobra.Command{
 	Use:   "record",
-	Short: "Continuously read and record registers from a Modbus TCP device",
+	Short: "Record the read requests of a plan from a Modbus device to a capture file",
 	Example: `
-  # Record holding registers from a Modbus device at 192.168.1.100 every 5 seconds for 1 minute
-  modbusctl client record --ip 192.168.1.100 --blocks-file blocks.json --output data.mbcap --interval 5 --duration 60
+  # Record the holding-register blocks of blocks.json every 5 seconds for 1 minute
+  modbusctl client record --ip 192.168.1.100 --blocks-file blocks.json --output data.mbcap --interval 5000 --duration 60000
 
   # Connect via URL (mutually exclusive with --ip/--port)
-  modbusctl client record --url tcp://192.168.1.100:502 --blocks-file blocks.json --output data.mbcap --interval 5 --duration 60
+  modbusctl client record --url tcp://192.168.1.100:502 --blocks-file blocks.json --output data.mbcap --interval 5000 --duration 60000
 
-  # Record input registers with function code 4, polling every 10 seconds for 2 minutes
-  modbusctl client record --ip 192.168.1.100 --function 4 --blocks-file register-ranges.json --output data.mbcap --interval 10 --duration 120
+  # Record input-register blocks (function code 4) every 10 seconds for 2 minutes
+  modbusctl client record --ip 192.168.1.100 --function 4 --blocks-file register-ranges.json --output data.mbcap --interval 10000 --duration 120000
+
+  # A plan with other read functions: diagnostics counters, server ID, FIFO queue, device identification
+  #   [{"start_address": 100, "register_count": 10}, {"function": 8, "sub_function": 11},
+  #    {"function": 17}, {"function": 24, "fifo_address": 1234}, {"function": 43}]
+  modbusctl client record --ip 192.168.1.100 --blocks-file plan.json --output data.mbcap --interval 1000 --duration 60000
 
   # Use environment variables instead of CLI arguments
-  MODBUSCTL_IP=192.168.1.100 MODBUSCTL_BLOCKS_FILE=blocks.json MODBUSCTL_OUTPUT=data.mbcap MODBUSCTL_INTERVAL=5 MODBUSCTL_DURATION=60 modbusctl client record
+  MODBUSCTL_IP=192.168.1.100 MODBUSCTL_BLOCKS_FILE=blocks.json MODBUSCTL_OUTPUT=data.mbcap MODBUSCTL_INTERVAL=5000 MODBUSCTL_DURATION=60000 modbusctl client record
 `,
 }
 

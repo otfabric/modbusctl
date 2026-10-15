@@ -45,7 +45,7 @@ Modbus TCP, UDP, RTU and ASCII carry no authentication and no encryption: anyone
 
 ### Captures and Output
 
-- MCAP captures, exports and command output contain register values, device identification and network addresses, which may be sensitive operational data. Be careful when storing or sharing them
+- Capture files (MBCAP), exports and command output contain register values, device identification and network addresses, which may be sensitive operational data. Be careful when storing or sharing them
 - `--debug` prints every Modbus frame sent and received to stderr
 
 ### Privileges

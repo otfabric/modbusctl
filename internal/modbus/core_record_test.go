@@ -33,7 +33,7 @@ func TestCoreRecord_capturesEveryBlockEachIteration(t *testing.T) {
 	dev := coreScanDevice(coreRange{0, 9}, coreRange{100, 104})
 	dc := coreTCP(t, dev)
 	dc.Unit = 6
-	out := coreMcapPath(t)
+	out := coreCapturePath(t)
 
 	var progress bytes.Buffer
 	sum, err := RecordToCapture(context.Background(), config.RecordConfig{
@@ -44,13 +44,13 @@ func TestCoreRecord_capturesEveryBlockEachIteration(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, dc.URL, sum.Target)
-	assert.Equal(t, out, sum.McapOutputPath)
+	assert.Equal(t, out, sum.CaptureOutputPath)
 	assert.GreaterOrEqual(t, sum.Iterations, uint32(2))
 	assert.LessOrEqual(t, sum.Iterations, uint32(7), "one iteration per 10 ms interval for 60 ms")
 	assert.Equal(t, 2*int(sum.Iterations), sum.BlocksRecorded)
 	assert.Equal(t, sum.BlocksRecorded, dev.RequestCount(3))
 
-	records, header := coreLoadMcap(t, out)
+	records, header := coreLoadCapture(t, out)
 	assert.Equal(t, uint8(6), header.Unit)
 	assert.Equal(t, uint8(3), header.Function)
 	require.Len(t, records, sum.BlocksRecorded)
@@ -82,7 +82,7 @@ func TestCoreRecord_capturesEveryBlockEachIteration(t *testing.T) {
 // A block that cannot be read is reported and skipped; the others are still recorded.
 func TestCoreRecord_unreadableBlockIsSkipped(t *testing.T) {
 	dev := coreScanDevice(coreRange{0, 3})
-	out := coreMcapPath(t)
+	out := coreCapturePath(t)
 	var progress bytes.Buffer
 	sum, err := RecordToCapture(context.Background(), config.RecordConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 4, Duration: 1,
@@ -93,7 +93,7 @@ func TestCoreRecord_unreadableBlockIsSkipped(t *testing.T) {
 	require.GreaterOrEqual(t, sum.Iterations, uint32(1))
 	assert.Equal(t, int(sum.Iterations), sum.BlocksRecorded)
 
-	records, header := coreLoadMcap(t, out)
+	records, header := coreLoadCapture(t, out)
 	assert.Equal(t, uint8(4), header.Function)
 	require.Len(t, records, sum.BlocksRecorded)
 	for _, rec := range records {
@@ -117,7 +117,7 @@ func TestCoreRecord_retriesBusyAndDroppedConnection(t *testing.T) {
 			return mbtest.Action{}
 		}
 	}
-	out := coreMcapPath(t)
+	out := coreCapturePath(t)
 	var progress bytes.Buffer
 	sum, err := RecordToCapture(context.Background(), config.RecordConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, Duration: 1, Debug: true,
@@ -130,7 +130,7 @@ func TestCoreRecord_retriesBusyAndDroppedConnection(t *testing.T) {
 	assert.NotContains(t, progress.String(), "Failed to read block")
 	assert.Contains(t, progress.String(), "Retrying due to Modbus read exception on address 0 with count 4 (attempt 1)")
 	assert.Contains(t, progress.String(), "Reconnecting due to connection error (attempt 2)")
-	records, _ := coreLoadMcap(t, out)
+	records, _ := coreLoadCapture(t, out)
 	require.Len(t, records, sum.BlocksRecorded)
 	assert.Equal(t, coreAddrSet(coreRange{0, 3}), coreCapturedAddrs(t, records))
 }
@@ -148,16 +148,16 @@ func TestCoreRecord_zeroDuration(t *testing.T) {
 	assert.Zero(t, sum.Iterations)
 	assert.Zero(t, sum.BlocksRecorded)
 	assert.Zero(t, dev.RequestCount(0))
-	assert.Equal(t, dir, filepath.Dir(sum.McapOutputPath))
-	assert.Regexp(t, `^modbusctl_record_\d{8}_\d{6}\.mbcap$`, filepath.Base(sum.McapOutputPath))
-	records, header := coreLoadMcap(t, sum.McapOutputPath)
+	assert.Equal(t, dir, filepath.Dir(sum.CaptureOutputPath))
+	assert.Regexp(t, `^modbusctl_record_\d{8}_\d{6}\.mbcap$`, filepath.Base(sum.CaptureOutputPath))
+	records, header := coreLoadCapture(t, sum.CaptureOutputPath)
 	assert.Empty(t, records)
 	assert.Equal(t, uint8(1), header.Unit, "the target is recorded even without samples")
 }
 
 func TestCoreRecord_setupFailures(t *testing.T) {
 	t.Run("blocks file missing", func(t *testing.T) {
-		out := coreMcapPath(t)
+		out := coreCapturePath(t)
 		_, err := RecordToCapture(context.Background(), config.RecordConfig{
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t)}, Timeout: coreShortTimeoutMS, Function: 3, Duration: 10,
 			BlocksFile: filepath.Join(t.TempDir(), "nope.json"), OutputFile: out,
@@ -172,13 +172,13 @@ func TestCoreRecord_setupFailures(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte(`{"start_address": 1}`), 0o600))
 		_, err := RecordToCapture(context.Background(), config.RecordConfig{
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t)}, Timeout: coreShortTimeoutMS, Function: 3, Duration: 10,
-			BlocksFile: path, OutputFile: coreMcapPath(t),
+			BlocksFile: path, OutputFile: coreCapturePath(t),
 		}, nil)
 		coreRequireKind(t, err, errs.KindOutput, errs.CodeInputDecodeFailed)
 	})
 
 	t.Run("connect refused", func(t *testing.T) {
-		out := coreMcapPath(t)
+		out := coreCapturePath(t)
 		_, err := RecordToCapture(context.Background(), config.RecordConfig{
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t)}, Timeout: coreShortTimeoutMS, Function: 3, Duration: 10,
 			BlocksFile: coreBlocksFile(t, types.AddressBlock{StartAddress: 0, RegisterCount: 1}), OutputFile: out,
@@ -192,7 +192,7 @@ func TestCoreRecord_setupFailures(t *testing.T) {
 		_, err := RecordToCapture(context.Background(), config.RecordConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, Duration: 10,
 			BlocksFile: coreBlocksFile(t, types.AddressBlock{StartAddress: 0, RegisterCount: 1}),
-			OutputFile: filepath.Join(t.TempDir(), "missing", "record.mcap"),
+			OutputFile: filepath.Join(t.TempDir(), "missing", "record.mbcap"),
 		}, nil)
 		coreRequireKind(t, err, errs.KindOutput, errs.CodeOutputFileCreateFailed)
 		assert.Zero(t, dev.RequestCount(0))
@@ -212,7 +212,7 @@ func TestCoreRecord_canceledBetweenIterations(t *testing.T) {
 		time.AfterFunc(100*time.Millisecond, cancel)
 		return mbtest.Action{}
 	}
-	out := coreMcapPath(t)
+	out := coreCapturePath(t)
 	start := time.Now()
 	sum, err := RecordToCapture(ctx, config.RecordConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, Interval: 5000, Duration: 60000,
@@ -222,7 +222,7 @@ func TestCoreRecord_canceledBetweenIterations(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Less(t, time.Since(start), 2*time.Second)
 	assert.Equal(t, 1, dev.RequestCount(0))
-	records, _ := coreLoadMcap(t, out)
+	records, _ := coreLoadCapture(t, out)
 	require.Len(t, records, 1)
 	assert.Equal(t, coreAddrSet(coreRange{0, 3}), coreCapturedAddrs(t, records))
 }

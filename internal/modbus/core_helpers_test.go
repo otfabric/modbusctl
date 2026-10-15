@@ -36,14 +36,14 @@ func coreClosedURL(t *testing.T) string {
 	return "tcp://" + addr
 }
 
-// coreMcapPath returns a capture path inside the test's temporary directory.
-func coreMcapPath(t *testing.T) string {
+// coreCapturePath returns a capture path inside the test's temporary directory.
+func coreCapturePath(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "capture.mbcap")
 }
 
-// coreLoadMcap reads back a capture file.
-func coreLoadMcap(t *testing.T, path string) ([]types.CaptureRecord, types.CaptureHeader) {
+// coreLoadCapture reads back a capture file.
+func coreLoadCapture(t *testing.T, path string) ([]types.CaptureRecord, types.CaptureHeader) {
 	t.Helper()
 	return capfiletest.ReadRecords(t, path)
 }

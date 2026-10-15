@@ -15,9 +15,9 @@ import (
 	"github.com/otfabric/go-modbus-capture/mbcsv"
 )
 
-// ErrLegacyMCAP is returned for a file in the MCAP v1 format of modbusctl 2.x,
-// which modbusctl 3 no longer reads.
-var ErrLegacyMCAP = errors.New("this is an MCAP v1 file from modbusctl 2.x, which modbusctl 3 does not read; record the device again, or convert the file with modbusctl 2.x and a script")
+// ErrLegacyFormat is returned for a modbusctl 2.x capture file (.mcap), which
+// modbusctl 3 does not read.
+var ErrLegacyFormat = errors.New("this is a modbusctl 2.x capture file (.mcap), which modbusctl 3 does not read; record the device again")
 
 // Encoding is a capture file encoding.
 type Encoding string
@@ -38,7 +38,7 @@ func OpenReader(r io.Reader) (capture.Reader, Encoding, error) {
 		cr, err := mbcap.NewReader(br)
 		return cr, Binary, err
 	case bytes.HasPrefix(head, []byte("MCAP")):
-		return nil, "", ErrLegacyMCAP
+		return nil, "", ErrLegacyFormat
 	}
 	head, _ = br.Peek(64)
 	head = bytes.TrimLeft(head, " \t\r\n")
@@ -64,7 +64,8 @@ type Loaded struct {
 }
 
 // Load reads a whole capture file. A truncated file is not an error: Loaded
-// says so.
+// says so. A capture holding a sample outside the supported read functions
+// (see [IsSpecRead]) is rejected with [ErrUnsupportedFunction].
 func Load(path string) (*Loaded, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -80,6 +81,12 @@ func Load(path string) (*Loaded, error) {
 	if errors.Is(err, capture.ErrTruncated) {
 		l.Truncated = true
 		err = nil
+	}
+	if unsupportedSample(err) {
+		err = fmt.Errorf("%w: %w", ErrUnsupportedFunction, err)
+	}
+	if err == nil && c != nil {
+		err = checkFunctions(c)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)

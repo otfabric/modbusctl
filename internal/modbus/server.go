@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,7 +85,12 @@ func ParseOffset(flag, s string) (time.Duration, error) {
 }
 
 // captureHandler serves the targets of a capture, one per unit id, as of the
-// replay time now() returns. It answers reads only. It is safe for concurrent
+// replay time now() returns: FC01–04 per address, FC43 device identification
+// per object, and FC07, FC08, FC11, FC12, FC17, FC20 and FC24 from the
+// response recorded for exactly the request, through the go-modbus optional
+// handlers. It answers reads only: go-modbus answers every other function
+// code, writes and vendor or unknown functions included, with Illegal
+// Function. It is safe for concurrent
 // use: the devices are immutable and the counters atomic.
 type captureHandler struct {
 	devices map[uint8]*replay.Device
@@ -212,16 +218,18 @@ func (h *captureHandler) HandleInputRegisters(_ context.Context, req *modbus.Inp
 	return h.values(req.UnitID, 4, req.Addr, req.Quantity)
 }
 
-// response returns the payload of the recorded response to a request without
-// data (FC07, FC0B, FC0C), when it holds at least n bytes.
-func (h *captureHandler) response(unit, fc uint8, n int) ([]byte, error) {
+// response returns the recorded response PDU to exactly req at the replay
+// time, when it is a response to req's function holding at least n bytes
+// after the function code; otherwise it answers as for an unrecorded request.
+func (h *captureHandler) response(unit uint8, req []byte, n int) ([]byte, error) {
 	d, err := h.device(unit)
 	if err != nil {
 		return nil, err
 	}
-	resp, ok := d.Response(h.now(), []byte{fc})
-	if ok && len(resp) >= 1+n {
-		return resp[1:], nil
+	fc := req[0]
+	resp, ok := d.Response(h.now(), req)
+	if ok && len(resp) >= 1+n && resp[0] == fc {
+		return resp, nil
 	}
 	h.unrecorded(unit, fc, 0, 0)
 	_, err = h.absent(d, fc, 0)
@@ -229,32 +237,115 @@ func (h *captureHandler) response(unit, fc uint8, n int) ([]byte, error) {
 }
 
 func (h *captureHandler) HandleExceptionStatus(_ context.Context, req *modbus.ExceptionStatusRequest) (uint8, error) {
-	p, err := h.response(req.UnitID, 0x07, 1)
+	r, err := h.response(req.UnitID, []byte{0x07}, 1)
 	if err != nil {
 		return 0, err
 	}
-	return p[0], nil
+	return r[1], nil
 }
 
 func (h *captureHandler) HandleCommEventCounter(_ context.Context, req *modbus.CommEventCounterRequest) (*modbus.CommEventCounterResponse, error) {
-	p, err := h.response(req.UnitID, 0x0B, 4)
+	r, err := h.response(req.UnitID, []byte{0x0B}, 4)
 	if err != nil {
 		return nil, err
 	}
-	return &modbus.CommEventCounterResponse{Status: binary.BigEndian.Uint16(p), EventCount: binary.BigEndian.Uint16(p[2:])}, nil
+	return &modbus.CommEventCounterResponse{Status: binary.BigEndian.Uint16(r[1:]), EventCount: binary.BigEndian.Uint16(r[3:])}, nil
 }
 
 func (h *captureHandler) HandleCommEventLog(_ context.Context, req *modbus.CommEventLogRequest) (*modbus.CommEventLogResponse, error) {
-	p, err := h.response(req.UnitID, 0x0C, 7)
+	r, err := h.response(req.UnitID, []byte{0x0C}, 7)
 	if err != nil {
 		return nil, err
 	}
-	// p = byte count, status, event count, message count, events.
-	if int(p[0]) != len(p)-1 {
+	// r = FC, byte count, status, event count, message count, events.
+	if int(r[1]) != len(r)-2 {
 		return nil, modbus.ErrServerDeviceFailure
 	}
-	return &modbus.CommEventLogResponse{Status: binary.BigEndian.Uint16(p[1:]), EventCount: binary.BigEndian.Uint16(p[3:]),
-		MessageCount: binary.BigEndian.Uint16(p[5:]), Events: append([]byte(nil), p[7:]...)}, nil
+	return &modbus.CommEventLogResponse{Status: binary.BigEndian.Uint16(r[2:]), EventCount: binary.BigEndian.Uint16(r[4:]),
+		MessageCount: binary.BigEndian.Uint16(r[6:]), Events: append([]byte(nil), r[8:]...)}, nil
+}
+
+// HandleDiagnostics serves FC08 sub-functions that return data (see
+// [capfile.IsDataDiagnostic]); the others change device state and are
+// refused with Illegal Function. The server echoes the sub-function in front
+// of the recorded data.
+func (h *captureHandler) HandleDiagnostics(_ context.Context, req *modbus.DiagnosticsRequest) ([]byte, error) {
+	sub := uint16(req.SubFunction)
+	if sub > 0xFF || !capfile.IsDataDiagnostic(uint8(sub)) {
+		return nil, modbus.ErrIllegalFunction
+	}
+	r, err := h.response(req.UnitID, append([]byte{0x08, byte(sub >> 8), byte(sub)}, req.Data...), 2)
+	if err != nil {
+		return nil, err
+	}
+	if binary.BigEndian.Uint16(r[1:]) != sub {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	return append([]byte(nil), r[3:]...), nil
+}
+
+// HandleReportServerID serves FC17 with the recorded data after the byte
+// count; the server adds the byte count.
+func (h *captureHandler) HandleReportServerID(_ context.Context, req *modbus.ReportServerIDRequest) ([]byte, error) {
+	r, err := h.response(req.UnitID, []byte{0x11}, 1)
+	if err != nil {
+		return nil, err
+	}
+	if int(r[1]) != len(r)-2 {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	return append([]byte(nil), r[2:]...), nil
+}
+
+// HandleReadFileRecords serves FC20 with the records of the response
+// recorded for exactly these sub-requests.
+func (h *captureHandler) HandleReadFileRecords(_ context.Context, req *modbus.ReadFileRecordsRequest) ([][]uint16, error) {
+	pdu := []byte{0x14, byte(7 * len(req.Requests))}
+	for _, s := range req.Requests {
+		pdu = append(pdu, 0x06, byte(s.FileNumber>>8), byte(s.FileNumber), byte(s.RecordNumber>>8), byte(s.RecordNumber),
+			byte(s.RecordLength>>8), byte(s.RecordLength))
+	}
+	r, err := h.response(req.UnitID, pdu, 1)
+	if err != nil {
+		return nil, err
+	}
+	// r = FC, data length, then per sub-request: length, reference type 6, registers.
+	if int(r[1]) != len(r)-2 {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	records, p := make([][]uint16, len(req.Requests)), 2
+	for i, s := range req.Requests {
+		if p+2 > len(r) || r[p+1] != 0x06 || int(r[p]) != 1+2*int(s.RecordLength) || p+1+int(r[p]) > len(r) {
+			return nil, modbus.ErrServerDeviceFailure
+		}
+		records[i] = make([]uint16, s.RecordLength)
+		for k := range records[i] {
+			records[i][k] = binary.BigEndian.Uint16(r[p+2+2*k:])
+		}
+		p += 1 + int(r[p])
+	}
+	if p != len(r) {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	return records, nil
+}
+
+// HandleReadFIFOQueue serves FC24 with the recorded queue.
+func (h *captureHandler) HandleReadFIFOQueue(_ context.Context, req *modbus.FIFOQueueRequest) ([]uint16, error) {
+	r, err := h.response(req.UnitID, []byte{0x18, byte(req.Addr >> 8), byte(req.Addr)}, 4)
+	if err != nil {
+		return nil, err
+	}
+	// r = FC, byte count, FIFO count, values.
+	count := int(binary.BigEndian.Uint16(r[3:]))
+	if int(binary.BigEndian.Uint16(r[1:])) != len(r)-3 || len(r) != 5+2*count {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	values := make([]uint16, count)
+	for i := range values {
+		values[i] = binary.BigEndian.Uint16(r[5+2*i:])
+	}
+	return values, nil
 }
 
 func (h *captureHandler) HandleDeviceIdentification(_ context.Context, req *modbus.DeviceIdentificationRequest) (*modbus.DeviceIdentificationResponse, error) {
@@ -339,7 +430,9 @@ func describeDevices(w io.Writer, devices map[uint8]*replay.Device) {
 
 // ServerConfig configures the Modbus TCP listener.
 type ServerConfig struct {
-	Port uint16
+	// Listen is the address to listen on; empty is every interface.
+	Listen string
+	Port   uint16
 	// MaxClients limits concurrent client connections; 0 is the go-modbus
 	// default (10).
 	MaxClients uint16
@@ -368,8 +461,12 @@ func newModbusServer(ctx context.Context, handler modbus.RequestHandler, metrics
 	if cfg.Debug {
 		logger = modbus.NewStdLogger(nil)
 	}
+	host := cfg.Listen
+	if host == "" {
+		host = "0.0.0.0"
+	}
 	server, err := modbus.NewServer(&modbus.ServerConfig{
-		URL:        fmt.Sprintf("tcp://0.0.0.0:%d", cfg.Port),
+		URL:        "tcp://" + net.JoinHostPort(host, strconv.Itoa(int(cfg.Port))),
 		Timeout:    0,
 		MaxClients: uint(cfg.MaxClients),
 		Logger:     logger,
@@ -378,9 +475,14 @@ func newModbusServer(ctx context.Context, handler modbus.RequestHandler, metrics
 	if err != nil {
 		return errs.New(errs.KindTransport, errs.CodeTransportConnectFailed, "failed to start modbus server: "+err.Error(), err)
 	}
-	_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on port %d\n", cfg.Port)
 	if err := server.Start(); err != nil {
 		return errs.New(errs.KindTransport, errs.CodeTransportConnectFailed, "modbus server failed: "+err.Error(), err)
+	}
+	// Printed once the listener is bound: from here on clients reach this server.
+	if cfg.Listen == "" {
+		_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on port %d\n", cfg.Port)
+	} else {
+		_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on %s port %d\n", cfg.Listen, cfg.Port)
 	}
 	// Block until context canceled (e.g. SIGINT/SIGTERM via root Execute).
 	<-ctx.Done()
@@ -422,7 +524,7 @@ func ServeStatic(ctx context.Context, cfg config.StaticServerConfig, progress io
 	_, _ = fmt.Fprintf(progress, "✅ Static server ready on port %d with %s of %s\n", cfg.Port, when, cfg.InputFile)
 	describeDevices(progress, devices)
 	h := &captureHandler{devices: devices, now: func() capture.Ticks { return t }, missing: missing}
-	return serve(ctx, h, ServerConfig{Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
+	return serve(ctx, h, ServerConfig{Listen: cfg.Listen, Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
 }
 
 // ServeReplay replays a capture: the served values follow the recorded ones
@@ -467,5 +569,5 @@ func ServeReplay(ctx context.Context, cfg config.ReplayServerConfig, progress io
 	describeDevices(progress, devices)
 	start := time.Now()
 	h := &captureHandler{devices: devices, now: func() capture.Ticks { return clock.At(time.Since(start)) }, missing: missing}
-	return serve(ctx, h, ServerConfig{Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
+	return serve(ctx, h, ServerConfig{Listen: cfg.Listen, Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
 }

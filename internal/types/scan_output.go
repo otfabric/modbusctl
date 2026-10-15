@@ -21,7 +21,7 @@ type ScanSummaryResult struct {
 	RegistersCaptured   int            `json:"registers_captured"`
 	AvgResponseMs       int64          `json:"avg_response_ms,omitempty"`
 	Duration            string         `json:"duration"`
-	McapOutputPath      string         `json:"mcap_output_path"`
+	CaptureOutputPath   string         `json:"capture_output_path"`
 }
 
 // MarshalTextOutput prints the historical scan summary block.
@@ -46,7 +46,7 @@ func (r *ScanSummaryResult) MarshalTextOutput() (string, error) {
 		_, _ = fmt.Fprintf(&b, "Avg response time: %d ms\n", r.AvgResponseMs)
 	}
 	_, _ = fmt.Fprintf(&b, "Duration: %s\n", r.Duration)
-	_, _ = fmt.Fprintf(&b, "Output: %s\n", r.McapOutputPath)
+	_, _ = fmt.Fprintf(&b, "Output: %s\n", r.CaptureOutputPath)
 	return b.String(), nil
 }
 
@@ -73,6 +73,6 @@ func (r *ScanSummaryResult) TableRows() [][]string {
 		{"registers_captured", fmt.Sprintf("%d", r.RegistersCaptured)},
 		{"avg_response_ms", fmt.Sprintf("%d", r.AvgResponseMs)},
 		{"duration", r.Duration},
-		{"mcap_output_path", r.McapOutputPath},
+		{"capture_output_path", r.CaptureOutputPath},
 	}
 }

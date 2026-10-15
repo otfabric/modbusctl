@@ -1,13 +1,17 @@
 package modbus
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -27,14 +31,33 @@ func collWriteCapture(t *testing.T, c *capture.Capture) string {
 	return capfiletest.Write(t, filepath.Join(t.TempDir(), "capture.mbcap"), c)
 }
 
-// collFreePort returns a TCP port that is free on every interface.
+// collFreePort returns a loopback TCP port that was free a moment ago. Another
+// socket may take it before it is bound again: bind it with collListen, which
+// moves on to another port when that happens.
 func collFreePort(t *testing.T) uint16 {
 	t.Helper()
-	ln, err := net.Listen("tcp", ":0")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := uint16(ln.Addr().(*net.TCPAddr).Port)
 	require.NoError(t, ln.Close())
 	return port
+}
+
+// collListen calls start with free loopback ports until it binds one, and
+// returns that port. start must return an error wrapping syscall.EADDRINUSE
+// when the port was taken in the meantime; any other error fails the test.
+func collListen(t *testing.T, start func(port uint16) error) uint16 {
+	t.Helper()
+	for range 20 {
+		port := collFreePort(t)
+		err := start(port)
+		if err == nil {
+			return port
+		}
+		require.ErrorIs(t, err, syscall.EADDRINUSE)
+	}
+	t.Fatal("no free loopback port after 20 attempts")
+	return 0
 }
 
 // collServer is a static or replay server running in a goroutine.
@@ -44,38 +67,79 @@ type collServer struct {
 	done   chan error
 }
 
-// collStartServer runs serve on a free port and waits until it accepts connections.
-func collStartServer(t *testing.T, serve func(ctx context.Context, port uint16) error) *collServer {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	s := &collServer{port: collFreePort(t), cancel: cancel, done: make(chan error, 1)}
-	go func() { s.done <- serve(ctx, s.port) }()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case <-s.done:
-		case <-time.After(5 * time.Second):
-			t.Error("server did not stop after its context was canceled")
-		}
-	})
+// collAddr is where collStartServer asks a server to listen, and the writer
+// its progress must (also) go to: the server is ready once it reports there
+// that it is serving.
+type collAddr struct {
+	Port   uint16
+	Listen string
+	ready  io.Writer
+}
 
-	addr := fmt.Sprintf("127.0.0.1:%d", s.port)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		select {
-		case err := <-s.done:
-			s.done <- err
-			t.Fatalf("server exited before accepting connections: %v", err)
-		default:
-		}
-		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-		if err == nil {
-			require.NoError(t, conn.Close())
-			return s
-		}
-		require.True(t, time.Now().Before(deadline), "server never accepted connections: %v", err)
-		time.Sleep(5 * time.Millisecond)
+// Progress returns the writer to pass to the server: w, if not nil, and the
+// readiness watcher.
+func (a collAddr) Progress(w io.Writer) io.Writer {
+	if w == nil {
+		return a.ready
 	}
+	return io.MultiWriter(w, a.ready)
+}
+
+// collReady closes its channel once "🚀 Serving Modbus TCP" was written.
+type collReady struct {
+	mu   sync.Mutex
+	buf  []byte
+	ch   chan struct{}
+	seen bool
+}
+
+func (r *collReady) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.seen {
+		r.buf = append(r.buf, p...)
+		if bytes.Contains(r.buf, []byte("🚀 Serving Modbus TCP")) {
+			r.seen = true
+			close(r.ch)
+		}
+	}
+	return len(p), nil
+}
+
+// collStartServer runs serve on a free loopback port and returns once the
+// server reports that its listener is bound, so the port is its own: a probe
+// connection could reach another socket holding the port.
+func collStartServer(t *testing.T, serve func(ctx context.Context, a collAddr) error) *collServer {
+	t.Helper()
+	var s *collServer
+	collListen(t, func(port uint16) error {
+		ctx, cancel := context.WithCancel(context.Background())
+		ready := &collReady{ch: make(chan struct{})}
+		s = &collServer{port: port, cancel: cancel, done: make(chan error, 1)}
+		go func() { s.done <- serve(ctx, collAddr{Port: port, Listen: "127.0.0.1", ready: ready}) }()
+		select {
+		case <-ready.ch:
+		case err := <-s.done:
+			cancel()
+			if errors.Is(err, syscall.EADDRINUSE) {
+				return err
+			}
+			t.Fatalf("server exited before serving: %v", err)
+		case <-time.After(10 * time.Second):
+			cancel()
+			t.Fatal("server did not report that it is serving")
+		}
+		t.Cleanup(func() {
+			cancel()
+			select {
+			case <-s.done:
+			case <-time.After(5 * time.Second):
+				t.Error("server did not stop after its context was canceled")
+			}
+		})
+		return nil
+	})
+	return s
 }
 
 // stop cancels the server and returns the error it exited with.
@@ -156,9 +220,9 @@ func collSite() *capture.Capture {
 func staticServer(t *testing.T, cfg config.StaticServerConfig) (*collServer, *collSyncBuffer) {
 	t.Helper()
 	var progress collSyncBuffer
-	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		cfg.Port = port
-		return ServeStatic(ctx, cfg, &progress)
+	srv := collStartServer(t, func(ctx context.Context, a collAddr) error {
+		cfg.Port, cfg.Listen = a.Port, a.Listen
+		return ServeStatic(ctx, cfg, a.Progress(&progress))
 	})
 	return srv, &progress
 }
@@ -254,13 +318,13 @@ func TestCollServer_errors(t *testing.T) {
 	site := collWriteCapture(t, collSite())
 
 	err := ServeStatic(ctx, config.StaticServerConfig{Port: 1, InputFile: filepath.Join(t.TempDir(), "missing.mbcap")}, nil)
-	coreRequireKind(t, err, errs.KindOutput, errs.CodeMCAPLoadFailed)
+	coreRequireKind(t, err, errs.KindOutput, errs.CodeCaptureLoadFailed)
 
-	v1 := filepath.Join(t.TempDir(), "old.mcap")
+	v1 := filepath.Join(t.TempDir(), "old.mbcap")
 	require.NoError(t, os.WriteFile(v1, []byte("MCAP\x01\x00\x02{}"), 0o600))
 	err = ServeReplay(ctx, config.ReplayServerConfig{Port: 1, InputFile: v1}, nil)
 	coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeCaptureLegacyFormat)
-	require.ErrorIs(t, err, capfile.ErrLegacyMCAP)
+	require.ErrorIs(t, err, capfile.ErrLegacyFormat)
 
 	err = ServeStatic(ctx, config.StaticServerConfig{Port: 1, InputFile: site, Target: 9}, nil)
 	coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeInvalidInput)
@@ -294,8 +358,8 @@ func TestCollReplayServer_followsTheRecording(t *testing.T) {
 	path := collWriteCapture(t, collSite())
 	var progress collSyncBuffer
 	// 3 s of capture at 10x: 300 ms per loop, played twice.
-	srv := collStartServer(t, func(ctx context.Context, port uint16) error {
-		return ServeReplay(ctx, config.ReplayServerConfig{Port: port, InputFile: path, Target: 1, Speed: "10", Loops: 2}, &progress)
+	srv := collStartServer(t, func(ctx context.Context, a collAddr) error {
+		return ServeReplay(ctx, config.ReplayServerConfig{Port: a.Port, Listen: a.Listen, InputFile: path, Target: 1, Speed: "10", Loops: 2}, a.Progress(&progress))
 	})
 	c := srv.client(t)
 	ctx := context.Background()
@@ -328,9 +392,9 @@ func TestCollReplayServer_beforeFirst(t *testing.T) {
 		before string
 		ok     bool
 	}{{"hold", true}, {"absent", false}} {
-		srv := collStartServer(t, func(ctx context.Context, port uint16) error {
+		srv := collStartServer(t, func(ctx context.Context, a collAddr) error {
 			// Speed 0.001: the replay stays near the start, before the identity read at 1.5 s.
-			return ServeReplay(ctx, config.ReplayServerConfig{Port: port, InputFile: path, Speed: "0.001", BeforeFirst: tc.before}, nil)
+			return ServeReplay(ctx, config.ReplayServerConfig{Port: a.Port, Listen: a.Listen, InputFile: path, Speed: "0.001", BeforeFirst: tc.before}, a.Progress(nil))
 		})
 		_, err := srv.client(t).ReadDeviceIdentification(ctx, 21, gomodbus.ReadDeviceIDBasic, 0)
 		if tc.ok {
@@ -371,4 +435,21 @@ func TestCollServer_debugAndStats(t *testing.T) {
 	assert.Contains(t, text, "DEBUG [serve] unit 21 FC03 10 x3: not in the capture")
 	assert.Contains(t, text, "DEBUG [serve] unit 3 FC11: not in the capture")
 	assert.Contains(t, text, "📊 Served 3 requests: 1 answered, 2 with an exception, 0 left unanswered; 2 asked for data the capture does not hold")
+}
+
+// A server asked to listen on a loopback port another socket holds fails with
+// EADDRINUSE: it never reports serving while a client would reach the other
+// socket. (Listening on every interface, macOS lets the bind succeed and sends
+// local connections to the more specific socket, which is how tests that
+// picked a port and then bound 0.0.0.0 used to reach the wrong server.)
+func TestCollServer_portTakenOnLoopback(t *testing.T) {
+	decoy, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = decoy.Close() }()
+	port := uint16(decoy.Addr().(*net.TCPAddr).Port)
+	path := collWriteCapture(t, collSite())
+	var progress collSyncBuffer
+	err = ServeStatic(context.Background(), config.StaticServerConfig{Listen: "127.0.0.1", Port: port, InputFile: path}, &progress)
+	require.ErrorIs(t, err, syscall.EADDRINUSE)
+	require.NotContains(t, progress.String(), "🚀 Serving Modbus TCP")
 }

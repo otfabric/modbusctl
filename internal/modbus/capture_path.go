@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// AutoCaptureMcapPath returns filepath.Join(dir, "modbusctl_<kind>_<UTC_timestamp>.mbcap") with a filesystem-safe timestamp (no colons).
+// AutoCapturePath returns filepath.Join(dir, "modbusctl_<kind>_<UTC_timestamp>.mbcap") with a filesystem-safe timestamp (no colons).
 // kind is typically "read", "scan", or "record". dir may be ".", "./captures", or "captures/" — Join normalizes separators.
-func AutoCaptureMcapPath(dir, kind string) string {
+func AutoCapturePath(dir, kind string) string {
 	if kind == "" {
 		kind = "capture"
 	}

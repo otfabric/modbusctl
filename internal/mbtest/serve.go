@@ -132,14 +132,32 @@ func CRC16(data []byte) uint16 {
 	return crc
 }
 
-// rtuRequestLength returns the total length of an RTU request frame given its first seven
-// bytes, for the function codes the device implements.
+// rtuRequestHead returns how many leading bytes of an RTU request frame (unit id
+// first) rtuRequestLength needs, given the function code.
+func rtuRequestHead(fc byte) int {
+	switch fc {
+	case 0x07, 0x0B, 0x0C, 0x11: // no data
+		return 4
+	case 0x14: // byte count after the function code
+		return 3
+	case 0x18: // FIFO pointer address
+		return 6
+	default:
+		return 7
+	}
+}
+
+// rtuRequestLength returns the total length of an RTU request frame given its first
+// rtuRequestHead bytes, for the function codes the device answers: every read function of
+// the specification (FC08 with two data bytes) and the four writes.
 func rtuRequestLength(head []byte) int {
 	switch head[1] {
 	case 0x0F, 0x10:
 		return 7 + int(head[6]) + 2
-	case 0x11:
-		return 4
+	case 0x14:
+		return 3 + int(head[2]) + 2
+	case 0x07, 0x0B, 0x0C, 0x11, 0x18:
+		return rtuRequestHead(head[1])
 	case 0x2B:
 		return 7
 	default:
@@ -151,19 +169,16 @@ func rtuRequestLength(head []byte) int {
 func (d *Device) serveRTU(rw io.ReadWriter) {
 	for {
 		frame := make([]byte, 256)
-		// Every supported request is at least 4 bytes; read those, then what the
-		// function code calls for.
-		if _, err := io.ReadFull(rw, frame[:4]); err != nil {
+		// Read the unit id and function code, then the header that gives the length,
+		// then the rest.
+		if _, err := io.ReadFull(rw, frame[:2]); err != nil {
 			return
 		}
-		n := 4
-		if frame[1] != 0x11 {
-			if _, err := io.ReadFull(rw, frame[4:7]); err != nil {
-				return
-			}
-			n = 7
+		n := rtuRequestHead(frame[1])
+		if _, err := io.ReadFull(rw, frame[2:n]); err != nil {
+			return
 		}
-		total := rtuRequestLength(frame[:7])
+		total := rtuRequestLength(frame[:n])
 		if total > len(frame) {
 			return
 		}

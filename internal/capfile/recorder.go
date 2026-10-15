@@ -170,6 +170,9 @@ func (r *Recorder) Commit(tok uint64, stream uint32, err error) error {
 		if capture.IsWriteFunction(s.Function()) {
 			continue // captures hold reads only
 		}
+		if !IsSpecRead(s.Request) {
+			return fmt.Errorf("%w: not recording function code %d (request % X)", ErrUnsupportedFunction, s.Function(), s.Request)
+		}
 		if werr := r.w.WriteSample(s); werr != nil {
 			return fmt.Errorf("writing capture %s: %w", r.path, werr)
 		}

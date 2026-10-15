@@ -17,21 +17,6 @@ func ScanAlgorithms() []string {
 	return scanAlgorithmValues
 }
 
-var convertFormatValues = []string{"mbcap", "jsonl", "csv", "wide-csv"}
-
-// ConvertFormats returns valid mcap convert --format values (distinct from client stdout [format.Values]).
-func ConvertFormats() []string {
-	return convertFormatValues
-}
-
-// ConvertFormatDescriptions maps mcap convert --format values to short shell-completion descriptions (keys must match [ConvertFormats]).
-var ConvertFormatDescriptions = map[string]string{
-	"mbcap":    "MBCAP binary (lossless)",
-	"jsonl":    "MBCAP JSON Lines (lossless)",
-	"csv":      "MBCAP long CSV (lossless)",
-	"wide-csv": "raw values per address over time (view)",
-}
-
 var functionCodeValues = []string{"1", "2", "3", "4"}
 
 // FunctionCodes returns valid Modbus read function codes for --function (1=coils, 2=discrete, 3=holding, 4=input).
@@ -80,12 +65,6 @@ func RegisterScanAlgoCompletion(cmd *cobra.Command) {
 	_ = cli.RegisterEnumFlagCompletion(cmd, "algo", ScanAlgorithms())
 }
 
-// RegisterConvertFormatCompletion registers shell completion for the --format flag (mcap convert).
-func RegisterConvertFormatCompletion(cmd *cobra.Command) {
-	_ = cli.RegisterEnumFlagCompletionWithDescriptions(cmd, "format", ConvertFormatDescriptions)
-}
-
-// RegisterFunctionCompletion registers shell completion for the --function flag (read/record/scan/static/replay).
 func RegisterFunctionCompletion(cmd *cobra.Command) {
 	_ = cli.RegisterEnumFlagCompletion(cmd, "function", FunctionCodes())
 }

@@ -19,11 +19,11 @@ import (
 	"time"
 
 	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/modbusctl/internal/analysis"
 	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/capfile/capfiletest"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/mbtest"
-	"github.com/otfabric/modbusctl/internal/mcap"
 	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -118,7 +118,7 @@ func TestE2ECapture_scanExtractRecordServe(t *testing.T) {
 
 			// 2. The scan becomes a blocks file.
 			var blocksJSON bytes.Buffer
-			require.NoError(t, mcap.ExportAddressBlocks(&blocksJSON, scanOut, config.CaptureSelection{}))
+			require.NoError(t, analysis.ExportAddressBlocks(&blocksJSON, scanOut, config.CaptureSelection{}))
 			var blocks []types.AddressBlock
 			require.NoError(t, json.Unmarshal(blocksJSON.Bytes(), &blocks))
 			covered := map[uint16]bool{}
@@ -164,8 +164,8 @@ func TestE2ECapture_scanExtractRecordServe(t *testing.T) {
 			// 5. Replay once at 4x: register 100 walks through the recorded values in order
 			// and stays on the last one.
 			var progress collSyncBuffer
-			rs := collStartServer(t, func(ctx context.Context, port uint16) error {
-				return ServeReplay(ctx, config.ReplayServerConfig{Port: port, InputFile: rec, Speed: "4", Loops: 1}, &progress)
+			rs := collStartServer(t, func(ctx context.Context, a collAddr) error {
+				return ServeReplay(ctx, config.ReplayServerConfig{Port: a.Port, Listen: a.Listen, InputFile: rec, Speed: "4", Loops: 1}, a.Progress(&progress))
 			})
 			rc := rs.client(t)
 			recorded := map[uint16]bool{}
@@ -214,11 +214,8 @@ func TestE2ECapture_encodingsServeTheSame(t *testing.T) {
 	for _, src := range []string{rec, coils} {
 		wantRegs, wantBits := read(src)
 		for _, f := range []string{"jsonl", "csv"} {
-			out := filepath.Join(t.TempDir(), "c."+f)
-			file, err := os.Create(out)
-			require.NoError(t, err)
-			require.NoError(t, mcap.Convert(file, src, f))
-			require.NoError(t, file.Close())
+			out := filepath.Join(t.TempDir(), "c.mbcap."+f)
+			rtConvert(t, src, out)
 			regs, bits := read(out)
 			require.Equal(t, wantRegs, regs, f)
 			require.Equal(t, wantBits, bits, f)

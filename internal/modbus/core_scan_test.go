@@ -130,13 +130,13 @@ func TestCoreScan_everyAlgorithm(t *testing.T) {
 			cfg.Timeout = coreTimeoutMS
 			cfg.Function = 3
 			cfg.Algo = tc.algo
-			cfg.OutputFile = coreMcapPath(t)
+			cfg.OutputFile = coreCapturePath(t)
 
 			var progress bytes.Buffer
 			sum, err := ScanAndRecord(context.Background(), cfg, &progress)
 			require.NoError(t, err)
 
-			records, header := coreLoadMcap(t, cfg.OutputFile)
+			records, header := coreLoadCapture(t, cfg.OutputFile)
 			assert.Equal(t, uint8(3), header.Unit)
 			assert.Equal(t, uint8(3), header.Function)
 			assert.Equal(t, "127.0.0.1", header.IP)
@@ -165,7 +165,7 @@ func TestCoreScan_everyAlgorithm(t *testing.T) {
 			}
 			assert.Equal(t, cfg.URL, sum.Target)
 			assert.Equal(t, tc.algo, sum.Algo)
-			assert.Equal(t, cfg.OutputFile, sum.McapOutputPath)
+			assert.Equal(t, cfg.OutputFile, sum.CaptureOutputPath)
 			assert.Equal(t, dev.RequestCount(0), sum.TotalRequests)
 			assert.Equal(t, dev.RequestCount(3), sum.TotalRequests, "only the configured function code is used")
 			assert.LessOrEqual(t, sum.TotalRequests, tc.maxReqs)
@@ -275,7 +275,7 @@ func TestCoreScan_sunspec(t *testing.T) {
 			cfg.Timeout = coreTimeoutMS
 			cfg.Function = 3
 			cfg.Algo = "sunspec"
-			cfg.OutputFile = coreMcapPath(t)
+			cfg.OutputFile = coreCapturePath(t)
 
 			var progress bytes.Buffer
 			sum, err := ScanAndRecord(context.Background(), cfg, &progress)
@@ -283,7 +283,7 @@ func TestCoreScan_sunspec(t *testing.T) {
 			assert.Equal(t, "sunspec", sum.Algo)
 			assert.True(t, strings.HasPrefix(progress.String(), tc.wantBanner), "progress:\n%s", progress.String())
 
-			records, _ := coreLoadMcap(t, cfg.OutputFile)
+			records, _ := coreLoadCapture(t, cfg.OutputFile)
 			var reads [][2]uint16
 			for _, rec := range records {
 				reads = append(reads, [2]uint16{rec.StartAddress, rec.RegisterCount})
@@ -301,7 +301,7 @@ func TestCoreScan_sunspec(t *testing.T) {
 
 	t.Run("no marker anywhere", func(t *testing.T) {
 		dev := coreScanDevice(coreRange{40000, 40001})
-		out := coreMcapPath(t)
+		out := coreCapturePath(t)
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 4, Algo: "SunSpec", OutputFile: out,
 		}, nil)
@@ -311,7 +311,7 @@ func TestCoreScan_sunspec(t *testing.T) {
 		// A readable base without the marker is still a successful read and is captured.
 		assert.Equal(t, 1, sum.SuccessCount)
 		assert.Equal(t, 7, sum.ExceptionCount)
-		records, header := coreLoadMcap(t, out)
+		records, header := coreLoadCapture(t, out)
 		require.Len(t, records, 1)
 		assert.Equal(t, uint16(40000), records[0].StartAddress)
 		assert.Equal(t, uint8(4), header.Function)
@@ -321,13 +321,13 @@ func TestCoreScan_sunspec(t *testing.T) {
 func TestCoreScan_inputRegistersAndCoils(t *testing.T) {
 	t.Run("input registers", func(t *testing.T) {
 		dev := mbtest.NewDevice().SetInput(10, 0xAAAA, 0xBBBB, 0xCCCC).SetHolding(0, 1, 2, 3, 4)
-		out := coreMcapPath(t)
+		out := coreCapturePath(t)
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 4, StartAddress: 8, EndAddress: 15, Algo: "smart", OutputFile: out,
 		}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, 3, sum.RegistersCaptured)
-		records, header := coreLoadMcap(t, out)
+		records, header := coreLoadCapture(t, out)
 		assert.Equal(t, uint8(4), header.Function)
 		assert.Equal(t, map[uint16]uint16{10: 0xAAAA, 11: 0xBBBB, 12: 0xCCCC}, coreRecordsAsRegisters(t, records))
 		assert.Zero(t, dev.RequestCount(3))
@@ -335,14 +335,14 @@ func TestCoreScan_inputRegistersAndCoils(t *testing.T) {
 
 	t.Run("coils are captured as packed bits", func(t *testing.T) {
 		dev := mbtest.NewDevice().SetCoils(0, true, false, true, true, false, false, false, false, true, true)
-		out := coreMcapPath(t)
+		out := coreCapturePath(t)
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 1, StartAddress: 0, EndAddress: 9, Algo: "linear", OutputFile: out,
 		}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, 1, sum.SuccessCount)
 		assert.Equal(t, 10, sum.RegistersCaptured)
-		records, header := coreLoadMcap(t, out)
+		records, header := coreLoadCapture(t, out)
 		assert.Equal(t, uint8(1), header.Function)
 		require.Len(t, records, 1)
 		assert.Equal(t, uint16(10), records[0].RegisterCount)
@@ -355,7 +355,7 @@ func TestCoreScan_debugProgress(t *testing.T) {
 	var progress bytes.Buffer
 	sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 3,
-		Algo: "smart", Debug: true, OutputFile: coreMcapPath(t),
+		Algo: "smart", Debug: true, OutputFile: coreCapturePath(t),
 	}, &progress)
 	require.NoError(t, err)
 	// [0,3] fails, [0,1] fails, 0 and 1 fail, [2,3] succeeds.
@@ -407,7 +407,7 @@ func TestCoreScan_strategyDebugOutput(t *testing.T) {
 
 func TestCoreScan_setupFailures(t *testing.T) {
 	t.Run("connect refused", func(t *testing.T) {
-		out := coreMcapPath(t)
+		out := coreCapturePath(t)
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t), Unit: 1}, Timeout: coreShortTimeoutMS,
 			Function: 3, EndAddress: 10, OutputFile: out,
@@ -421,7 +421,7 @@ func TestCoreScan_setupFailures(t *testing.T) {
 		dev := coreScanDevice(coreRange{0, 10})
 		_, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, EndAddress: 10,
-			OutputFile: filepath.Join(t.TempDir(), "missing", "scan.mcap"),
+			OutputFile: filepath.Join(t.TempDir(), "missing", "scan.mbcap"),
 		}, nil)
 		coreRequireKind(t, err, errs.KindOutput, errs.CodeOutputFileCreateFailed)
 		assert.Zero(t, dev.RequestCount(0))
@@ -432,7 +432,7 @@ func TestCoreScan_setupFailures(t *testing.T) {
 		var progress bytes.Buffer
 		_, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, EndAddress: 10,
-			Algo: "quantum", OutputFile: coreMcapPath(t),
+			Algo: "quantum", OutputFile: coreCapturePath(t),
 		}, &progress)
 		coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeInvalidInput)
 		assert.Contains(t, err.Error(), `unsupported scan algorithm "quantum"`)
@@ -451,9 +451,9 @@ func TestCoreScan_outputDirectoryAndDefaultAlgorithm(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "safe", sum.Algo)
-	assert.Equal(t, dir, filepath.Dir(sum.McapOutputPath))
-	assert.Regexp(t, `^modbusctl_scan_\d{8}_\d{6}\.mbcap$`, filepath.Base(sum.McapOutputPath))
-	records, _ := coreLoadMcap(t, sum.McapOutputPath)
+	assert.Equal(t, dir, filepath.Dir(sum.CaptureOutputPath))
+	assert.Regexp(t, `^modbusctl_scan_\d{8}_\d{6}\.mbcap$`, filepath.Base(sum.CaptureOutputPath))
+	records, _ := coreLoadCapture(t, sum.CaptureOutputPath)
 	assert.Equal(t, coreAddrSet(coreRange{0, 4}), coreCapturedAddrs(t, records))
 }
 
@@ -462,7 +462,7 @@ func TestCoreScan_normalizedAlgorithm(t *testing.T) {
 	dev := coreScanDevice(coreRange{0, 4})
 	sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 4,
-		Algo: " SMART ", NormalizedAlgo: config.ScanAlgoLinear, OutputFile: coreMcapPath(t),
+		Algo: " SMART ", NormalizedAlgo: config.ScanAlgoLinear, OutputFile: coreCapturePath(t),
 	}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "linear", sum.Algo)
@@ -473,7 +473,7 @@ func TestCoreScan_timeouts(t *testing.T) {
 	t.Run("counted as timeouts", func(t *testing.T) {
 		dev := coreScanDevice(coreRange{0, 9})
 		dev.OnRequest = func(mbtest.Request) mbtest.Action { return mbtest.Action{Drop: true} }
-		out := coreMcapPath(t)
+		out := coreCapturePath(t)
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreShortTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 9,
 			Algo: "linear", OutputFile: out,
@@ -485,14 +485,14 @@ func TestCoreScan_timeouts(t *testing.T) {
 		assert.Zero(t, sum.ExceptionCount)
 		assert.Zero(t, sum.TransportErrorCount)
 		assert.Zero(t, sum.AvgResponseMs)
-		records, _ := coreLoadMcap(t, out)
+		records, _ := coreLoadCapture(t, out)
 		assert.Empty(t, records)
 	})
 
 	t.Run("retried once when configured", func(t *testing.T) {
 		dev := coreScanDevice(coreRange{0, 9})
 		dev.OnRequest = coreFirstN(1, mbtest.Action{Drop: true})
-		out := coreMcapPath(t)
+		out := coreCapturePath(t)
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreShortTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 9,
 			Algo: "linear", RetryOnTimeoutTransport: 1, OutputFile: out,
@@ -503,7 +503,7 @@ func TestCoreScan_timeouts(t *testing.T) {
 		assert.Equal(t, 1, sum.SuccessCount)
 		assert.Zero(t, sum.FailCount)
 		assert.Zero(t, sum.TimeoutCount)
-		records, _ := coreLoadMcap(t, out)
+		records, _ := coreLoadCapture(t, out)
 		assert.Equal(t, coreAddrSet(coreRange{0, 9}), coreCapturedAddrs(t, records))
 	})
 
@@ -513,7 +513,7 @@ func TestCoreScan_timeouts(t *testing.T) {
 		start := time.Now()
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreShortTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 9,
-			Algo: "linear", RetryOnTimeoutTransport: 1, Delay: 30, OutputFile: coreMcapPath(t),
+			Algo: "linear", RetryOnTimeoutTransport: 1, Delay: 30, OutputFile: coreCapturePath(t),
 		}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, 2, sum.TotalRequests)
@@ -527,7 +527,7 @@ func TestCoreScan_timeouts(t *testing.T) {
 		dev := coreScanDevice(coreRange{50, 59})
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 9,
-			Algo: "linear", RetryOnTimeoutTransport: 1, OutputFile: coreMcapPath(t),
+			Algo: "linear", RetryOnTimeoutTransport: 1, OutputFile: coreCapturePath(t),
 		}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, 1, sum.TotalRequests)
@@ -541,7 +541,7 @@ func TestCoreScan_connectionClosedByDevice(t *testing.T) {
 	t.Run("scan continues after re-dialing", func(t *testing.T) {
 		dev := coreScanDevice(coreRange{0, 3})
 		dev.OnRequest = coreFirstN(1, mbtest.Action{Close: true})
-		out := coreMcapPath(t)
+		out := coreCapturePath(t)
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 3,
 			Algo: "smart", OutputFile: out,
@@ -553,7 +553,7 @@ func TestCoreScan_connectionClosedByDevice(t *testing.T) {
 		assert.Zero(t, sum.ExceptionCount)
 		assert.Zero(t, sum.TimeoutCount)
 		assert.Equal(t, 2, sum.SuccessCount)
-		records, _ := coreLoadMcap(t, out)
+		records, _ := coreLoadCapture(t, out)
 		assert.Equal(t, coreAddrSet(coreRange{0, 3}), coreCapturedAddrs(t, records))
 	})
 
@@ -563,7 +563,7 @@ func TestCoreScan_connectionClosedByDevice(t *testing.T) {
 		var progress bytes.Buffer
 		sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 3,
-			Algo: "smart", RetryOnTimeoutTransport: 1, Debug: true, OutputFile: coreMcapPath(t),
+			Algo: "smart", RetryOnTimeoutTransport: 1, Debug: true, OutputFile: coreCapturePath(t),
 		}, &progress)
 		require.NoError(t, err)
 		assert.Equal(t, 2, sum.TotalRequests)
@@ -582,7 +582,7 @@ func TestCoreScan_unclassifiedFailure(t *testing.T) {
 	var progress bytes.Buffer
 	sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 9, StartAddress: 0, EndAddress: 9,
-		Algo: "linear", Debug: true, OutputFile: coreMcapPath(t),
+		Algo: "linear", Debug: true, OutputFile: coreCapturePath(t),
 	}, &progress)
 	require.NoError(t, err)
 	assert.Equal(t, 1, sum.TotalRequests)
@@ -600,7 +600,7 @@ func TestCoreScan_delayBetweenRequests(t *testing.T) {
 	start := time.Now()
 	sum, err := ScanAndRecord(context.Background(), config.ScanConfig{
 		DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 7,
-		Algo: "smart", Delay: 20, OutputFile: coreMcapPath(t),
+		Algo: "smart", Delay: 20, OutputFile: coreCapturePath(t),
 	}, nil)
 	require.NoError(t, err)
 	// [0,7] fails, [0,3] succeeds, [4,7] is split down to single registers: 1 + 1 + 7 requests.
@@ -620,7 +620,7 @@ func TestCoreScan_cancellation(t *testing.T) {
 		cancel()
 		sum, err := ScanAndRecord(ctx, config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 9,
-			Algo: "safe", Delay: 500, OutputFile: coreMcapPath(t),
+			Algo: "safe", Delay: 500, OutputFile: coreCapturePath(t),
 		}, nil)
 		assert.Nil(t, sum)
 		require.ErrorIs(t, err, context.Canceled)
@@ -641,7 +641,7 @@ func TestCoreScan_cancellation(t *testing.T) {
 		start := time.Now()
 		sum, err := ScanAndRecord(ctx, config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 2000,
-			Algo: "safe", Delay: 5, OutputFile: coreMcapPath(t),
+			Algo: "safe", Delay: 5, OutputFile: coreCapturePath(t),
 		}, nil)
 		assert.Nil(t, sum)
 		require.ErrorIs(t, err, context.Canceled)
@@ -660,7 +660,7 @@ func TestCoreScan_cancellation(t *testing.T) {
 		}
 		sum, err := ScanAndRecord(ctx, config.ScanConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreShortTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 9,
-			Algo: "linear", RetryOnTimeoutTransport: 1, Delay: 400, OutputFile: coreMcapPath(t),
+			Algo: "linear", RetryOnTimeoutTransport: 1, Delay: 400, OutputFile: coreCapturePath(t),
 		}, nil)
 		assert.Nil(t, sum)
 		require.ErrorIs(t, err, context.Canceled)

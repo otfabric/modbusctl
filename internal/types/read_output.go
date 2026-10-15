@@ -9,14 +9,14 @@ import (
 
 // ReadResult is the structured outcome of a single client read (plus the capture file it writes).
 type ReadResult struct {
-	Target         string `json:"target"`
-	UnitID         uint8  `json:"unit_id"`
-	Function       uint8  `json:"function"`
-	StartAddress   uint16 `json:"start_address"`
-	RegisterCount  uint16 `json:"register_count"`
-	RawByteCount   int    `json:"raw_byte_count"`
-	RawDataHex     string `json:"raw_data_hex"`
-	McapOutputPath string `json:"mcap_output_path"`
+	Target            string `json:"target"`
+	UnitID            uint8  `json:"unit_id"`
+	Function          uint8  `json:"function"`
+	StartAddress      uint16 `json:"start_address"`
+	RegisterCount     uint16 `json:"register_count"`
+	RawByteCount      int    `json:"raw_byte_count"`
+	RawDataHex        string `json:"raw_data_hex"`
+	CaptureOutputPath string `json:"capture_output_path"`
 }
 
 // MarshalTextOutput matches historical read stdout (single coherent view of ReadResult fields).
@@ -28,7 +28,7 @@ func (r *ReadResult) MarshalTextOutput() (string, error) {
 	_, _ = fmt.Fprintf(&b, "Reading %d registers starting from address %d using function code %d\n",
 		r.RegisterCount, r.StartAddress, r.Function)
 	_, _ = fmt.Fprintf(&b, "Read %d bytes of data: %s\n", r.RawByteCount, r.RawDataHex)
-	_, _ = fmt.Fprintf(&b, "✅ Output written to %s\n", r.McapOutputPath)
+	_, _ = fmt.Fprintf(&b, "✅ Output written to %s\n", r.CaptureOutputPath)
 	return b.String(), nil
 }
 
@@ -50,7 +50,7 @@ func (r *ReadResult) TableRows() [][]string {
 		{"register_count", fmt.Sprintf("%d", r.RegisterCount)},
 		{"raw_byte_count", fmt.Sprintf("%d", r.RawByteCount)},
 		{"raw_data_hex", r.RawDataHex},
-		{"mcap_output_path", r.McapOutputPath},
+		{"capture_output_path", r.CaptureOutputPath},
 	}
 	return rows
 }

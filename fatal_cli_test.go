@@ -34,10 +34,10 @@ func TestCLI_fatalText_emptyStdout_noCobraErrorPrefix(t *testing.T) {
 	}
 }
 
-func TestCLI_mcap_convert_fatal_missingMCAP(t *testing.T) {
+func TestCLI_capture_extract_fatal_missingCapture(t *testing.T) {
 	bin := buildModbusctl(t)
-	badPath := filepath.Join(t.TempDir(), "does-not-exist.mcap")
-	cmd := exec.Command(bin, "mcap", "convert", "--input", badPath, "--format", "csv")
+	badPath := filepath.Join(t.TempDir(), "does-not-exist.mbcap")
+	cmd := exec.Command(bin, "capture", "extract", "--input", badPath)
 	cmd.Env = modbusctlEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

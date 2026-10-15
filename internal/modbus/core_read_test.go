@@ -45,7 +45,7 @@ func TestCoreCollectRead_everyFunctionCode(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			out := coreMcapPath(t)
+			out := coreCapturePath(t)
 			before := time.Now().UnixNano()
 			res, err := CollectRead(context.Background(), config.ReadConfig{
 				DeviceConfig: dc, Timeout: coreTimeoutMS, Function: tc.fc,
@@ -60,9 +60,9 @@ func TestCoreCollectRead_everyFunctionCode(t *testing.T) {
 			assert.Equal(t, tc.count, res.RegisterCount)
 			assert.Equal(t, len(tc.wantRaw), res.RawByteCount)
 			assert.Equal(t, fmt.Sprintf("% X", tc.wantRaw), res.RawDataHex)
-			assert.Equal(t, out, res.McapOutputPath)
+			assert.Equal(t, out, res.CaptureOutputPath)
 
-			records, header := coreLoadMcap(t, out)
+			records, header := coreLoadCapture(t, out)
 			host, portStr, err := net.SplitHostPort(strings.TrimPrefix(dc.URL, "tcp://"))
 			require.NoError(t, err)
 			port, err := strconv.Atoi(portStr)
@@ -96,7 +96,7 @@ func TestCoreCollectRead_ipAndPortInsteadOfURL(t *testing.T) {
 	res, err := CollectRead(context.Background(), config.ReadConfig{
 		DeviceConfig: config.DeviceConfig{IP: host, Port: uint16(port), Unit: 9},
 		Timeout:      coreTimeoutMS, Function: 3, StartAddress: 5, RegisterCount: 1,
-		OutputFile: coreMcapPath(t),
+		OutputFile: coreCapturePath(t),
 	}, io.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, "tcp://"+net.JoinHostPort(host, portStr), res.Target)
@@ -115,29 +115,29 @@ func TestCoreCollectRead_outputDirectory(t *testing.T) {
 		OutputFile: dir + "/",
 	}, nil)
 	require.NoError(t, err)
-	assert.Equal(t, dir, filepath.Dir(res.McapOutputPath))
-	assert.Regexp(t, `^modbusctl_read_\d{8}_\d{6}\.mbcap$`, filepath.Base(res.McapOutputPath))
-	records, _ := coreLoadMcap(t, res.McapOutputPath)
+	assert.Equal(t, dir, filepath.Dir(res.CaptureOutputPath))
+	assert.Regexp(t, `^modbusctl_read_\d{8}_\d{6}\.mbcap$`, filepath.Base(res.CaptureOutputPath))
+	records, _ := coreLoadCapture(t, res.CaptureOutputPath)
 	require.Len(t, records, 1)
 	assert.Equal(t, []byte{0x00, 0x07}, records[0].Data)
 }
 
-func TestCoreReadCaptureMcapPath(t *testing.T) {
-	assert.Equal(t, "/x/y.mcap", readCaptureMcapPath(config.ReadConfig{OutputFile: "/x/y.mcap"}))
-	assert.Regexp(t, `^/x/modbusctl_read_\d{8}_\d{6}\.mbcap$`, readCaptureMcapPath(config.ReadConfig{OutputFile: "/x/"}))
+func TestCoreReadCapturePath(t *testing.T) {
+	assert.Equal(t, "/x/y.mbcap", readCapturePath(config.ReadConfig{OutputFile: "/x/y.mbcap"}))
+	assert.Regexp(t, `^/x/modbusctl_read_\d{8}_\d{6}\.mbcap$`, readCapturePath(config.ReadConfig{OutputFile: "/x/"}))
 	// No output file: an auto-named capture in the current directory.
-	assert.Regexp(t, `^modbusctl_read_\d{8}_\d{6}\.mbcap$`, readCaptureMcapPath(config.ReadConfig{}))
+	assert.Regexp(t, `^modbusctl_read_\d{8}_\d{6}\.mbcap$`, readCapturePath(config.ReadConfig{}))
 }
 
-func TestCoreAutoCaptureMcapPath_defaultKind(t *testing.T) {
-	assert.Regexp(t, `^d/modbusctl_capture_\d{8}_\d{6}\.mbcap$`, AutoCaptureMcapPath("d", ""))
+func TestCoreAutoCapturePath_defaultKind(t *testing.T) {
+	assert.Regexp(t, `^d/modbusctl_capture_\d{8}_\d{6}\.mbcap$`, AutoCapturePath("d", ""))
 }
 
 func TestCoreCollectRead_failures(t *testing.T) {
 	t.Run("connect refused", func(t *testing.T) {
 		_, err := CollectRead(context.Background(), config.ReadConfig{
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t), Unit: 1},
-			Timeout:      coreShortTimeoutMS, Function: 3, RegisterCount: 1, OutputFile: coreMcapPath(t),
+			Timeout:      coreShortTimeoutMS, Function: 3, RegisterCount: 1, OutputFile: coreCapturePath(t),
 		}, nil)
 		require.ErrorIs(t, err, ErrTCPConnection)
 		coreRequireKind(t, err, errs.KindTransport, errs.CodeTransportConnectFailed)
@@ -146,7 +146,7 @@ func TestCoreCollectRead_failures(t *testing.T) {
 	t.Run("invalid url", func(t *testing.T) {
 		_, err := CollectRead(context.Background(), config.ReadConfig{
 			DeviceConfig: config.DeviceConfig{URL: "bogus://127.0.0.1:502", Unit: 1},
-			Timeout:      coreShortTimeoutMS, Function: 3, RegisterCount: 1, OutputFile: coreMcapPath(t),
+			Timeout:      coreShortTimeoutMS, Function: 3, RegisterCount: 1, OutputFile: coreCapturePath(t),
 		}, nil)
 		require.ErrorIs(t, err, ErrTCPConnection)
 	})
@@ -155,7 +155,7 @@ func TestCoreCollectRead_failures(t *testing.T) {
 		dev := mbtest.NewDevice().SetHolding(0, 1)
 		_, err := CollectRead(context.Background(), config.ReadConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, RegisterCount: 1,
-			OutputFile: filepath.Join(t.TempDir(), "missing", "out.mcap"),
+			OutputFile: filepath.Join(t.TempDir(), "missing", "out.mbcap"),
 		}, nil)
 		coreRequireKind(t, err, errs.KindOutput, errs.CodeOutputFileCreateFailed)
 		assert.Zero(t, dev.RequestCount(0), "no request may be sent when the capture cannot be written")
@@ -165,7 +165,7 @@ func TestCoreCollectRead_failures(t *testing.T) {
 		dev := mbtest.NewDevice().SetHolding(0, 1)
 		_, err := CollectRead(context.Background(), config.ReadConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 50, RegisterCount: 2,
-			OutputFile: coreMcapPath(t),
+			OutputFile: coreCapturePath(t),
 		}, nil)
 		var ex *gomodbus.ExceptionError
 		require.ErrorAs(t, err, &ex)
@@ -179,7 +179,7 @@ func TestCoreCollectRead_failures(t *testing.T) {
 			dev := mbtest.NewDevice()
 			_, err := CollectRead(context.Background(), config.ReadConfig{
 				DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: fc, StartAddress: 5, RegisterCount: 3,
-				OutputFile: coreMcapPath(t),
+				OutputFile: coreCapturePath(t),
 			}, nil)
 			require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress)
 			assert.Equal(t, 1, dev.RequestCount(fc))
@@ -192,7 +192,7 @@ func TestCoreCollectRead_failures(t *testing.T) {
 		start := time.Now()
 		_, err := CollectRead(context.Background(), config.ReadConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreShortTimeoutMS, Function: 3, RegisterCount: 1,
-			OutputFile: coreMcapPath(t),
+			OutputFile: coreCapturePath(t),
 		}, nil)
 		coreRequireKind(t, err, errs.KindTimeout, errs.CodeRequestTimeout)
 		assert.GreaterOrEqual(t, time.Since(start), coreShortTimeoutMS*time.Millisecond)
@@ -203,7 +203,7 @@ func TestCoreCollectRead_failures(t *testing.T) {
 		dev := mbtest.NewDevice().SetHolding(0, 1)
 		_, err := CollectRead(context.Background(), config.ReadConfig{
 			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 7, RegisterCount: 1,
-			OutputFile: coreMcapPath(t),
+			OutputFile: coreCapturePath(t),
 		}, nil)
 		coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeInvalidInput)
 		assert.Contains(t, err.Error(), "unsupported function code: 7")

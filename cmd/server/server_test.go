@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -60,7 +62,8 @@ func record(t *testing.T, d *mbtest.Device, fc uint8, blocksJSON string) (string
 	return out, uint16(res.Iterations)
 }
 
-// freePort returns a TCP port nothing listens on.
+// freePort returns a loopback TCP port that was free a moment ago; another
+// socket may take it before the server binds it (see startServer).
 func freePort(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -85,14 +88,46 @@ type server struct {
 	done   chan cmdResult
 }
 
-// startServer runs "server <args> --port <free port>" until stop is called.
+// startServer runs "server <args> --listen 127.0.0.1 --port <free port>" until stop is
+// called. It returns once the server reports that its listener is bound: only then is the
+// port its own (a probe connection could reach another socket holding the port). When the
+// port was taken between freePort and the bind, it starts again on another one.
 func startServer(t *testing.T, args ...string) *server {
+	t.Helper()
+	for range 20 {
+		if s := tryStartServer(t, args); s != nil {
+			return s
+		}
+	}
+	t.Fatal("no free loopback port after 20 attempts")
+	return nil
+}
+
+// tryStartServer is one attempt of startServer; nil means the port was taken.
+func tryStartServer(t *testing.T, args []string) *server {
 	t.Helper()
 	s := &server{port: freePort(t), stdout: &syncBuffer{}, done: make(chan cmdResult, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
-	args = append(append([]string{"server"}, args...), "--port", s.port)
-	go func() { s.done <- runTo(t, ctx, s.stdout, args...) }()
+	full := append(append([]string{"server"}, args...), "--listen", "127.0.0.1", "--port", s.port)
+	go func() { s.done <- runTo(t, ctx, s.stdout, full...) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(s.stdout.String(), "🚀 Serving Modbus TCP") {
+		select {
+		case r := <-s.done:
+			cancel()
+			if r.err != nil && errors.Is(r.err, syscall.EADDRINUSE) {
+				return nil
+			}
+			t.Fatalf("server exited before serving: %v\n%s", r.err, s.stdout.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("server on port %s did not report that it is serving:\n%s", s.port, s.stdout.String())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -100,24 +135,7 @@ func startServer(t *testing.T, args ...string) *server {
 		case <-time.After(5 * time.Second):
 		}
 	})
-	// Wait until the listener accepts connections.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+s.port, 200*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			return s
-		}
-		select {
-		case r := <-s.done:
-			t.Fatalf("server exited before it was reachable: %v\n%s", r.err, s.stdout.String())
-		default:
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("server on port %s did not come up: %v\n%s", s.port, err, s.stdout.String())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	return s
 }
 
 // stop interrupts the server and returns the command result.
@@ -192,7 +210,7 @@ func TestStatic(t *testing.T) {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
 	wantContains(t, s.stdout.String(), "Static server ready on port "+s.port+" with the last recorded values of "+in,
-		"Unit 1: target 1, ", "Serving Modbus TCP on port "+s.port)
+		"Unit 1: target 1, ", "Serving Modbus TCP on 127.0.0.1 port "+s.port)
 }
 
 func TestStatic_coils(t *testing.T) {

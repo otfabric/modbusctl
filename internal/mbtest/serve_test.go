@@ -85,6 +85,14 @@ func TestRTURequestLength(t *testing.T) {
 	assert.Equal(t, 10, rtuRequestLength(head(0x0F, 1)))
 	assert.Equal(t, 4, rtuRequestLength(head(0x11, 0)))
 	assert.Equal(t, 7, rtuRequestLength(head(0x2B, 0)))
+	for _, fc := range []byte{0x07, 0x0B, 0x0C, 0x11} {
+		assert.Equal(t, 4, rtuRequestHead(fc))
+		assert.Equal(t, 4, rtuRequestLength([]byte{1, fc, 0, 0}))
+	}
+	assert.Equal(t, 6, rtuRequestHead(0x18))
+	assert.Equal(t, 6, rtuRequestLength([]byte{1, 0x18, 0x04, 0xD2, 0, 0}))
+	assert.Equal(t, 3, rtuRequestHead(0x14))
+	assert.Equal(t, 3+14+2, rtuRequestLength([]byte{1, 0x14, 14}))
 }
 
 // pipe runs serve on one end of an in-memory connection and returns the other end.

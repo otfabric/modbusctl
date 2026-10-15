@@ -1,7 +1,8 @@
-// Package mcap implements the modbusctl mcap commands on MBCAP capture files
-// (see github.com/otfabric/go-modbus-capture): info, verify, convert, and the
-// register-block analyses decode, strings, frequencies and extract.
-package mcap
+// Package analysis implements the modbusctl capture commands: register-block
+// analyses of MBCAP capture files (decode, extract, strings, frequencies).
+// Inspecting, verifying and converting capture files is left to mbcapctl of
+// github.com/otfabric/go-modbus-capture.
+package analysis
 
 import (
 	"github.com/otfabric/modbusctl/internal/capfile"

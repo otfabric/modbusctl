@@ -1,4 +1,4 @@
-package mcap
+package capture
 
 import (
 	"bytes"
@@ -19,7 +19,7 @@ import (
 var testRoot = func() *cobra.Command {
 	root := &cobra.Command{Use: "modbusctl", SilenceUsage: true, SilenceErrors: true}
 	root.PersistentFlags().Bool("debug", false, "Print debug information")
-	root.AddCommand(McapCmd)
+	root.AddCommand(CaptureCmd)
 	return root
 }()
 

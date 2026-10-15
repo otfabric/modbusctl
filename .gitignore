@@ -9,7 +9,7 @@
 *.csv
 *.json
 *.log
-*.mcap
+*.mbcap*
 
 # Editor settings
 .vscode/
