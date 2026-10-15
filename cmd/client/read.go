@@ -27,6 +27,9 @@ var readCmd = &cobra.Command{
   # Connect via URL (mutually exclusive with --ip/--port)
   modbusctl client read --url tcp://192.168.1.10:502 --start 40001
 
+  # Modbus/TCP Security: TLS with a client certificate (see --tls-cert, --tls-key, --tls-ca)
+  modbusctl client read --url tcp+tls://192.168.1.10:802 --tls-cert client.pem --tls-key client-key.pem --tls-ca ca.pem --start 40001
+
   # Use environment variables instead of CLI arguments
   MODBUSCTL_IP=192.168.1.10 MODBUSCTL_ADDRESS=40001 MODBUSCTL_COUNT=5 modbusctl client read
 `,

@@ -22,6 +22,9 @@ var recordCmd = &cobra.Command{
   # Connect via URL (mutually exclusive with --ip/--port)
   modbusctl client record --url tcp://192.168.1.100:502 --blocks-file blocks.json --output data.mbcap --interval 5000 --duration 60000
 
+  # Modbus/TCP Security: TLS with a client certificate (see --tls-cert, --tls-key, --tls-ca)
+  modbusctl client record --url tcp+tls://192.168.1.100:802 --tls-cert client.pem --tls-key client-key.pem --tls-ca ca.pem --blocks-file blocks.json --output data.mbcap --interval 5000 --duration 60000
+
   # Record input-register blocks (function code 4) every 10 seconds for 2 minutes
   modbusctl client record --ip 192.168.1.100 --function 4 --blocks-file register-ranges.json --output data.mbcap --interval 10000 --duration 120000
 

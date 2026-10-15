@@ -68,7 +68,7 @@ func Poll(ctx context.Context, cfg config.PollConfig, progress io.Writer, emit f
 	}
 
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
+	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig)
 	if err != nil {
 		return nil, err
 	}

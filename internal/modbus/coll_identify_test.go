@@ -353,7 +353,8 @@ func TestCollIdentify_ipPortTarget(t *testing.T) {
 
 func TestCollClientPool(t *testing.T) {
 	dev := mbtest.NewDevice().SetHolding(0, 0xBEEF)
-	conf := buildDeviceClientConfig("tcp://"+dev.ServeTCP(t), 1000, false, config.SerialConfig{})
+	conf, err := buildDeviceClientConfig("tcp://"+dev.ServeTCP(t), 1000, false, config.SerialConfig{}, config.TLSConfig{})
+	require.NoError(t, err)
 
 	t.Run("opens n independent clients", func(t *testing.T) {
 		clients, cleanup, err := openModbusClientPool(3, conf)

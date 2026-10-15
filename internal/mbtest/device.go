@@ -1,7 +1,7 @@
 // Package mbtest provides an in-memory Modbus slave for tests. A [Device] holds coils and
-// registers and can be served over every transport modbusctl speaks: Modbus TCP, Modbus UDP,
-// RTU or ASCII framing over TCP, and RTU or ASCII on a pseudo-terminal standing in for a
-// serial port.
+// registers and can be served over every transport modbusctl speaks: Modbus TCP, Modbus/TCP
+// Security (TLS), Modbus UDP, RTU or ASCII framing over TCP, and RTU or ASCII on a
+// pseudo-terminal standing in for a serial port.
 package mbtest
 
 import (

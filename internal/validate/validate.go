@@ -34,12 +34,16 @@ func validateOptionalTimeoutMilliseconds(ms uint16) error {
 }
 
 // validateModbusEndpoint applies layered checks: [config.ValidateModbusAddress] (exactly one of URL or IP),
-// the serial-line settings, then when --ip is set literal IP syntax and a non-zero port.
-func validateModbusEndpoint(url, ip string, port uint16, serial config.SerialConfig) error {
+// the serial-line settings, the TLS files of a tcp+tls:// URL, then when --ip is set literal IP
+// syntax and a non-zero port.
+func validateModbusEndpoint(url, ip string, port uint16, serial config.SerialConfig, tlsCfg config.TLSConfig) error {
 	if err := config.ValidateModbusAddress(url, ip); err != nil {
 		return err
 	}
 	if err := config.ValidateSerialConfig(serial); err != nil {
+		return err
+	}
+	if err := config.ValidateTLSConfig(url, tlsCfg); err != nil {
 		return err
 	}
 	if strings.TrimSpace(ip) == "" {
@@ -63,7 +67,7 @@ func CheckIdentifyConfig(cfg config.IdentifyConfig) error {
 
 // validateUnitClientConfig validates URL-or-IP (mutually exclusive), and when IP is set also Port and UnitID ("all" or 1-255).
 func validateUnitClientConfig(cfg config.UnitClientConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
 		return err
 	}
 	if cfg.UnitID == "" {
@@ -321,7 +325,7 @@ func checkSelection(sel config.CaptureSelection) error {
 }
 
 func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
 		return err
 	}
 	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
@@ -334,7 +338,7 @@ func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
 }
 
 func CheckDiagnosticConfig(cfg config.DiagnosticConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
 		return err
 	}
 	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
@@ -497,7 +501,7 @@ func isValidHostIP(s string) bool {
 }
 
 func validateDeviceConfig(cfg config.DeviceConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
 		return err
 	}
 	// uint8 cannot exceed 255; reject 0 (broadcast / invalid for directed client requests).
@@ -581,7 +585,7 @@ func CheckSunSpecProbeConfig(cfg config.SunSpecProbeConfig) error {
 }
 
 func checkSunSpecBaseConfig(cfg *config.SunSpecBaseConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
 		return err
 	}
 	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {

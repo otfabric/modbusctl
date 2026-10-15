@@ -19,7 +19,10 @@ func CollectFingerprint(ctx context.Context, cfg config.FingerprintConfig) (*typ
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	res := &types.FingerprintResult{Target: modbusURL}
 
-	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
+	conf, err := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig)
+	if err != nil {
+		return nil, err
+	}
 	if err := modbus.ValidateConfig(conf); err != nil {
 		return nil, ClientConfigInvalid(err)
 	}

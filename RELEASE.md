@@ -1,5 +1,28 @@
 # modbusctl Releases
 
+## v3.2.0
+
+**Date:** unreleased  
+**Previous release:** v3.1.0
+
+### Summary
+
+Minor release: the client speaks **Modbus/TCP Security**. `tcp+tls://` URLs were accepted before but could not connect, because go-modbus requires a client certificate for them and modbusctl had no way to give one. Every client command now takes **`--tls-cert`**, **`--tls-key`** and **`--tls-ca`**, so devices can be read, scanned, polled, written, identified and recorded over TLS.
+
+### Added
+
+- **`--tls-cert`, `--tls-key`, `--tls-ca`** on every client command (`MODBUSCTL_TLS_CERT`, `MODBUSCTL_TLS_KEY`, `MODBUSCTL_TLS_CA`), used with `tcp+tls://` URLs and ignored for other URLs. `--tls-cert` is required. `--tls-key` defaults to the `--tls-cert` file, which may hold both. `--tls-ca` defaults to the system roots. A missing or unreadable file is invalid input (exit 3) and nothing is sent. A device that the CA does not vouch for, or that rejects the client certificate, is a transport error (exit 4).
+- Captures made over TLS record the target's transport as `tls`. The certificate files are not stored in them.
+
+### Not included
+
+- **No TLS server name override.** go-modbus checks the device certificate against the host of the URL and has no setting for another name.
+- **No TLS on `server static` and `server replay`.** They serve over plain Modbus TCP, including captures recorded over TLS.
+
+### Tests
+
+- End to end against a go-modbus `tcp+tls` server with a throwaway CA. A plan of FC03, FC08, FC17, FC20 and FC24 is recorded over TLS and the capture replayed with `server replay`. The capture is also served back over TLS and read with the TLS client. Every client command runs over TLS. The client is refused by an untrusted CA, the system roots, a certificate without the device's address, and a server that does not trust the client certificate. It fails as invalid input with a missing certificate, a mismatched key, or a missing or empty CA file.
+
 ## v3.1.0
 
 **Date:** 2026-10-15  

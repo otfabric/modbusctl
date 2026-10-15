@@ -23,7 +23,10 @@ func CollectDeviceIdentification(ctx context.Context, cfg config.IdentifyConfig)
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	res := &types.IdentifyResult{Target: modbusURL}
 
-	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
+	conf, err := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig)
+	if err != nil {
+		return nil, err
+	}
 	reqBudget := clientRequestTimeout(cfg.Timeout)
 
 	// A serial line carries one request at a time: never open it more than once.

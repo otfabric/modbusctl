@@ -36,6 +36,12 @@ func (d *Device) serveStream(t testing.TB, serve func(io.ReadWriter)) string {
 	if err != nil {
 		t.Fatalf("mbtest: listen: %v", err)
 	}
+	return serveListener(t, ln, serve)
+}
+
+// serveListener accepts connections on ln and serves each with serve until the test ends.
+// It returns the address of ln.
+func serveListener(t testing.TB, ln net.Listener, serve func(io.ReadWriter)) string {
 	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		for {
