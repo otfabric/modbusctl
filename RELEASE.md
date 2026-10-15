@@ -1,30 +1,5 @@
 # modbusctl Releases
 
-## v3.2.0
-
-**Date:** 2026-10-15
-**Previous release:** v3.1.0
-
-### Summary
-
-Minor release: the client speaks **Modbus/TCP Security**. `tcp+tls://` URLs were accepted before but could not connect, because go-modbus requires a client certificate for them and modbusctl had no way to give one. Every client command now takes **`--tls-cert`**, **`--tls-key`** and **`--tls-ca`**, so devices can be read, scanned, polled, written, identified and recorded over TLS.
-
-### Added
-
-- **`--tls-cert`, `--tls-key`, `--tls-ca`** on every client command (`MODBUSCTL_TLS_CERT`, `MODBUSCTL_TLS_KEY`, `MODBUSCTL_TLS_CA`), used with `tcp+tls://` URLs and ignored for other URLs. `--tls-cert` is required. `--tls-key` defaults to the `--tls-cert` file, which may hold both. `--tls-ca` defaults to the system roots. A missing or unreadable file is invalid input (exit 3) and nothing is sent. A device that the CA does not vouch for, or that rejects the client certificate, is a transport error (exit 4).
-- Captures made over TLS record the target's transport as `tls`. The certificate files are not stored in them.
-
-### Not included
-
-- **No TLS server name override.** go-modbus checks the device certificate against the host of the URL and has no setting for another name.
-- **No TLS on `server static` and `server replay`.** They serve over plain Modbus TCP, including captures recorded over TLS.
-
-### Tests
-
-- End to end against a go-modbus `tcp+tls` server with a throwaway CA. A plan of FC03, FC08, FC17, FC20 and FC24 is recorded over TLS and the capture replayed with `server replay`. The capture is also served back over TLS and read with the TLS client. Every client command runs over TLS. The client is refused by an untrusted CA, the system roots, a certificate without the device's address, and a server that does not trust the client certificate. It fails as invalid input with a missing certificate, a mismatched key, or a missing or empty CA file.
-
----
-
 ## v3.1.0
 
 **Date:** 2026-10-15
@@ -32,7 +7,7 @@ Minor release: the client speaks **Modbus/TCP Security**. `tcp+tls://` URLs were
 
 ### Summary
 
-Minor release: modbusctl records and replays **every read function of the Modbus specification**: FC01–04, FC07, FC08 (sub-functions that return data), FC11, FC12, FC17, FC20, FC24 and FC43 Read Device Identification. **`client record`** takes them in its plan file, and **`server static`** and **`server replay`** answer them from the capture. Vendor and unknown function codes are not supported anywhere. The **`mcap`** command group is renamed **`capture`**. Its `info`, `verify` and `convert` commands are removed in favour of [`mbcapctl`](https://github.com/otfabric/go-modbus-capture/blob/main/docs/cli.md) of go-modbus-capture. Adopts **go-modbus v1.7.1** and **go-modbus-capture v0.0.2**.
+Minor release: modbusctl records and replays **every read function of the Modbus specification**: FC01–04, FC07, FC08 (sub-functions that return data), FC11, FC12, FC17, FC20, FC24 and FC43 Read Device Identification. **`client record`** takes them in its plan file, and **`server static`** and **`server replay`** answer them from the capture. Vendor and unknown function codes are not supported anywhere. The client speaks **Modbus/TCP Security**: every client command takes **`--tls-cert`**, **`--tls-key`** and **`--tls-ca`** for `tcp+tls://` URLs, which could not connect before. The **`mcap`** command group is renamed **`capture`**. Its `info`, `verify` and `convert` commands are removed in favour of [`mbcapctl`](https://github.com/otfabric/go-modbus-capture/blob/main/docs/cli.md) of go-modbus-capture. Adopts **go-modbus v1.7.1** and **go-modbus-capture v0.0.2**.
 
 ### Breaking changes (scripts)
 
@@ -48,6 +23,10 @@ Minor release: modbusctl records and replays **every read function of the Modbus
 - **Serving FC08, FC17, FC20 and FC24:** both servers answer them with the data of the response recorded for exactly that request, as they already did for FC07, FC11 and FC12. FC08 sub-functions that change device state are answered with Illegal Function.
 - **`--listen`** on both servers (`MODBUSCTL_LISTEN`): the address to listen on, for example `127.0.0.1`; the default is every interface, as before. The `🚀 Serving Modbus TCP …` line is now printed once the listener is bound.
 - **Error code `capture_unsupported_function`** (exit 3): a capture file holding a sample outside the supported reads is refused when loaded.
+- **Modbus/TCP Security on the client: `--tls-cert`, `--tls-key`, `--tls-ca`** on every client command (`MODBUSCTL_TLS_CERT`, `MODBUSCTL_TLS_KEY`, `MODBUSCTL_TLS_CA`), used with `tcp+tls://` URLs and ignored for other URLs. `tcp+tls://` URLs were accepted before but could not connect, because go-modbus requires a client certificate and modbusctl had no way to give one.
+  - `--tls-cert` is required. `--tls-key` defaults to the `--tls-cert` file, which may hold both. `--tls-ca` defaults to the system roots.
+  - A missing or unreadable file is invalid input (exit 3) and nothing is sent. A device that the CA does not vouch for, or that rejects the client certificate, is a transport error (exit 4).
+  - Captures made over TLS record the target's transport as `tls`. The certificate files are not stored in them.
 
 ### Changed
 
@@ -61,9 +40,21 @@ Minor release: modbusctl records and replays **every read function of the Modbus
 - **`client record` examples** gave `--interval` and `--duration` in seconds; both are milliseconds.
 - **Flaky server tests:** tests picked a free port, released it and then started a server listening on every interface. Under load another socket could take the port in between. The bind then failed, or (on macOS) succeeded next to another test's loopback listener, and the test talked to the wrong device. Test servers now listen on `127.0.0.1` with `--listen`, wait for the server to report its bound listener, and choose another port only when the bind fails with "address already in use".
 
+### Not included
+
+- **No TLS server name override.** go-modbus checks the device certificate against the host of the URL and has no setting for another name.
+- **No TLS on `server static` and `server replay`.** They serve over plain Modbus TCP, including captures recorded over TLS.
+
 ### Tests
 
 - Record → file → replay round trips for every supported function. The sources are a go-modbus v1.7.1 server and the in-memory test device over TCP, RTU over TCP and UDP. Each file is checked with `mbcapctl verify` and converted to JSON Lines and CSV with `mbcapctl convert`. The static and replay servers answer byte for byte. There are chaos variants (busy, dropped, closed, truncated and late answers) and parallel variants (several recordings and many clients at once).
+- Modbus/TCP Security, end to end against a go-modbus `tcp+tls` server with a throwaway CA:
+  - A plan of FC03, FC08, FC17, FC20 and FC24 is recorded over TLS and replayed with `server replay`; the capture is also served back over TLS and read with the TLS client.
+  - Every client command runs over TLS.
+  - The client is refused by an untrusted CA, by the system roots, by a certificate without the device's address, and by a server that does not trust the client certificate.
+  - It fails as invalid input with a missing certificate, a mismatched key, or a missing or empty CA file, in every client path.
+
+---
 
 ## v3.0.0
 
