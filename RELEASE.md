@@ -2,7 +2,7 @@
 
 ## v3.2.0
 
-**Date:** unreleased  
+**Date:** 2026-10-15
 **Previous release:** v3.1.0
 
 ### Summary
@@ -23,9 +23,11 @@ Minor release: the client speaks **Modbus/TCP Security**. `tcp+tls://` URLs were
 
 - End to end against a go-modbus `tcp+tls` server with a throwaway CA. A plan of FC03, FC08, FC17, FC20 and FC24 is recorded over TLS and the capture replayed with `server replay`. The capture is also served back over TLS and read with the TLS client. Every client command runs over TLS. The client is refused by an untrusted CA, the system roots, a certificate without the device's address, and a server that does not trust the client certificate. It fails as invalid input with a missing certificate, a mismatched key, or a missing or empty CA file.
 
+---
+
 ## v3.1.0
 
-**Date:** 2026-10-15  
+**Date:** 2026-10-15
 **Previous release:** v3.0.0
 
 ### Summary
