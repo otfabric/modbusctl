@@ -7,7 +7,7 @@
 
 ### Summary
 
-Minor release: modbusctl records and replays **every read function of the Modbus specification**: FC01–04, FC07, FC08 (sub-functions that return data), FC11, FC12, FC17, FC20, FC24 and FC43 Read Device Identification. **`client record`** takes them in its plan file, and **`server static`** and **`server replay`** answer them from the capture. Vendor and unknown function codes are not supported anywhere. The **`mcap`** command group is renamed **`capture`**. Its `info`, `verify` and `convert` commands are removed in favour of [`mbcapctl`](https://github.com/otfabric/go-modbus-capture/blob/main/docs/cli.md) of go-modbus-capture. Adopts **go-modbus v1.7.0**.
+Minor release: modbusctl records and replays **every read function of the Modbus specification**: FC01–04, FC07, FC08 (sub-functions that return data), FC11, FC12, FC17, FC20, FC24 and FC43 Read Device Identification. **`client record`** takes them in its plan file, and **`server static`** and **`server replay`** answer them from the capture. Vendor and unknown function codes are not supported anywhere. The **`mcap`** command group is renamed **`capture`**. Its `info`, `verify` and `convert` commands are removed in favour of [`mbcapctl`](https://github.com/otfabric/go-modbus-capture/blob/main/docs/cli.md) of go-modbus-capture. Adopts **go-modbus v1.7.1**.
 
 ### Breaking changes (scripts)
 
@@ -28,7 +28,7 @@ Minor release: modbusctl records and replays **every read function of the Modbus
 
 - **Unsupported functions:** a plan entry with any other function code, or an FC08 sub-function that changes device state, is refused before anything is sent. The recorder never writes such a sample. Both servers answer such requests, and the writes FC21, FC22 and FC23, with Illegal Function.
 - **Shorter 2.x message:** a modbusctl 2.x capture file (`.mcap`) is still refused (`capture_legacy_format`), with a shorter message.
-- **go-modbus:** Requires **`github.com/otfabric/go-modbus` v1.7.0** (was v1.6.1).
+- **go-modbus:** Requires **`github.com/otfabric/go-modbus` v1.7.1** (was v1.6.1).
 
 ### Fixed
 
@@ -37,7 +37,7 @@ Minor release: modbusctl records and replays **every read function of the Modbus
 
 ### Tests
 
-- Record → file → replay round trips for every supported function. The sources are a go-modbus v1.7.0 server and the in-memory test device over TCP, RTU over TCP and UDP. Each file is checked with `mbcapctl verify` and converted to JSON Lines and CSV with `mbcapctl convert`. The static and replay servers answer byte for byte. There are chaos variants (busy, dropped, closed, truncated and late answers) and parallel variants (several recordings and many clients at once).
+- Record → file → replay round trips for every supported function. The sources are a go-modbus v1.7.1 server and the in-memory test device over TCP, RTU over TCP and UDP. Each file is checked with `mbcapctl verify` and converted to JSON Lines and CSV with `mbcapctl convert`. The static and replay servers answer byte for byte. There are chaos variants (busy, dropped, closed, truncated and late answers) and parallel variants (several recordings and many clients at once).
 
 ## v3.0.0
 
