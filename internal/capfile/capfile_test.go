@@ -228,3 +228,17 @@ func TestIsSpecRead(t *testing.T) {
 		assert.Equalf(t, tc.want, IsSpecRead(tc.req), "% X", tc.req)
 	}
 }
+
+// go-modbus-capture rejects samples of unsupported functions as corrupt; Load
+// reports exactly those as ErrUnsupportedFunction, and nothing else.
+func TestUnsupportedSample(t *testing.T) {
+	for _, req := range [][]byte{{0x41}, {0x10, 0, 0, 0, 1, 2, 0, 0}, {0x08, 0x00, 0x01, 0, 0}, {0x2B, 0x0D}} {
+		err := capture.CheckPDUs(req, req)
+		require.Errorf(t, err, "% X", req)
+		assert.Truef(t, unsupportedSample(fmt.Errorf("x.mbcap: %w", err)), "% X: %v", req, err)
+	}
+	require.NoError(t, capture.CheckPDUs([]byte{0x08, 0, 0x0B, 0, 0}, []byte{0x08, 0, 0x0B, 0, 1}))
+	assert.False(t, unsupportedSample(capture.CheckPDUs([]byte{0x03, 0, 0, 0, 1}, []byte{0x04, 2, 0, 1})), "a mismatched response is corrupt, not unsupported")
+	assert.False(t, unsupportedSample(capture.ErrTruncated))
+	assert.False(t, unsupportedSample(nil))
+}

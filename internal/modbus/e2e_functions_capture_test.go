@@ -14,14 +14,18 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	gomodbus "github.com/otfabric/go-modbus"
 	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/go-modbus-capture/jsonl"
 	"github.com/otfabric/modbusctl/internal/capfile"
+	"github.com/otfabric/modbusctl/internal/capfile/capfiletest"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/replay"
@@ -405,12 +409,26 @@ func TestE2EFunctionsCapture_unsupportedFunctions(t *testing.T) {
 }
 
 // A capture holding a sample outside the supported read functions is refused
-// on load with a typed error, by both servers.
+// on load with a typed error, by both servers. go-modbus-capture's writers
+// refuse to write such a sample, so the files are JSON Lines edited by hand.
 func TestE2EFunctionsCapture_unsupportedSampleRejected(t *testing.T) {
-	for _, req := range [][]byte{{0x41, 0x01}, {0x2B, 0x0D, 0x00}, {0x08, 0x00, 0x01, 0x00, 0x00}} {
-		site := collSite()
-		site.Samples = append(site.Samples, capture.Sample{Stream: 1, At: 2_500_000, Request: req, Response: append([]byte(nil), req...)})
-		path := collWriteCapture(t, site)
+	l := capfiletest.Load(t, collWriteCapture(t, collSite()))
+	var good bytes.Buffer
+	w, err := jsonl.NewWriter(&good, l.Header)
+	require.NoError(t, err)
+	require.NoError(t, l.WriteTo(w))
+	lines := strings.Split(strings.TrimRight(good.String(), "\n"), "\n")
+	require.Contains(t, lines[len(lines)-1], `"t":"end"`)
+	for _, req := range [][]byte{
+		{0x41, 0x01},                   // vendor
+		{0x2B, 0x0D, 0x00},             // FC43, not device identification
+		{0x08, 0x00, 0x01, 0x00, 0x00}, // FC08 restart communications
+		{0x10, 0x00, 0x01, 0x00, 0x01, 0x02, 0x00, 0x00}, // write
+	} {
+		bad := fmt.Sprintf(`{"t":"s","s":1,"at":2500000,"req":"%x","resp":"%x"}`, req, req)
+		text := strings.Join(append(append(append([]string(nil), lines[:len(lines)-1]...), bad), lines[len(lines)-1]), "\n") + "\n"
+		path := filepath.Join(t.TempDir(), "unsupported.mbcap.jsonl")
+		require.NoError(t, os.WriteFile(path, []byte(text), 0o600))
 		_, err := capfile.Load(path)
 		require.ErrorIsf(t, err, capfile.ErrUnsupportedFunction, "request % X", req)
 		err = ServeStatic(context.Background(), config.StaticServerConfig{InputFile: path, Port: collFreePort(t)}, nil)

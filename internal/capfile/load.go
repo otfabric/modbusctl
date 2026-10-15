@@ -82,6 +82,9 @@ func Load(path string) (*Loaded, error) {
 		l.Truncated = true
 		err = nil
 	}
+	if unsupportedSample(err) {
+		err = fmt.Errorf("%w: %w", ErrUnsupportedFunction, err)
+	}
 	if err == nil && c != nil {
 		err = checkFunctions(c)
 	}
