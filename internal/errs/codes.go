@@ -41,6 +41,8 @@ const (
 	CodeCaptureSelectionAmbiguous = "capture_selection_ambiguous"
 	// The selected target or function has no data in the capture.
 	CodeCaptureSelectionEmpty = "capture_selection_empty"
+	// A capture holds a sample of a function code outside the Modbus read functions modbusctl supports.
+	CodeCaptureUnsupportedFunction = "capture_unsupported_function"
 
 	CodeInternalUnexpected = "internal_unexpected"
 )

@@ -175,6 +175,7 @@ func TestWrapError(t *testing.T) {
 		{fmt.Errorf("x.mcap: %w", ErrLegacyMCAP), errs.KindInvalidInput, errs.CodeCaptureLegacyFormat},
 		{fmt.Errorf("%w; choose one: ...", ErrAmbiguousSelection), errs.KindInvalidInput, errs.CodeCaptureSelectionAmbiguous},
 		{fmt.Errorf("%w for target 2", ErrEmptySelection), errs.KindInvalidInput, errs.CodeCaptureSelectionEmpty},
+		{fmt.Errorf("x: %w: sample 3", ErrUnsupportedFunction), errs.KindInvalidInput, errs.CodeCaptureUnsupportedFunction},
 		{fmt.Errorf("x: %w", capture.ErrTruncated), errs.KindOutput, errs.CodeMCAPLoadFailed},
 		{os.ErrNotExist, errs.KindOutput, errs.CodeMCAPLoadFailed},
 		{errs.InvalidInput(errs.CodeInvalidInput, "already typed", nil), errs.KindInvalidInput, errs.CodeInvalidInput},
@@ -186,4 +187,44 @@ func TestWrapError(t *testing.T) {
 		assert.ErrorIs(t, WrapError(tc.err), tc.err)
 	}
 	assert.NoError(t, WrapError(nil))
+}
+
+func TestIsSpecRead(t *testing.T) {
+	for _, tc := range []struct {
+		req  []byte
+		want bool
+	}{
+		{[]byte{0x01, 0, 0, 0, 8}, true},
+		{[]byte{0x02, 0, 0, 0, 8}, true},
+		{[]byte{0x03, 0, 0, 0, 1}, true},
+		{[]byte{0x04, 0, 0, 0, 1}, true},
+		{[]byte{0x07}, true},
+		{[]byte{0x08, 0x00, 0x00, 0xA5, 0x37}, true},
+		{[]byte{0x08, 0x00, 0x02, 0, 0}, true},
+		{[]byte{0x08, 0x00, 0x0B, 0, 0}, true},
+		{[]byte{0x08, 0x00, 0x12, 0, 0}, true},
+		{[]byte{0x08, 0x00, 0x01, 0, 0}, false}, // restart communications
+		{[]byte{0x08, 0x00, 0x04, 0, 0}, false}, // force listen only
+		{[]byte{0x08, 0x00, 0x0A, 0, 0}, false}, // clear counters
+		{[]byte{0x08, 0x00, 0x14, 0, 0}, false}, // clear overrun counter
+		{[]byte{0x08, 0x01, 0x0B, 0, 0}, false},
+		{[]byte{0x08, 0x00}, false},
+		{[]byte{0x0B}, true},
+		{[]byte{0x0C}, true},
+		{[]byte{0x11}, true},
+		{[]byte{0x14, 0x07, 0x06, 0, 1, 0, 0, 0, 1}, true},
+		{[]byte{0x18, 0, 1}, true},
+		{[]byte{0x2B, 0x0E, 0x01, 0x00}, true},
+		{[]byte{0x2B, 0x0D, 0x00}, false},
+		{[]byte{0x2B}, false},
+		{[]byte{0x05, 0, 0, 0xFF, 0}, false},
+		{[]byte{0x10, 0, 0, 0, 1, 2, 0, 0}, false},
+		{[]byte{0x15}, false},
+		{[]byte{0x17}, false},
+		{[]byte{0x41, 0x01}, false},
+		{[]byte{0x09}, false},
+		{nil, false},
+	} {
+		assert.Equalf(t, tc.want, IsSpecRead(tc.req), "% X", tc.req)
+	}
 }

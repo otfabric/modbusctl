@@ -7,16 +7,17 @@
 
 ### Summary
 
-Minor release: **`server static`** and **`server replay`** now answer every function a capture holds, not only FC01–04, FC07, FC11, FC12 and FC43 device identification. Adopts **go-modbus v1.7.0**, whose server dispatches every function code. No changes to flags or JSON output.
+Minor release: **`server static`** and **`server replay`** now answer every read function of the Modbus specification that a capture can hold: FC08, FC17, FC20 and FC24 join FC01–04, FC07, FC11, FC12 and FC43 device identification. Vendor and unknown function codes are not supported: they are not recorded, a capture holding them is refused, and the servers answer them with Illegal Function. Adopts **go-modbus v1.7.0**. No changes to flags or JSON output.
 
 ### Added
 
-- **Every recorded function is served:** FC08 Diagnostics, FC17 Report Server ID, FC20 Read File Record, FC24 Read FIFO Queue, FC43 MEI types other than device identification and vendor function codes are answered with the response recorded for exactly that request, byte for byte. A request the capture does not hold is answered according to `--missing`, as for the other functions.
+- **FC08, FC17, FC20 and FC24 are served:** FC08 Diagnostics (sub-functions that return data: Return Query Data, Return Diagnostic Register and the counters 0x0B–0x12), FC17 Report Server ID, FC20 Read File Record and FC24 Read FIFO Queue are answered with the data of the response recorded for exactly that request. A request the capture does not hold is answered according to `--missing`, as for the other functions.
+- **Error code `capture_unsupported_function`** (exit 3): a capture file holding a sample outside the supported read functions (a vendor or unknown function code, an FC08 sub-function that changes device state, an FC43 MEI type other than device identification) is refused when loaded.
 
 ### Changed
 
-- **FC07, FC11 and FC12** are served the same way: the recorded response PDU is returned as it is instead of being decoded and re-encoded.
-- **Writes** through FC21 Write File Record, FC22 Mask Write Register and FC23 Read/Write Multiple Registers are refused with Illegal Function, like the other writes.
+- **Function codes outside the supported reads** (vendor and unknown ones, FC08 sub-functions that change device state, and FC21, FC22 and FC23 writes) are answered with Illegal Function by both servers.
+- **Recording** refuses to write a sample outside the supported reads. `client read`, `scan` and `record` already accept only FC01–04 for `--function`.
 - **go-modbus:** Requires **`github.com/otfabric/go-modbus` v1.7.0** (was v1.6.1).
 
 ## v3.0.0

@@ -1,17 +1,19 @@
 package modbus
 
-// End-to-end tests of the functions the servers answer through the go-modbus
-// RawRequestHandler (FC08 Diagnostics, FC17 Report Server ID, FC20 Read File
+// End-to-end tests of the functions the servers answer through go-modbus
+// optional handlers (FC08 Diagnostics, FC17 Report Server ID, FC20 Read File
 // Record, FC24 Read FIFO Queue): record them from a go-modbus server, then
 // serve the recording back, static and replayed, and check that each answer is
-// the recorded response PDU byte for byte. Vendor functions and refused writes
-// are tested on the handler itself.
+// the recorded response PDU byte for byte. Vendor and unknown function codes
+// are neither recorded, loaded nor served.
 
 import (
 	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"net"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -21,6 +23,7 @@ import (
 	"github.com/otfabric/go-modbus-capture/capture"
 	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/replay"
 	"github.com/stretchr/testify/require"
 )
@@ -283,19 +286,21 @@ func TestE2EFunctionsCapture_replay(t *testing.T) {
 	require.ErrorIs(t, srv.stop(t), context.Canceled)
 }
 
-// The raw handler answers vendor functions and FC43 MEI types other than
-// device identification with the recorded response, refuses writes, and
-// answers what the capture does not hold according to --missing.
-func TestCaptureHandler_rawRequests(t *testing.T) {
+// The typed handlers answer from the response recorded for exactly the
+// request, refuse FC08 sub-functions that change state, and answer what the
+// capture does not hold according to --missing.
+func TestCaptureHandler_functions(t *testing.T) {
 	c := &capture.Capture{
 		Header:  capture.Header{TickNS: 1000},
 		Targets: []capture.Target{{ID: 1, Unit: 5}},
 		Streams: []capture.Stream{{ID: 1, Target: 1}},
 		Samples: []capture.Sample{
-			{Stream: 1, At: 0, Request: []byte{0x41, 0x01, 0x02}, Response: []byte{0x41, 0xCA, 0xFE}},
-			{Stream: 1, At: 10, Request: []byte{0x41, 0x01, 0x02}, Response: []byte{0x41, 0xBE, 0xEF}},
-			{Stream: 1, At: 20, Request: []byte{0x2B, 0x0D, 0x00}, Response: []byte{0x2B, 0x0D, 0x00, 0x99}},
-			{Stream: 1, At: 30, Request: []byte{0x07}, Response: []byte{0x07, 0x6D}},
+			{Stream: 1, At: 0, Request: []byte{0x08, 0x00, 0x0B, 0x00, 0x00}, Response: []byte{0x08, 0x00, 0x0B, 0x00, 0x07}},
+			{Stream: 1, At: 10, Request: []byte{0x08, 0x00, 0x0B, 0x00, 0x00}, Response: []byte{0x08, 0x00, 0x0B, 0x00, 0x09}},
+			{Stream: 1, At: 10, Request: []byte{0x11}, Response: []byte{0x11, 0x03, 0x2A, 'x', 0xFF}},
+			{Stream: 1, At: 10, Request: []byte{0x14, 0x07, 0x06, 0x00, 0x01, 0x00, 0x02, 0x00, 0x02},
+				Response: []byte{0x14, 0x06, 0x05, 0x06, 0x12, 0x34, 0x56, 0x78}},
+			{Stream: 1, At: 10, Request: []byte{0x18, 0x04, 0xD2}, Response: []byte{0x18, 0x00, 0x06, 0x00, 0x02, 0x00, 0x0A, 0x00, 0x0B}},
 		},
 		End: capture.End{Known: true, At: 100},
 	}
@@ -303,36 +308,128 @@ func TestCaptureHandler_rawRequests(t *testing.T) {
 	require.NoError(t, err)
 	at := capture.Ticks(5)
 	h := &captureHandler{devices: map[uint8]*replay.Device{5: d}, now: func() capture.Ticks { return at }}
-	ask := func(fc uint8, payload ...byte) ([]byte, error) {
-		return h.HandleRawRequest(context.Background(), &gomodbus.RawRequest{UnitID: 5, FunctionCode: gomodbus.FunctionCode(fc), Payload: payload})
+	ctx := context.Background()
+	diag := func(sub gomodbus.DiagnosticSubFunction, data ...byte) ([]byte, error) {
+		return h.HandleDiagnostics(ctx, &gomodbus.DiagnosticsRequest{UnitID: 5, SubFunction: sub, Data: data})
 	}
 
-	got, err := ask(0x41, 0x01, 0x02)
+	got, err := diag(gomodbus.DiagReturnBusMessageCount, 0, 0)
 	require.NoError(t, err)
-	require.Equal(t, []byte{0xCA, 0xFE}, got, "the sample at T")
+	require.Equal(t, []byte{0x00, 0x07}, got, "the sample at T")
 	at = 50
-	got, err = ask(0x41, 0x01, 0x02)
+	got, err = diag(gomodbus.DiagReturnBusMessageCount, 0, 0)
 	require.NoError(t, err)
-	require.Equal(t, []byte{0xBE, 0xEF}, got, "the later sample")
-	got, err = ask(0x2B, 0x0D, 0x00)
+	require.Equal(t, []byte{0x00, 0x09}, got, "the later sample")
+	id, err := h.HandleReportServerID(ctx, &gomodbus.ReportServerIDRequest{UnitID: 5})
 	require.NoError(t, err)
-	require.Equal(t, []byte{0x0D, 0x00, 0x99}, got)
+	require.Equal(t, []byte{0x2A, 'x', 0xFF}, id)
+	recs, err := h.HandleReadFileRecords(ctx, &gomodbus.ReadFileRecordsRequest{UnitID: 5,
+		Requests: []gomodbus.FileRecordRequest{{FileNumber: 1, RecordNumber: 2, RecordLength: 2}}})
+	require.NoError(t, err)
+	require.Equal(t, [][]uint16{{0x1234, 0x5678}}, recs)
+	fifo, err := h.HandleReadFIFOQueue(ctx, &gomodbus.FIFOQueueRequest{UnitID: 5, Addr: 0x04D2})
+	require.NoError(t, err)
+	require.Equal(t, []uint16{10, 11}, fifo)
 
-	for _, fc := range []uint8{0x15, 0x16, 0x17} {
-		_, err = ask(fc, 0x00, 0x01)
-		require.ErrorIsf(t, err, gomodbus.ErrIllegalFunction, "write FC%d", fc)
+	for _, sub := range []gomodbus.DiagnosticSubFunction{gomodbus.DiagRestartCommunications, gomodbus.DiagForceListenOnlyMode,
+		gomodbus.DiagClearCountersAndDiagnosticReg, gomodbus.DiagClearOverrunCounterAndFlag, 0x4100} {
+		_, err = diag(sub, 0, 0)
+		require.ErrorIsf(t, err, gomodbus.ErrIllegalFunction, "FC08 sub-function %#04x", uint16(sub))
 	}
-	_, err = ask(0x41, 0x09)
+	_, err = diag(gomodbus.DiagReturnBusMessageCount, 0, 1)
 	require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress, "recorded function, other request")
-	_, err = ask(0x42)
+	_, err = h.HandleReadFIFOQueue(ctx, &gomodbus.FIFOQueueRequest{UnitID: 5, Addr: 1})
+	require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress)
+	_, err = h.HandleExceptionStatus(ctx, &gomodbus.ExceptionStatusRequest{UnitID: 5})
 	require.ErrorIs(t, err, gomodbus.ErrIllegalFunction, "function never recorded")
-	_, err = h.HandleRawRequest(context.Background(), &gomodbus.RawRequest{UnitID: 6, FunctionCode: 0x41})
+	_, err = h.HandleReportServerID(ctx, &gomodbus.ReportServerIDRequest{UnitID: 6})
 	require.ErrorIs(t, err, gomodbus.ErrBadUnitID)
 
 	h.missing = MissingZero
-	_, err = ask(0x41, 0x09)
+	_, err = h.HandleReadFIFOQueue(ctx, &gomodbus.FIFOQueueRequest{UnitID: 5, Addr: 1})
 	require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress, "zero applies to coils and registers only")
 	h.missing = MissingSilence
-	_, err = ask(0x41, 0x09)
+	_, err = h.HandleReadFIFOQueue(ctx, &gomodbus.FIFOQueueRequest{UnitID: 5, Addr: 1})
 	require.ErrorIs(t, err, gomodbus.ErrNoResponse)
+}
+
+// e2eRawExchange sends one Modbus TCP request PDU to addr on unit 1 and
+// returns the response PDU.
+func e2eRawExchange(t *testing.T, addr string, pdu []byte) []byte {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	require.NoError(t, conn.SetDeadline(time.Now().Add(2*time.Second)))
+	n := len(pdu) + 1
+	_, err = conn.Write(append([]byte{0x00, 0x2A, 0x00, 0x00, byte(n >> 8), byte(n), 0x01}, pdu...))
+	require.NoError(t, err)
+	head := make([]byte, 7)
+	_, err = io.ReadFull(conn, head)
+	require.NoError(t, err)
+	body := make([]byte, int(head[4])<<8|int(head[5])-1)
+	_, err = io.ReadFull(conn, body)
+	require.NoError(t, err)
+	return body
+}
+
+// Vendor and unknown function codes, and writes outside FC05/06/15/16, are
+// answered with Illegal Function, and the server keeps serving.
+func TestE2EFunctionsCapture_unsupportedFunctions(t *testing.T) {
+	path, recorded := e2eFunctionsRecord(t, 1, 0)
+	srv, progress := staticServer(t, config.StaticServerConfig{InputFile: path})
+	addr := fmt.Sprintf("127.0.0.1:%d", srv.port)
+	for _, pdu := range [][]byte{
+		{0x41, 0x01, 0x02},             // vendor
+		{0x64},                         // vendor, no data
+		{0x09, 0x00},                   // unassigned
+		{0x2B, 0x0D, 0x00},             // FC43 CANopen general reference
+		{0x08, 0x00, 0x01, 0x00, 0x00}, // FC08 restart communications
+		{0x15, 0x07, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00},       // FC21 write file record
+		{0x16, 0x00, 0x01, 0xFF, 0xFF, 0x00, 0x00},                               // FC22 mask write
+		{0x17, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x00}, // FC23 read/write
+	} {
+		require.Equalf(t, []byte{pdu[0] | 0x80, 0x01}, e2eRawExchange(t, addr, pdu), "request % X", pdu)
+	}
+	var served e2eExchanges
+	c := e2eFunctionsClient(t, "tcp://"+addr, &served)
+	requireRecordedLast(t, recorded, e2eFunctionsAsk(t, c, &served))
+	require.ErrorIs(t, srv.stop(t), context.Canceled)
+	require.Contains(t, progress.String(), "📊 Served 13 requests: 5 answered, 8 with an exception")
+}
+
+// A capture holding a sample outside the supported read functions is refused
+// on load with a typed error, by both servers.
+func TestE2EFunctionsCapture_unsupportedSampleRejected(t *testing.T) {
+	for _, req := range [][]byte{{0x41, 0x01}, {0x2B, 0x0D, 0x00}, {0x08, 0x00, 0x01, 0x00, 0x00}} {
+		site := collSite()
+		site.Samples = append(site.Samples, capture.Sample{Stream: 1, At: 2_500_000, Request: req, Response: append([]byte(nil), req...)})
+		path := collWriteCapture(t, site)
+		_, err := capfile.Load(path)
+		require.ErrorIsf(t, err, capfile.ErrUnsupportedFunction, "request % X", req)
+		err = ServeStatic(context.Background(), config.StaticServerConfig{InputFile: path, Port: collFreePort(t)}, nil)
+		e, ok := errs.As(err)
+		require.Truef(t, ok, "typed error, got %v", err)
+		require.Equal(t, errs.CodeCaptureUnsupportedFunction, e.Code)
+		err = ServeReplay(context.Background(), config.ReplayServerConfig{InputFile: path, Port: collFreePort(t)}, nil)
+		require.ErrorIs(t, err, capfile.ErrUnsupportedFunction)
+	}
+}
+
+// The recorder refuses an FC08 sub-function that changes state instead of
+// writing it to the capture.
+func TestE2EFunctionsCapture_recorderRefusesUnsupported(t *testing.T) {
+	url := e2eFunctionsServe(t, &e2eFunctionsDevice{})
+	path := filepath.Join(t.TempDir(), "refused.mbcap")
+	rec, err := capfile.Create(path, capfile.RecorderOptions{})
+	require.NoError(t, err)
+	require.NoError(t, rec.AddTarget(capture.Target{ID: 1, Unit: 1}))
+	require.NoError(t, rec.AddStream(capture.Stream{ID: 1, Target: 1}))
+	c := e2eFunctionsClient(t, url, rec.Tap())
+	ctx, tok := rec.Begin(context.Background())
+	_, err = c.Diagnostics(ctx, 1, gomodbus.DiagRestartCommunications, []byte{0, 0})
+	require.NoError(t, err)
+	require.ErrorIs(t, rec.Commit(tok, 1, nil), capfile.ErrUnsupportedFunction)
+	require.Zero(t, rec.Samples())
+	require.NoError(t, rec.Close())
 }

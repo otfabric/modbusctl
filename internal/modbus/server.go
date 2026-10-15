@@ -2,6 +2,7 @@ package modbus
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -84,8 +85,11 @@ func ParseOffset(flag, s string) (time.Duration, error) {
 
 // captureHandler serves the targets of a capture, one per unit id, as of the
 // replay time now() returns: FC01–04 per address, FC43 device identification
-// per object, and every other function with the recorded response PDU
-// (go-modbus RawRequestHandler). It answers reads only. It is safe for concurrent
+// per object, and FC07, FC08, FC11, FC12, FC17, FC20 and FC24 from the
+// response recorded for exactly the request, through the go-modbus optional
+// handlers. It answers reads only: go-modbus answers every other function
+// code, writes and vendor or unknown functions included, with Illegal
+// Function. It is safe for concurrent
 // use: the devices are immutable and the counters atomic.
 type captureHandler struct {
 	devices map[uint8]*replay.Device
@@ -213,31 +217,134 @@ func (h *captureHandler) HandleInputRegisters(_ context.Context, req *modbus.Inp
 	return h.values(req.UnitID, 4, req.Addr, req.Quantity)
 }
 
-// isWrite reports whether fc changes device state: FC21 Write File Record,
-// FC22 Mask Write Register and FC23 Read/Write Multiple Registers reach
-// HandleRawRequest; FC05, FC06, FC15 and FC16 arrive with IsWrite set.
-func isWrite(fc uint8) bool { return fc == 0x15 || fc == 0x16 || fc == 0x17 }
-
-// HandleRawRequest answers every function go-modbus does not decode for the
-// handler (FC07, FC08, FC11, FC12, FC17, FC20, FC24, FC43 other than device
-// identification, vendor functions) with the response recorded for exactly
-// this request PDU, byte for byte.
-func (h *captureHandler) HandleRawRequest(_ context.Context, req *modbus.RawRequest) ([]byte, error) {
-	fc := uint8(req.FunctionCode)
-	if isWrite(fc) {
-		return nil, modbus.ErrIllegalFunction // a replayed device is read-only
-	}
-	d, err := h.device(req.UnitID)
+// response returns the recorded response PDU to exactly req at the replay
+// time, when it is a response to req's function holding at least n bytes
+// after the function code; otherwise it answers as for an unrecorded request.
+func (h *captureHandler) response(unit uint8, req []byte, n int) ([]byte, error) {
+	d, err := h.device(unit)
 	if err != nil {
 		return nil, err
 	}
-	resp, ok := d.Response(h.now(), append([]byte{fc}, req.Payload...))
-	if ok && len(resp) >= 1 && resp[0] == fc {
-		return resp[1:], nil
+	fc := req[0]
+	resp, ok := d.Response(h.now(), req)
+	if ok && len(resp) >= 1+n && resp[0] == fc {
+		return resp, nil
 	}
-	h.unrecorded(req.UnitID, fc, 0, 0)
+	h.unrecorded(unit, fc, 0, 0)
 	_, err = h.absent(d, fc, 0)
 	return nil, err
+}
+
+func (h *captureHandler) HandleExceptionStatus(_ context.Context, req *modbus.ExceptionStatusRequest) (uint8, error) {
+	r, err := h.response(req.UnitID, []byte{0x07}, 1)
+	if err != nil {
+		return 0, err
+	}
+	return r[1], nil
+}
+
+func (h *captureHandler) HandleCommEventCounter(_ context.Context, req *modbus.CommEventCounterRequest) (*modbus.CommEventCounterResponse, error) {
+	r, err := h.response(req.UnitID, []byte{0x0B}, 4)
+	if err != nil {
+		return nil, err
+	}
+	return &modbus.CommEventCounterResponse{Status: binary.BigEndian.Uint16(r[1:]), EventCount: binary.BigEndian.Uint16(r[3:])}, nil
+}
+
+func (h *captureHandler) HandleCommEventLog(_ context.Context, req *modbus.CommEventLogRequest) (*modbus.CommEventLogResponse, error) {
+	r, err := h.response(req.UnitID, []byte{0x0C}, 7)
+	if err != nil {
+		return nil, err
+	}
+	// r = FC, byte count, status, event count, message count, events.
+	if int(r[1]) != len(r)-2 {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	return &modbus.CommEventLogResponse{Status: binary.BigEndian.Uint16(r[2:]), EventCount: binary.BigEndian.Uint16(r[4:]),
+		MessageCount: binary.BigEndian.Uint16(r[6:]), Events: append([]byte(nil), r[8:]...)}, nil
+}
+
+// HandleDiagnostics serves FC08 sub-functions that return data (see
+// [capfile.IsDataDiagnostic]); the others change device state and are
+// refused with Illegal Function. The server echoes the sub-function in front
+// of the recorded data.
+func (h *captureHandler) HandleDiagnostics(_ context.Context, req *modbus.DiagnosticsRequest) ([]byte, error) {
+	sub := uint16(req.SubFunction)
+	if sub > 0xFF || !capfile.IsDataDiagnostic(uint8(sub)) {
+		return nil, modbus.ErrIllegalFunction
+	}
+	r, err := h.response(req.UnitID, append([]byte{0x08, byte(sub >> 8), byte(sub)}, req.Data...), 2)
+	if err != nil {
+		return nil, err
+	}
+	if binary.BigEndian.Uint16(r[1:]) != sub {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	return append([]byte(nil), r[3:]...), nil
+}
+
+// HandleReportServerID serves FC17 with the recorded data after the byte
+// count; the server adds the byte count.
+func (h *captureHandler) HandleReportServerID(_ context.Context, req *modbus.ReportServerIDRequest) ([]byte, error) {
+	r, err := h.response(req.UnitID, []byte{0x11}, 1)
+	if err != nil {
+		return nil, err
+	}
+	if int(r[1]) != len(r)-2 {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	return append([]byte(nil), r[2:]...), nil
+}
+
+// HandleReadFileRecords serves FC20 with the records of the response
+// recorded for exactly these sub-requests.
+func (h *captureHandler) HandleReadFileRecords(_ context.Context, req *modbus.ReadFileRecordsRequest) ([][]uint16, error) {
+	pdu := []byte{0x14, byte(7 * len(req.Requests))}
+	for _, s := range req.Requests {
+		pdu = append(pdu, 0x06, byte(s.FileNumber>>8), byte(s.FileNumber), byte(s.RecordNumber>>8), byte(s.RecordNumber),
+			byte(s.RecordLength>>8), byte(s.RecordLength))
+	}
+	r, err := h.response(req.UnitID, pdu, 1)
+	if err != nil {
+		return nil, err
+	}
+	// r = FC, data length, then per sub-request: length, reference type 6, registers.
+	if int(r[1]) != len(r)-2 {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	records, p := make([][]uint16, len(req.Requests)), 2
+	for i, s := range req.Requests {
+		if p+2 > len(r) || r[p+1] != 0x06 || int(r[p]) != 1+2*int(s.RecordLength) || p+1+int(r[p]) > len(r) {
+			return nil, modbus.ErrServerDeviceFailure
+		}
+		records[i] = make([]uint16, s.RecordLength)
+		for k := range records[i] {
+			records[i][k] = binary.BigEndian.Uint16(r[p+2+2*k:])
+		}
+		p += 1 + int(r[p])
+	}
+	if p != len(r) {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	return records, nil
+}
+
+// HandleReadFIFOQueue serves FC24 with the recorded queue.
+func (h *captureHandler) HandleReadFIFOQueue(_ context.Context, req *modbus.FIFOQueueRequest) ([]uint16, error) {
+	r, err := h.response(req.UnitID, []byte{0x18, byte(req.Addr >> 8), byte(req.Addr)}, 4)
+	if err != nil {
+		return nil, err
+	}
+	// r = FC, byte count, FIFO count, values.
+	count := int(binary.BigEndian.Uint16(r[3:]))
+	if int(binary.BigEndian.Uint16(r[1:])) != len(r)-3 || len(r) != 5+2*count {
+		return nil, modbus.ErrServerDeviceFailure
+	}
+	values := make([]uint16, count)
+	for i := range values {
+		values[i] = binary.BigEndian.Uint16(r[5+2*i:])
+	}
+	return values, nil
 }
 
 func (h *captureHandler) HandleDeviceIdentification(_ context.Context, req *modbus.DeviceIdentificationRequest) (*modbus.DeviceIdentificationResponse, error) {

@@ -246,8 +246,8 @@ func (d *Device) HasFunction(fc uint8) bool {
 	switch {
 	case fc >= 1 && fc <= 4:
 		return len(d.addrs[fc]) > 0
-	case fc == 0x2B && len(d.objs) > 0:
-		return true
+	case fc == 0x2B:
+		return len(d.objs) > 0
 	}
 	for k := range d.reqs {
 		if k[0] == fc {

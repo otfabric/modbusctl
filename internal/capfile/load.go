@@ -64,7 +64,8 @@ type Loaded struct {
 }
 
 // Load reads a whole capture file. A truncated file is not an error: Loaded
-// says so.
+// says so. A capture holding a sample outside the supported read functions
+// (see [IsSpecRead]) is rejected with [ErrUnsupportedFunction].
 func Load(path string) (*Loaded, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -80,6 +81,9 @@ func Load(path string) (*Loaded, error) {
 	if errors.Is(err, capture.ErrTruncated) {
 		l.Truncated = true
 		err = nil
+	}
+	if err == nil && c != nil {
+		err = checkFunctions(c)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)

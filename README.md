@@ -908,7 +908,8 @@ Both servers:
 
 - accept up to `--max-clients` concurrent connections (default 10) and close further ones;
 - print a summary when stopped (`📊 Served N requests: …`), counting the answers, exceptions, silences and requests for data the capture does not hold; with `--debug` they also name each such request and log the Modbus frames;
-- answer **FC01–04** from the values recorded per address (any range whose addresses were all recorded, even one never requested as such), **FC43** device identification from the recorded objects, and every other recorded function (**FC07**, **FC08**, **FC11**, **FC12**, **FC17**, **FC20**, **FC24**, other FC43 MEI types and vendor functions) with the response recorded for exactly that request, byte for byte;
+- answer **FC01–04** from the values recorded per address (any range whose addresses were all recorded, even one never requested as such), **FC43** device identification from the recorded objects, and **FC07**, **FC08** (sub-functions that return data: 0x00, 0x02, 0x0B–0x12), **FC11**, **FC12**, **FC17**, **FC20** and **FC24** with the data of the response recorded for exactly that request;
+- answer any other function code, vendor and unknown ones included, with Illegal Function; a capture file holding a sample of such a function is refused when loaded (`capture_unsupported_function`, exit 3);
 - refuse writes (Illegal Function): a replayed device is read-only;
 - answer what the capture does not hold according to `--missing`: **exception** (default: Illegal Function for a function never recorded, Illegal Data Address otherwise), **zero** (unrecorded registers and coils read 0), or **silence** (no answer: the client times out);
 - before an address is first sampled, serve its first sample (`--before-first hold`, default) or treat it as unrecorded (`--before-first absent`; replay only).
