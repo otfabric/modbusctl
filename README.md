@@ -157,7 +157,7 @@ The following features are available:
 | Read             | Retrieve raw data from specified Modbus registers (arbitrary count, saved as a capture file).                            |
 | Poll             | Read the same block of coils or registers at an interval and print every sample as it arrives (text, JSON Lines or table), optionally decoded with a codec. Nothing is written to disk. |
 | Write            | Write coils (FC05/FC15) and holding registers (FC06/FC16). Integer values, or typed values (floats, 32/64-bit integers, strings, …) encoded with a **codec**. |
-| Transports       | Modbus TCP, Modbus UDP, serial RTU and ASCII, and RTU or ASCII framing over TCP, selected with **`--url`**. See [Transports and serial settings](#transports-and-serial-settings). |
+| Transports       | Modbus TCP, Modbus/TCP Security (TLS with client certificates), Modbus UDP, serial RTU and ASCII, and RTU or ASCII framing over TCP, selected with **`--url`**. See [Transports and serial settings](#transports-and-serial-settings). |
 | Decode (registers) | Read holding/input registers (FC03/FC04) and decode them into typed values (integers, floats, strings, BCD, time, IP, MAC, …) using a **codec** such as `float32/layout:4321` or `ascii/registers:8`. |
 | Codecs           | List available register codecs (id, family, value kind, register/byte width) with optional family / value-kind / register-width filters. |
 | Record           | Record every read function of the Modbus specification (FC01–04, 07, 08, 11, 12, 17, 20, 24, 43) into MBCAP capture files for replay or analysis. |
@@ -412,6 +412,7 @@ Every `modbusctl client` command talks to the device named by `--url`. The schem
 | URL | Transport |
 |---|---|
 | `tcp://host:port` | Modbus TCP (same as `--ip host --port port`) |
+| `tcp+tls://host:port` | Modbus/TCP Security: Modbus TCP over TLS with a client certificate (port 802 by convention) |
 | `udp://host:port` | Modbus TCP framing over UDP |
 | `rtu://<device>` | Modbus RTU on a serial line (RS-232 / RS-485) |
 | `ascii://<device>` | Modbus ASCII on a serial line |
@@ -444,13 +445,34 @@ modbusctl client decode --url udp://192.168.1.10:502 --start 100 --codec uint32/
 modbusctl client scan --url rtuovertcp://192.168.1.50:4001 --unit 7 --start 0 --end 200 --output scan.mbcap
 ```
 
+#### Modbus/TCP Security (`tcp+tls://`)
+
+A `tcp+tls://` device authenticates the client by its certificate (mutual TLS, as the Modbus/TCP Security specification requires), and the client checks the device's certificate. Three flags, available on every client command and ignored for other URLs, give the files in PEM:
+
+| Flag | Environment | Content |
+|---|---|---|
+| `--tls-cert` | `MODBUSCTL_TLS_CERT` | Client certificate (required); the file may also hold the key |
+| `--tls-key` | `MODBUSCTL_TLS_KEY` | Client private key (default: read from `--tls-cert`) |
+| `--tls-ca` | `MODBUSCTL_TLS_CA` | CA certificates that sign the device certificate (default: the system roots) |
+
+```console
+# Read over TLS with a client certificate and the CA of the plant PKI
+modbusctl client read --url tcp+tls://192.168.1.10:802 --tls-cert client.pem --tls-key client-key.pem --tls-ca plant-ca.pem --start 100 --count 4
+
+# Record over TLS, with the settings in the environment
+export MODBUSCTL_TLS_CERT=client.pem MODBUSCTL_TLS_KEY=client-key.pem MODBUSCTL_TLS_CA=plant-ca.pem
+modbusctl client record --url tcp+tls://192.168.1.10:802 --blocks-file plan.json --interval 1000 --duration 60000 --output plant.mbcap
+```
+
+The device certificate must name the host of the URL (an IP address SAN for `tcp+tls://192.168.1.10:802`, a DNS name for `tcp+tls://plc.example:802`). A missing or unreadable certificate, key or CA file is invalid input (exit 3) and nothing is sent; a device the CA does not vouch for, or one that rejects the client certificate, is a transport error (exit 4). A capture made over TLS records the target's transport as `tls`; the certificate files are not stored in it. `server static` and `server replay` serve a capture over plain Modbus TCP.
+
 Good to know:
 
 - **Defaults differ between tools.** Many devices ship as 9600 8N1; the Modbus specification default is 19200 8E1. If a serial device does not answer, check `--baud`, `--parity` and `--stop-bits` against its manual first.
 - **One request at a time on a serial line.** With `rtu://` and `ascii://`, `--parallel` is ignored and units are queried one after the other.
 - **Unit IDs matter on a bus.** A unit that is not present does not answer, so each missing unit costs one `--timeout`. Use a short timeout (for example `--timeout 300`) when sweeping units with `--unit 1-32`.
 - **Captures** made over a serial line record the device path and serial settings (baud, parity, data and stop bits) of the target; the full URL is kept in the target's `url` tag.
-- **`server` and `discover` are Modbus TCP only.**
+- **`server` and `discover` are Modbus TCP only** (no TLS).
 - UDP transports are not part of the Modbus specification; vendors use either `udp://` (MBAP framing) or `rtuoverudp://`. Try both if unsure.
 
 ### Common Commands
@@ -1076,9 +1098,12 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_SPEED**       | string   | **`server replay`**: speed factor (1 = original, 10 = ten times faster, 0.1 = ten times slower) | `--speed` | 1 |
 | **MODBUSCTL_SUBNETS**     | string   | Subnets to scan for Modbus devices (comma-separated)     | `--subnets`     |            |
 | **MODBUSCTL_TARGET**      | uint32   | Capture target to use: **`server static`/`replay`** (0 = every target), **`capture decode`/`extract`/`strings`/`frequencies`** (0 = the only one) | `--target` | 0 |
+| **MODBUSCTL_TLS_CA**      | string   | **`tcp+tls://`** only: CA certificates (PEM) that sign the device certificate | `--tls-ca` | system roots |
+| **MODBUSCTL_TLS_CERT**    | string   | **`tcp+tls://`** only: client certificate (PEM), may also hold the key | `--tls-cert` |            |
+| **MODBUSCTL_TLS_KEY**     | string   | **`tcp+tls://`** only: client private key (PEM)         | `--tls-key`     | from `--tls-cert` |
 | **MODBUSCTL_TIMEOUT**     | uint16   | Request timeout in ms and dial cap; **0 = 10000** ms default | `--timeout`     | 0 (most client commands) |
 | **MODBUSCTL_UNIT**        | string   | Unit ID (1-255); for multi-unit commands: single, range (1-10), list (1,5,25), mixed (1-10,255), or `all`; **`server static`/`replay`**: serve the target on this unit id (0 = its recorded unit id) | `--unit` | 1 (servers: 0) |
-| **MODBUSCTL_URL**         | string   | Modbus URL for client commands: `tcp://`, `udp://`, `rtu://`, `ascii://`, `rtuovertcp://`, `rtuoverudp://` or `asciiovertcp://` (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port | `--url`  |         |
+| **MODBUSCTL_URL**         | string   | Modbus URL for client commands: `tcp://`, `tcp+tls://`, `udp://`, `rtu://`, `ascii://`, `rtuovertcp://`, `rtuoverudp://` or `asciiovertcp://` (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port | `--url`  |         |
 | **MODBUSCTL_VALUES**      | string   | **`client write`**: comma-separated values to write       | `--values`      |            |
 | **MODBUSCTL_REGTYPE**     | string   | Register type for sunspec: holding or input | `--regtype` | holding |
 | **MODBUSCTL_SUNSPEC_BASES** | string | Comma-separated base addresses to probe (sunspec detect) | `--bases` | 0,40000,50000,… |

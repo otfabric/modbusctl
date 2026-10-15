@@ -25,6 +25,9 @@ Exit code 7 (partial success) is used when the command completes and writes outp
   # Connect via URL (mutually exclusive with --ip/--port)
   modbusctl client scan --url tcp://192.168.1.100:502 --start 0 --end 10 --output scan.mbcap
 
+  # Modbus/TCP Security: TLS with a client certificate (see --tls-cert, --tls-key, --tls-ca)
+  modbusctl client scan --url tcp+tls://192.168.1.100:802 --tls-cert client.pem --tls-key client-key.pem --tls-ca ca.pem --start 0 --end 10 --output scan.mbcap
+
   # Scan holding registers with smart algorithm (interval splitting)
   modbusctl client scan --ip 192.168.1.100 --function 3 --algo smart --start 0 --end 1000 --output scan.mbcap
 

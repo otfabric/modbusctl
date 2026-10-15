@@ -101,12 +101,31 @@ func applySerialConfig(conf *modbus.Config, serial config.SerialConfig) {
 	}
 }
 
-func buildDeviceClientConfig(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig) modbus.Config {
+// applyTLSConfig loads the client key pair and CA bundle onto conf when conf.URL is a
+// tcp+tls:// URL; the settings are ignored for other URLs. [config.ValidateTLSConfig] reports
+// unusable files before a command gets this far.
+func applyTLSConfig(conf *modbus.Config, tlsCfg config.TLSConfig) error {
+	if !config.IsTLSURL(conf.URL) {
+		return nil
+	}
+	cert, roots, err := tlsCfg.Load()
+	if err != nil {
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
+	}
+	conf.TLSClientCert = cert
+	conf.TLSRootCAs = roots
+	return nil
+}
+
+func buildDeviceClientConfig(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, tlsCfg config.TLSConfig) (modbus.Config, error) {
 	req := clientRequestTimeout(timeoutMS)
 	c := buildClientConfig(modbusURL, req, debug)
 	c.DialTimeout = dialTimeoutForRequest(req)
 	applySerialConfig(&c, serial)
-	return c
+	if err := applyTLSConfig(&c, tlsCfg); err != nil {
+		return modbus.Config{}, err
+	}
+	return c, nil
 }
 
 // validateAndConnect validates conf, creates a client, and opens the connection.
@@ -141,9 +160,13 @@ type deviceLink struct {
 }
 
 // openDeviceLink connects to modbusURL. The caller must Close the returned link.
-func openDeviceLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig) (*deviceLink, error) {
+func openDeviceLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, tlsCfg config.TLSConfig) (*deviceLink, error) {
+	conf, err := buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial, tlsCfg)
+	if err != nil {
+		return nil, err
+	}
 	link := &deviceLink{
-		conf:  buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial),
+		conf:  conf,
 		url:   modbusURL,
 		debug: debug,
 	}
@@ -156,9 +179,13 @@ func openDeviceLink(modbusURL string, timeoutMS uint16, debug bool, serial confi
 // openRecordingLink is openDeviceLink for a link whose successful reads are recorded as samples
 // of stream, once [deviceLink.record] attaches a recorder. Connecting first means that a device
 // that cannot be reached leaves no capture file behind.
-func openRecordingLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, stream uint32) (*deviceLink, error) {
+func openRecordingLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, tlsCfg config.TLSConfig, stream uint32) (*deviceLink, error) {
+	conf, err := buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial, tlsCfg)
+	if err != nil {
+		return nil, err
+	}
 	link := &deviceLink{
-		conf:   buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial),
+		conf:   conf,
 		url:    modbusURL,
 		debug:  debug,
 		stream: stream,
@@ -479,7 +506,7 @@ func CollectRead(ctx context.Context, cfg config.ReadConfig, progress io.Writer)
 		progress = io.Discard
 	}
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, 1)
+	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -542,7 +569,7 @@ func ScanAndRecord(ctx context.Context, cfg config.ScanConfig, progress io.Write
 		}
 		out = AutoCapturePath(dir, "scan")
 	}
-	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, 1)
+	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -701,7 +728,7 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 		}
 		out = AutoCapturePath(dir, "record")
 	}
-	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, 1)
+	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, 1)
 	if err != nil {
 		return nil, err
 	}

@@ -21,7 +21,10 @@ func CollectReportServerID(ctx context.Context, cfg config.ReportServerIDConfig)
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	res := &types.ReportServerIDResult{Target: modbusURL}
 
-	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
+	conf, err := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig)
+	if err != nil {
+		return nil, err
+	}
 	reqBudget := clientRequestTimeout(cfg.Timeout)
 
 	// A serial line carries one request at a time: never open it more than once.

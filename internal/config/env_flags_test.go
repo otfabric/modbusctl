@@ -135,11 +135,13 @@ func TestLoadFromEnv_realConfigs(t *testing.T) {
 		"MODBUSCTL_TIMEOUT": "750", "MODBUSCTL_FUNCTION": "16", "MODBUSCTL_ADDRESS": "100",
 		"MODBUSCTL_VALUES": "1, 0x10 ,-5", "MODBUSCTL_CODEC": "ip_addr", "MODBUSCTL_OUTPUT_FORMAT": "json",
 		"MODBUSCTL_COUNT": "4", "MODBUSCTL_INTERVAL": "250", "MODBUSCTL_POLLS": "9",
+		"MODBUSCTL_TLS_CERT": "client.pem", "MODBUSCTL_TLS_KEY": "client-key.pem", "MODBUSCTL_TLS_CA": "ca.pem",
 	} {
 		t.Setenv(k, v)
 	}
 	serial := SerialConfig{Baud: 9600, DataBits: 8, Parity: "even", StopBits: 1}
-	device := DeviceConfig{SerialConfig: serial, URL: "rtu:///dev/ttyUSB0", Unit: 17}
+	tlsCfg := TLSConfig{TLSCert: "client.pem", TLSKey: "client-key.pem", TLSCA: "ca.pem"}
+	device := DeviceConfig{SerialConfig: serial, TLSConfig: tlsCfg, URL: "rtu:///dev/ttyUSB0", Unit: 17}
 
 	var w WriteConfig
 	require.NoError(t, LoadFromEnv(&w))
@@ -160,6 +162,26 @@ func TestLoadFromEnv_realConfigs(t *testing.T) {
 	require.NoError(t, LoadFromEnv(&id))
 	assert.Equal(t, "17", id.UnitID)
 	assert.Equal(t, serial, id.SerialConfig)
+	assert.Equal(t, tlsCfg, id.TLSConfig)
+
+	// Every command that dials takes the TLS settings.
+	var fp FingerprintConfig
+	var diag DiagnosticConfig
+	var ss SunSpecDetectConfig
+	require.NoError(t, LoadFromEnv(&fp))
+	require.NoError(t, LoadFromEnv(&diag))
+	require.NoError(t, LoadFromEnv(&ss))
+	assert.Equal(t, tlsCfg, fp.TLSConfig)
+	assert.Equal(t, tlsCfg, diag.TLSConfig)
+	assert.Equal(t, tlsCfg, ss.TLSConfig)
+}
+
+func TestIsTLSURL(t *testing.T) {
+	assert.True(t, IsTLSURL("tcp+tls://10.0.0.1:802"))
+	assert.True(t, IsTLSURL("  tcp+tls://h:802 "))
+	for _, u := range []string{"", "tcp://h:502", "tcp+tls", "rtu:///dev/ttyUSB0", "tls://h:802"} {
+		assert.False(t, IsTLSURL(u), u)
+	}
 }
 
 func TestRegisterFlags_everyKind(t *testing.T) {

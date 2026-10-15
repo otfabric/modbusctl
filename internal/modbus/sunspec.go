@@ -92,7 +92,10 @@ func sunspecOperationContext(parent context.Context, cfg *config.SunSpecBaseConf
 }
 
 func openSunSpecModbusClient(modbusURL string, cfg *config.SunSpecBaseConfig) (*modbus.Client, func(), error) {
-	conf := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig)
+	conf, err := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := modbus.ValidateConfig(conf); err != nil {
 		return nil, nil, ClientConfigInvalid(err)
 	}

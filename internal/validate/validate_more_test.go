@@ -42,12 +42,16 @@ func TestValidateModbusEndpoint(t *testing.T) {
 		ip     string
 		port   uint16
 		serial config.SerialConfig
+		tls    config.TLSConfig
 		want   string
 	}{
 		{name: "tcp", url: "tcp://192.168.1.10:502"},
 		{name: "tcp hostname without port", url: "tcp://plc.local"},
 		{name: "tcp ipv6", url: "tcp://[::1]:1502"},
-		{name: "tcp+tls", url: "tcp+tls://plc.local:802"},
+		{name: "tcp+tls without a client certificate", url: "tcp+tls://plc.local:802", want: "tcp+tls:// needs a client certificate: set --tls-cert"},
+		{name: "tcp+tls with a missing certificate file", url: "tcp+tls://plc.local:802", tls: config.TLSConfig{TLSCert: "/no/such/client.pem"}, want: "load TLS client certificate /no/such/client.pem"},
+		{name: "tls settings are ignored for tcp", url: "tcp://plc.local:502", tls: config.TLSConfig{TLSCert: "/no/such/client.pem"}},
+		{name: "endpoint is checked before tls settings", url: "tcp+tls://", want: "tcp+tls:// needs a host and port"},
 		{name: "udp", url: "udp://10.0.0.1:502"},
 		{name: "rtuovertcp", url: "rtuovertcp://10.0.0.1:4001"},
 		{name: "rtuoverudp", url: "rtuoverudp://10.0.0.1:4001"},
@@ -85,7 +89,7 @@ func TestValidateModbusEndpoint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			check(t, validateModbusEndpoint(tt.url, tt.ip, tt.port, tt.serial), tt.want)
+			check(t, validateModbusEndpoint(tt.url, tt.ip, tt.port, tt.serial, tt.tls), tt.want)
 		})
 	}
 }

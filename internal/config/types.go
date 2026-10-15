@@ -14,7 +14,8 @@ type SerialConfig struct {
 
 type DeviceConfig struct {
 	SerialConfig
-	URL  string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
+	TLSConfig
+	URL  string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP   string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	Unit uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID of the Modbus device" flag:"unit"`
@@ -23,7 +24,8 @@ type DeviceConfig struct {
 // UnitClientConfig is used by commands that support a single unit ID or "all" (1–255).
 type UnitClientConfig struct {
 	SerialConfig
-	URL      string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
+	TLSConfig
+	URL      string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP       string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port     uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	UnitID   string `env:"MODBUSCTL_UNIT" desc:"Unit ID: single (1), range (1-10), list (1,5,25), mixed (1-10,255), or 'all' (1-255)" flag:"unit"`
@@ -220,7 +222,8 @@ type DiscoverConfig struct {
 // FingerprintConfig is used by the fingerprint command (probe supported read FCs per unit via go-modbus SupportsFunction).
 type FingerprintConfig struct {
 	SerialConfig
-	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
+	TLSConfig
+	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	UnitID       string `env:"MODBUSCTL_UNIT" desc:"Unit ID: single, range (1-10), list (1,5,25), mixed (1-10,255), or 'all'" flag:"unit"`
@@ -233,7 +236,8 @@ type FingerprintConfig struct {
 // DiagnosticConfig is used by the diagnostic command (FC08 Diagnostics).
 type DiagnosticConfig struct {
 	SerialConfig
-	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
+	TLSConfig
+	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	UnitID       uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID of the Modbus device" flag:"unit"`
@@ -261,7 +265,8 @@ type DeviceProfileDecodeConfig struct {
 // SunSpecBaseConfig is shared by all client sunspec commands (URL or IP/Port, unit, regtype, output).
 type SunSpecBaseConfig struct {
 	SerialConfig
-	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
+	TLSConfig
+	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
 	Unit         uint8  `env:"MODBUSCTL_UNIT" desc:"Unit ID (0-255, full Modbus range)" flag:"unit"`
