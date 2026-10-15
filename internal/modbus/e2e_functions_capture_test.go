@@ -175,7 +175,7 @@ func e2eFunctionsRecord(t *testing.T, rounds int, gap time.Duration) (string, ma
 				}
 			}
 			return false
-		}(), "FC%02X recorded", fc)
+		}(), "FC%d recorded", fc)
 	}
 	return path, recorded
 }
@@ -320,7 +320,7 @@ func TestCaptureHandler_rawRequests(t *testing.T) {
 
 	for _, fc := range []uint8{0x15, 0x16, 0x17} {
 		_, err = ask(fc, 0x00, 0x01)
-		require.ErrorIsf(t, err, gomodbus.ErrIllegalFunction, "write FC%02X", fc)
+		require.ErrorIsf(t, err, gomodbus.ErrIllegalFunction, "write FC%d", fc)
 	}
 	_, err = ask(0x41, 0x09)
 	require.ErrorIs(t, err, gomodbus.ErrIllegalDataAddress, "recorded function, other request")

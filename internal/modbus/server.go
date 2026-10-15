@@ -219,9 +219,9 @@ func (h *captureHandler) HandleInputRegisters(_ context.Context, req *modbus.Inp
 func isWrite(fc uint8) bool { return fc == 0x15 || fc == 0x16 || fc == 0x17 }
 
 // HandleRawRequest answers every function go-modbus does not decode for the
-// handler (FC07, FC08, FC0B, FC0C, FC11, FC12, FC14, FC18, FC2B other than
-// device identification, vendor functions) with the response recorded for
-// exactly this request PDU, byte for byte.
+// handler (FC07, FC08, FC11, FC12, FC17, FC20, FC24, FC43 other than device
+// identification, vendor functions) with the response recorded for exactly
+// this request PDU, byte for byte.
 func (h *captureHandler) HandleRawRequest(_ context.Context, req *modbus.RawRequest) ([]byte, error) {
 	fc := uint8(req.FunctionCode)
 	if isWrite(fc) {
