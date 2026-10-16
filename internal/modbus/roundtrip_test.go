@@ -1,7 +1,7 @@
 package modbus
 
-// Record -> file -> replay round trips for every read function of the Modbus
-// specification modbusctl supports: FC01-04, FC07, FC08 (sub-functions that
+// Record -> file -> replay round trips, over tcp, tcp+tls, rtuovertcp and udp,
+// for every read function of the Modbus specification modbusctl supports: FC01-04, FC07, FC08 (sub-functions that
 // return data), FC11, FC12, FC17, FC20, FC24 and FC43/14. A device is recorded
 // with `client record` and a plan holding every function; the file is checked
 // with go-modbus-capture's mbcapctl verify; then the static and replay servers
@@ -280,12 +280,19 @@ func rtServeGoModbus(t *testing.T) string {
 // ms, every interval ms, and returns the capture path.
 func rtRecord(t *testing.T, url, planJSON string, interval, duration uint32, timeoutMS uint16) string {
 	t.Helper()
+	return rtRecordDevice(t, config.DeviceConfig{URL: url, Unit: 1}, planJSON, interval, duration, timeoutMS)
+}
+
+// rtRecordDevice is rtRecord for a device config, such as a tcp+tls one with
+// client certificates.
+func rtRecordDevice(t *testing.T, dev config.DeviceConfig, planJSON string, interval, duration uint32, timeoutMS uint16) string {
+	t.Helper()
 	dir := t.TempDir()
 	pf := filepath.Join(dir, "plan.json")
 	require.NoError(t, os.WriteFile(pf, []byte(planJSON), 0o600))
 	out := filepath.Join(dir, "roundtrip.mbcap")
 	_, err := RecordToCapture(context.Background(), config.RecordConfig{
-		DeviceConfig: config.DeviceConfig{URL: url, Unit: 1}, Timeout: timeoutMS, Function: 3,
+		DeviceConfig: dev, Timeout: timeoutMS, Function: 3,
 		Interval: interval, Duration: duration, BlocksFile: pf, OutputFile: out,
 	}, nil)
 	require.NoError(t, err)
@@ -391,19 +398,25 @@ func TestRoundTrip_everyFunction(t *testing.T) {
 	reqs := rtRequests(t)
 	// duration (ms) leaves room for at least two rounds of the plan: RTU framing
 	// over TCP is slower than the others.
+	plain := func(url string) config.DeviceConfig { return config.DeviceConfig{URL: url, Unit: 1} }
 	sources := []struct {
 		name     string
-		url      func(t *testing.T) string
+		dev      func(t *testing.T) config.DeviceConfig
 		duration uint32
 	}{
-		{"go-modbus server", rtServeGoModbus, 160},
-		{"mbtest tcp", func(t *testing.T) string { return "tcp://" + rtDevice().ServeTCP(t) }, 160},
-		{"mbtest rtuovertcp", func(t *testing.T) string { return "rtuovertcp://" + rtDevice().ServeRTUOverTCP(t) }, 1500},
-		{"mbtest udp", func(t *testing.T) string { return "udp://" + rtDevice().ServeUDP(t) }, 160},
+		{"go-modbus server", func(t *testing.T) config.DeviceConfig { return plain(rtServeGoModbus(t)) }, 160},
+		{"go-modbus server tcp+tls", func(t *testing.T) config.DeviceConfig {
+			pki := mbtest.NewPKI(t)
+			return config.DeviceConfig{URL: e2eTLSServe(t, pki, &rtGoModbusDevice{}), Unit: 1, TLSConfig: tlsClient(pki)}
+		}, 300},
+		{"mbtest tcp", func(t *testing.T) config.DeviceConfig { return plain("tcp://" + rtDevice().ServeTCP(t)) }, 160},
+		{"mbtest tcp+tls", func(t *testing.T) config.DeviceConfig { return tlsDevice(t, mbtest.NewPKI(t), rtDevice()) }, 300},
+		{"mbtest rtuovertcp", func(t *testing.T) config.DeviceConfig { return plain("rtuovertcp://" + rtDevice().ServeRTUOverTCP(t)) }, 1500},
+		{"mbtest udp", func(t *testing.T) config.DeviceConfig { return plain("udp://" + rtDevice().ServeUDP(t)) }, 160},
 	}
 	for _, src := range sources {
 		t.Run(src.name, func(t *testing.T) {
-			path := rtRecord(t, src.url(t), rtPlan, 40, src.duration, coreTimeoutMS)
+			path := rtRecordDevice(t, src.dev(t), rtPlan, 40, src.duration, coreTimeoutMS)
 			mbcapctlVerify(t, path)
 			recorded := rtLoad(t, path)
 			rtRequireAll(t, recorded, reqs, 2)
@@ -487,10 +500,15 @@ func TestChaosRoundTrip_everyFunction(t *testing.T) {
 	for _, tr := range []struct {
 		name   string
 		stream bool
-		serve  func(d *mbtest.Device, t testing.TB) string
+		serve  func(d *mbtest.Device, t *testing.T) config.DeviceConfig
 	}{
-		{"tcp", true, func(d *mbtest.Device, t testing.TB) string { return "tcp://" + d.ServeTCP(t) }},
-		{"rtuovertcp", true, func(d *mbtest.Device, t testing.TB) string { return "rtuovertcp://" + d.ServeRTUOverTCP(t) }},
+		{"tcp", true, func(d *mbtest.Device, t *testing.T) config.DeviceConfig {
+			return config.DeviceConfig{URL: "tcp://" + d.ServeTCP(t), Unit: 1}
+		}},
+		{"tcp+tls", true, func(d *mbtest.Device, t *testing.T) config.DeviceConfig { return tlsDevice(t, mbtest.NewPKI(t), d) }},
+		{"rtuovertcp", true, func(d *mbtest.Device, t *testing.T) config.DeviceConfig {
+			return config.DeviceConfig{URL: "rtuovertcp://" + d.ServeRTUOverTCP(t), Unit: 1}
+		}},
 	} {
 		t.Run(tr.name, func(t *testing.T) {
 			d := mbtest.NewDevice()
@@ -524,7 +542,7 @@ func TestChaosRoundTrip_everyFunction(t *testing.T) {
 				sent[string(r.PDU)+"|"+string(resp)] = true
 				return mbtest.Action{Reply: resp}
 			}
-			path := rtRecord(t, tr.serve(d, t), rtPlan, 0, 1500, 150)
+			path := rtRecordDevice(t, tr.serve(d, t), rtPlan, 0, 1500, 150)
 			mbcapctlVerify(t, path)
 			recorded := rtLoad(t, path)
 			rtRequireAll(t, recorded, reqs, 1)
