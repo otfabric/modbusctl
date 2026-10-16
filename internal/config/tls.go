@@ -64,3 +64,48 @@ func ValidateTLSConfig(modbusURL string, cfg TLSConfig) error {
 	_, _, err := cfg.Load()
 	return err
 }
+
+// ServerTLSConfig holds the TLS settings of `server static` and `server replay`. With a
+// certificate the server speaks Modbus/TCP Security (tcp+tls) instead of plain Modbus TCP:
+// it presents the certificate and requires every client to present a certificate signed by
+// the CA bundle, so the bundle is required too. Without a certificate it serves plain TCP.
+type ServerTLSConfig struct {
+	TLSCert string `env:"MODBUSCTL_TLS_CERT" desc:"Server certificate (PEM): serve Modbus/TCP Security (tcp+tls) instead of plain TCP; the file may also hold the key" flag:"tls-cert"`
+	TLSKey  string `env:"MODBUSCTL_TLS_KEY" desc:"Server private key (PEM) for --tls-cert (default: read from --tls-cert)" flag:"tls-key"`
+	TLSCA   string `env:"MODBUSCTL_TLS_CA" desc:"CA certificates (PEM) that sign the client certificates; required with --tls-cert, clients without such a certificate are rejected" flag:"tls-ca"`
+}
+
+// Enabled reports whether the server serves tcp+tls: a certificate, key or CA bundle is
+// set. Load then requires the certificate and the bundle.
+func (c ServerTLSConfig) Enabled() bool {
+	return strings.TrimSpace(c.TLSCert) != "" || strings.TrimSpace(c.TLSKey) != "" || strings.TrimSpace(c.TLSCA) != ""
+}
+
+// Load reads the server key pair and the client CA bundle. Without --tls-key the key is read
+// from the --tls-cert file. It returns nils when TLS is not enabled.
+func (c ServerTLSConfig) Load() (*tls.Certificate, *x509.CertPool, error) {
+	if !c.Enabled() {
+		return nil, nil, nil
+	}
+	certFile := strings.TrimSpace(c.TLSCert)
+	if certFile == "" {
+		return nil, nil, fmt.Errorf("tcp+tls needs a server certificate: set --tls-cert (and --tls-key unless the file holds the key)")
+	}
+	ca := strings.TrimSpace(c.TLSCA)
+	if ca == "" {
+		return nil, nil, fmt.Errorf("tcp+tls requires client certificates: set --tls-ca to the CA certificates that sign them")
+	}
+	keyFile := strings.TrimSpace(c.TLSKey)
+	if keyFile == "" {
+		keyFile = certFile
+	}
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load TLS server certificate %s: %w", certFile, err)
+	}
+	clientCAs, err := modbus.LoadCertPool(ca)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load TLS client CA certificates: %w", err)
+	}
+	return &cert, clientCAs, nil
+}

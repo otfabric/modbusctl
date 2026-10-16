@@ -14,7 +14,7 @@ import (
 
 var staticCmd = &cobra.Command{
 	Use:   "static",
-	Short: "Serve the values of a capture as a static Modbus TCP device",
+	Short: "Serve the values of a capture as a static Modbus TCP (or tcp+tls) device",
 	Example: `
   # Serve the last recorded values of every target in a capture, each on its recorded unit id
   modbusctl server static --port 502 --input site.mbcap
@@ -24,6 +24,9 @@ var staticCmd = &cobra.Command{
 
   # Answer unrecorded registers with zeros instead of an exception
   modbusctl server static --input site.mbcap --missing zero
+
+  # Serve over Modbus/TCP Security: clients need a certificate signed by plant-ca.pem
+  modbusctl server static --input site.mbcap --port 802 --tls-cert server.pem --tls-key server-key.pem --tls-ca plant-ca.pem
 
   # Use environment variables instead of CLI arguments
   MODBUSCTL_PORT=502 MODBUSCTL_INPUT=site.mbcap modbusctl server static

@@ -5,7 +5,8 @@ package modbus
 // A go-modbus tcp+tls server is recorded and the recording replayed, every
 // client command runs over TLS, and the client refuses a server it does not
 // trust and fails cleanly without a certificate or with one the server does
-// not trust.
+// not trust. The static and replay servers serve tcp+tls with the server
+// --tls-cert/--tls-key and require client certificates signed by --tls-ca.
 
 import (
 	"context"
@@ -25,7 +26,6 @@ import (
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/mbtest"
-	"github.com/otfabric/modbusctl/internal/replay"
 	"github.com/otfabric/modbusctl/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +34,17 @@ import (
 // tlsClient returns the client TLS settings for a PKI: its client key pair and CA.
 func tlsClient(p *mbtest.PKI) config.TLSConfig {
 	return config.TLSConfig{TLSCert: p.ClientCertFile, TLSKey: p.ClientKeyFile, TLSCA: p.CAFile}
+}
+
+// tlsServer returns the server TLS settings for a PKI: its server key pair, and its CA as
+// the bundle that signs client certificates.
+func tlsServer(p *mbtest.PKI) config.ServerTLSConfig {
+	return config.ServerTLSConfig{TLSCert: p.ServerCertFile, TLSKey: p.ServerKeyFile, TLSCA: p.CAFile}
+}
+
+// tlsURL is the tcp+tls:// URL of a static or replay server serving tcp+tls.
+func (s *collServer) tlsURL() string {
+	return fmt.Sprintf("tcp+tls://127.0.0.1:%d", s.port)
 }
 
 // tlsDevice serves d over tcp+tls with the PKI and returns the device config to reach it.
@@ -87,8 +98,8 @@ func (d *e2eTLSDevice) HandleHoldingRegisters(_ context.Context, req *gomodbus.H
 }
 
 // Record a go-modbus tcp+tls server, then replay the recording: over plain
-// Modbus TCP with `server replay`, and over tcp+tls from a go-modbus server
-// that answers from the capture, read back with the TLS client.
+// Modbus TCP with `server replay`, and over tcp+tls with `server static`,
+// read back with the TLS client.
 func TestE2ETLS_recordAndReplay(t *testing.T) {
 	pki := mbtest.NewPKI(t)
 	dev := &e2eTLSDevice{}
@@ -165,12 +176,13 @@ func TestE2ETLS_recordAndReplay(t *testing.T) {
 	require.Equal(t, lastFC17[2:], id.Data, "FC17 answers the recorded response")
 	require.ErrorIs(t, rs.stop(t), context.Canceled)
 
-	// The capture served over tcp+tls and read with the TLS client: the last
-	// recorded values, and a capture of the read that says it was over TLS.
-	loaded, devices, err := serveTargets(rec, 0, 0, replay.Options{})
-	require.NoError(t, err)
-	end := loaded.End()
-	replayURL := e2eTLSServe(t, pki, &captureHandler{devices: devices, now: func() capture.Ticks { return end }})
+	// The capture served over tcp+tls by `server static` and read with the TLS
+	// client: the last recorded values, and a capture of the read that says it
+	// was over TLS.
+	ss := collStartServer(t, func(ctx context.Context, a collAddr) error {
+		return ServeStatic(ctx, config.StaticServerConfig{ServerTLSConfig: tlsServer(pki), Port: a.Port, Listen: a.Listen, InputFile: rec}, a.Progress(nil))
+	})
+	replayURL := ss.tlsURL()
 	readOut := filepath.Join(dir, "read.mbcap")
 	res, err := CollectRead(context.Background(), config.ReadConfig{
 		DeviceConfig: config.DeviceConfig{URL: replayURL, Unit: 1, TLSConfig: tlsClient(pki)},

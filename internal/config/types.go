@@ -181,6 +181,7 @@ type StringsConfig struct {
 }
 
 type StaticServerConfig struct {
+	ServerTLSConfig
 	Listen     string `env:"MODBUSCTL_LISTEN" desc:"Address to listen on, e.g. 127.0.0.1 (default: every interface)" flag:"listen"`
 	Port       uint16 `env:"MODBUSCTL_PORT" desc:"Port for the static server" flag:"port"`
 	Unit       uint8  `env:"MODBUSCTL_UNIT" desc:"Serve the target as this unit id (0 = the unit id recorded for each target)" flag:"unit"`
@@ -193,6 +194,7 @@ type StaticServerConfig struct {
 }
 
 type ReplayServerConfig struct {
+	ServerTLSConfig
 	Listen      string `env:"MODBUSCTL_LISTEN" desc:"Address to listen on, e.g. 127.0.0.1 (default: every interface)" flag:"listen"`
 	Port        uint16 `env:"MODBUSCTL_PORT" desc:"Port for the replay server" flag:"port"`
 	Unit        uint8  `env:"MODBUSCTL_UNIT" desc:"Serve the target as this unit id (0 = the unit id recorded for each target)" flag:"unit"`

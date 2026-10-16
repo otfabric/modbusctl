@@ -174,6 +174,15 @@ func TestLoadFromEnv_realConfigs(t *testing.T) {
 	assert.Equal(t, tlsCfg, fp.TLSConfig)
 	assert.Equal(t, tlsCfg, diag.TLSConfig)
 	assert.Equal(t, tlsCfg, ss.TLSConfig)
+
+	// The servers read the same variables as their certificate, key and client CA bundle.
+	serverTLS := ServerTLSConfig{TLSCert: "client.pem", TLSKey: "client-key.pem", TLSCA: "ca.pem"}
+	var static StaticServerConfig
+	var rp ReplayServerConfig
+	require.NoError(t, LoadFromEnv(&static))
+	require.NoError(t, LoadFromEnv(&rp))
+	assert.Equal(t, serverTLS, static.ServerTLSConfig)
+	assert.Equal(t, serverTLS, rp.ServerTLSConfig)
 }
 
 func TestIsTLSURL(t *testing.T) {

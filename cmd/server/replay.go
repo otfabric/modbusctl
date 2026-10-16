@@ -14,7 +14,7 @@ import (
 
 var replayCmd = &cobra.Command{
 	Use:   "replay",
-	Short: "Replay a capture as a Modbus TCP device whose values follow the recording",
+	Short: "Replay a capture as a Modbus TCP (or tcp+tls) device whose values follow the recording",
 	Example: `
   # Replay a capture at its original speed, looping forever, every target on its recorded unit id
   modbusctl server replay --input=recording.mbcap
@@ -24,6 +24,9 @@ var replayCmd = &cobra.Command{
 
   # One target as unit 1 on port 1502; addresses are absent until first sampled
   modbusctl server replay --input=site.mbcap --target=2 --unit=1 --port=1502 --before-first=absent
+
+  # Replay over Modbus/TCP Security: clients need a certificate signed by plant-ca.pem
+  modbusctl server replay --input=site.mbcap --port=802 --tls-cert=server.pem --tls-key=server-key.pem --tls-ca=plant-ca.pem
 
   # Use environment variables instead of CLI arguments
   MODBUSCTL_PORT=1502 MODBUSCTL_INPUT=recording.mbcap MODBUSCTL_SPEED=60 modbusctl server replay

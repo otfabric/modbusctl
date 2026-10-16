@@ -2,6 +2,8 @@ package modbus
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -436,7 +438,12 @@ type ServerConfig struct {
 	// MaxClients limits concurrent client connections; 0 is the go-modbus
 	// default (10).
 	MaxClients uint16
-	Debug      bool
+	// TLSCert, when set, serves Modbus/TCP Security (tcp+tls) instead of
+	// plain Modbus TCP: the server presents it and requires a client
+	// certificate signed by TLSClientCAs.
+	TLSCert      *tls.Certificate
+	TLSClientCAs *x509.CertPool
+	Debug        bool
 }
 
 // serve runs the handler on a Modbus TCP listener until ctx ends, then prints
@@ -465,12 +472,18 @@ func newModbusServer(ctx context.Context, handler modbus.RequestHandler, metrics
 	if host == "" {
 		host = "0.0.0.0"
 	}
+	scheme, what := "tcp", "Modbus TCP"
+	if cfg.TLSCert != nil {
+		scheme, what = "tcp+tls", "Modbus TCP Security (tcp+tls, client certificates required)"
+	}
 	server, err := modbus.NewServer(&modbus.ServerConfig{
-		URL:        "tcp://" + net.JoinHostPort(host, strconv.Itoa(int(cfg.Port))),
-		Timeout:    0,
-		MaxClients: uint(cfg.MaxClients),
-		Logger:     logger,
-		Metrics:    metrics,
+		URL:           scheme + "://" + net.JoinHostPort(host, strconv.Itoa(int(cfg.Port))),
+		Timeout:       0,
+		MaxClients:    uint(cfg.MaxClients),
+		Logger:        logger,
+		Metrics:       metrics,
+		TLSServerCert: cfg.TLSCert,
+		TLSClientCAs:  cfg.TLSClientCAs,
 	}, handler)
 	if err != nil {
 		return errs.New(errs.KindTransport, errs.CodeTransportConnectFailed, "failed to start modbus server: "+err.Error(), err)
@@ -480,9 +493,9 @@ func newModbusServer(ctx context.Context, handler modbus.RequestHandler, metrics
 	}
 	// Printed once the listener is bound: from here on clients reach this server.
 	if cfg.Listen == "" {
-		_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on port %d\n", cfg.Port)
+		_, _ = fmt.Fprintf(progress, "🚀 Serving %s on port %d\n", what, cfg.Port)
 	} else {
-		_, _ = fmt.Fprintf(progress, "🚀 Serving Modbus TCP on %s port %d\n", cfg.Listen, cfg.Port)
+		_, _ = fmt.Fprintf(progress, "🚀 Serving %s on %s port %d\n", what, cfg.Listen, cfg.Port)
 	}
 	// Block until context canceled (e.g. SIGINT/SIGTERM via root Execute).
 	<-ctx.Done()
@@ -508,6 +521,10 @@ func ServeStatic(ctx context.Context, cfg config.StaticServerConfig, progress io
 	if err != nil {
 		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
 	}
+	cert, clientCAs, err := cfg.Load()
+	if err != nil {
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
+	}
 	l, devices, err := serveTargets(cfg.InputFile, cfg.Target, cfg.Unit, replay.Options{})
 	if err != nil {
 		return err
@@ -524,7 +541,7 @@ func ServeStatic(ctx context.Context, cfg config.StaticServerConfig, progress io
 	_, _ = fmt.Fprintf(progress, "✅ Static server ready on port %d with %s of %s\n", cfg.Port, when, cfg.InputFile)
 	describeDevices(progress, devices)
 	h := &captureHandler{devices: devices, now: func() capture.Ticks { return t }, missing: missing}
-	return serve(ctx, h, ServerConfig{Listen: cfg.Listen, Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
+	return serve(ctx, h, ServerConfig{Listen: cfg.Listen, Port: cfg.Port, MaxClients: cfg.MaxClients, TLSCert: cert, TLSClientCAs: clientCAs, Debug: cfg.Debug}, progress)
 }
 
 // ServeReplay replays a capture: the served values follow the recorded ones
@@ -552,6 +569,10 @@ func ServeReplay(ctx context.Context, cfg config.ReplayServerConfig, progress io
 	if err != nil {
 		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
 	}
+	cert, clientCAs, err := cfg.Load()
+	if err != nil {
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
+	}
 	l, devices, err := serveTargets(cfg.InputFile, cfg.Target, cfg.Unit, replay.Options{BeforeFirst: before})
 	if err != nil {
 		return err
@@ -569,5 +590,5 @@ func ServeReplay(ctx context.Context, cfg config.ReplayServerConfig, progress io
 	describeDevices(progress, devices)
 	start := time.Now()
 	h := &captureHandler{devices: devices, now: func() capture.Ticks { return clock.At(time.Since(start)) }, missing: missing}
-	return serve(ctx, h, ServerConfig{Listen: cfg.Listen, Port: cfg.Port, MaxClients: cfg.MaxClients, Debug: cfg.Debug}, progress)
+	return serve(ctx, h, ServerConfig{Listen: cfg.Listen, Port: cfg.Port, MaxClients: cfg.MaxClients, TLSCert: cert, TLSClientCAs: clientCAs, Debug: cfg.Debug}, progress)
 }
