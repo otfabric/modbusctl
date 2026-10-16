@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/mbtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -608,6 +609,24 @@ func TestCheckServerConfigs(t *testing.T) {
 	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 1502, InputFile: input, Speed: "fast"}), `invalid --speed "fast"`)
 	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 1502, InputFile: input, From: "-1s"}), `invalid --from "-1s"`)
 	check(t, CheckReplayServerConfig(config.ReplayServerConfig{Port: 1502, InputFile: input, BeforeFirst: "later"}), `invalid --before-first "later"`)
+
+	// tcp+tls: a server certificate and a client CA bundle that load.
+	pki := mbtest.NewPKI(t)
+	good := config.ServerTLSConfig{TLSCert: pki.ServerCertFile, TLSKey: pki.ServerKeyFile, TLSCA: pki.CAFile}
+	check(t, CheckStaticServerConfig(config.StaticServerConfig{ServerTLSConfig: good, Port: 802, InputFile: input}), "")
+	check(t, CheckReplayServerConfig(config.ReplayServerConfig{ServerTLSConfig: good, Port: 802, InputFile: input}), "")
+	for _, tc := range []struct {
+		tls  config.ServerTLSConfig
+		want string
+	}{
+		{config.ServerTLSConfig{TLSCert: pki.ServerCertFile, TLSKey: pki.ServerKeyFile}, "set --tls-ca"},
+		{config.ServerTLSConfig{TLSCA: pki.CAFile}, "set --tls-cert"},
+		{config.ServerTLSConfig{TLSCert: pki.ServerCertFile, TLSCA: pki.CAFile}, "load TLS server certificate"},
+		{config.ServerTLSConfig{TLSCert: pki.ServerCertFile, TLSKey: pki.ServerKeyFile, TLSCA: filepath.Join(dir, "missing.pem")}, "load TLS client CA certificates"},
+	} {
+		check(t, CheckStaticServerConfig(config.StaticServerConfig{ServerTLSConfig: tc.tls, Port: 802, InputFile: input}), tc.want)
+		check(t, CheckReplayServerConfig(config.ReplayServerConfig{ServerTLSConfig: tc.tls, Port: 802, InputFile: input}), tc.want)
+	}
 }
 
 func TestCheckSunSpecConfigs_more(t *testing.T) {

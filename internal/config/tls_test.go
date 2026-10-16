@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/otfabric/modbusctl/internal/mbtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTLSConfigLoad(t *testing.T) {
@@ -50,5 +52,42 @@ func TestValidateTLSConfig(t *testing.T) {
 	}
 	if err := ValidateTLSConfig("tcp+tls://127.0.0.1:802", TLSConfig{}); err == nil {
 		t.Error("a tcp+tls:// URL without a certificate passed")
+	}
+}
+
+func TestServerTLSConfigLoad(t *testing.T) {
+	pki := mbtest.NewPKI(t)
+
+	// Without settings the server serves plain TCP.
+	var off ServerTLSConfig
+	assert.False(t, off.Enabled())
+	cert, pool, err := off.Load()
+	require.NoError(t, err)
+	assert.Nil(t, cert)
+	assert.Nil(t, pool)
+
+	on := ServerTLSConfig{TLSCert: pki.ServerCertFile, TLSKey: pki.ServerKeyFile, TLSCA: pki.CAFile}
+	assert.True(t, on.Enabled())
+	cert, pool, err = on.Load()
+	require.NoError(t, err)
+	require.NotNil(t, cert)
+	require.NotNil(t, pool)
+
+	for _, tc := range []struct {
+		name string
+		cfg  ServerTLSConfig
+		want string
+	}{
+		{"CA only", ServerTLSConfig{TLSCA: pki.CAFile}, "needs a server certificate"},
+		{"blank certificate", ServerTLSConfig{TLSCert: " ", TLSKey: pki.ServerKeyFile}, "needs a server certificate"},
+		{"no client CA", ServerTLSConfig{TLSCert: pki.ServerCertFile, TLSKey: pki.ServerKeyFile}, "set --tls-ca"},
+		{"key that does not match", ServerTLSConfig{TLSCert: pki.ServerCertFile, TLSKey: pki.ClientKeyFile, TLSCA: pki.CAFile}, "load TLS server certificate"},
+		{"missing CA file", ServerTLSConfig{TLSCert: pki.ServerCertFile, TLSKey: pki.ServerKeyFile, TLSCA: "/no/such/ca.pem"}, "load TLS client CA certificates"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.True(t, tc.cfg.Enabled())
+			_, _, err := tc.cfg.Load()
+			require.ErrorContains(t, err, tc.want)
+		})
 	}
 }

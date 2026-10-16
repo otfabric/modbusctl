@@ -1,5 +1,31 @@
 # modbusctl Releases
 
+## v3.2.0
+
+**Date:** unreleased
+**Previous release:** v3.1.0
+
+### Summary
+
+Minor release: **`server static`** and **`server replay`** serve **Modbus/TCP Security** (`tcp+tls`) with client certificates required, given **`--tls-cert`**, **`--tls-key`** and **`--tls-ca`**. They served plain Modbus TCP only. Without the flags they serve plain Modbus TCP as before.
+
+### Added
+
+- **Modbus/TCP Security on both servers: `--tls-cert`, `--tls-key`, `--tls-ca`** (`MODBUSCTL_TLS_CERT`, `MODBUSCTL_TLS_KEY`, `MODBUSCTL_TLS_CA`, the variables the client reads).
+  - `--tls-cert` is the server certificate and turns TLS on. `--tls-key` defaults to the `--tls-cert` file, which may hold both.
+  - `--tls-ca` is required with TLS: the CA certificates that sign the client certificates. Every client must present a certificate that bundle vouches for (mutual TLS, as the Modbus/TCP Security specification requires). A client without one, with one another CA signed, or speaking plain Modbus TCP gets no answer and is not counted as a request.
+  - A missing or unreadable file, a key that does not match, `--tls-cert` without `--tls-ca`, or `--tls-key`/`--tls-ca` without `--tls-cert` is invalid input (exit 3), before the server binds.
+  - The listener line reads `🚀 Serving Modbus TCP Security (tcp+tls, client certificates required) on … port N`. The port stays `--port` (default 502); Modbus/TCP Security uses 802 by convention.
+  - The TLS handshake times out after 30 seconds (the go-modbus default).
+
+### Tests
+
+- A capture recorded over tcp+tls is served over tcp+tls by `server static` and `server replay` and read back with the modbusctl TLS client, through the library and through the CLI flags. The replay walks through the recorded values and ends on the last one; a read of it records the transport as `tls`.
+- Both servers reject a client certificate of another CA, a server certificate used as a client certificate, a client that does not trust the server, and a plain Modbus TCP client, and serve none of their requests.
+- Both servers fail as invalid input, before printing anything, without `--tls-ca`, without `--tls-cert`, with a certificate without its key, a mismatched key, or a missing, empty or certificate-less CA file. The server key may sit in the certificate file.
+
+---
+
 ## v3.1.0
 
 **Date:** 2026-10-15

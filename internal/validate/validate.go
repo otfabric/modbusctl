@@ -448,7 +448,11 @@ func CheckStaticServerConfig(cfg config.StaticServerConfig) error {
 	if err := checkMissing(cfg.Missing); err != nil {
 		return err
 	}
-	return checkOffset("at", cfg.At)
+	if err := checkOffset("at", cfg.At); err != nil {
+		return err
+	}
+	_, _, err := cfg.Load()
+	return err
 }
 
 func CheckReplayServerConfig(cfg config.ReplayServerConfig) error {
@@ -474,7 +478,11 @@ func CheckReplayServerConfig(cfg config.ReplayServerConfig) error {
 			return fmt.Errorf("invalid --speed %q: use a positive factor such as 1, 0.1 or 60", cfg.Speed)
 		}
 	}
-	return checkOffset("from", cfg.From)
+	if err := checkOffset("from", cfg.From); err != nil {
+		return err
+	}
+	_, _, err := cfg.Load()
+	return err
 }
 
 func checkMissing(s string) error {

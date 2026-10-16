@@ -161,8 +161,8 @@ The following features are available:
 | Decode (registers) | Read holding/input registers (FC03/FC04) and decode them into typed values (integers, floats, strings, BCD, time, IP, MAC, …) using a **codec** such as `float32/layout:4321` or `ascii/registers:8`. |
 | Codecs           | List available register codecs (id, family, value kind, register/byte width) with optional family / value-kind / register-width filters. |
 | Record           | Record every read function of the Modbus specification (FC01–04, 07, 08, 11, 12, 17, 20, 24, 43) into MBCAP capture files for replay or analysis. |
-| Static           | Serve the values of a capture as a Modbus TCP device (static hosting).                                                    |
-| Replay           | Replay a capture as a Modbus TCP device whose values follow the recording (speed, loops).                                 |
+| Static           | Serve the values of a capture as a Modbus TCP or Modbus/TCP Security device (static hosting).                             |
+| Replay           | Replay a capture as a Modbus TCP or Modbus/TCP Security device whose values follow the recording (speed, loops).          |
 | Decode           | Decode captured registers using device profiles.                                                                          |
 | Extract          | Extract the address blocks of a capture (a blocks file for `client record`).                                             |
 | Strings          | Extract printable strings from captured registers for inspection, debugging, or searching for embedded text.              |
@@ -464,7 +464,7 @@ export MODBUSCTL_TLS_CERT=client.pem MODBUSCTL_TLS_KEY=client-key.pem MODBUSCTL_
 modbusctl client record --url tcp+tls://192.168.1.10:802 --blocks-file plan.json --interval 1000 --duration 60000 --output plant.mbcap
 ```
 
-The device certificate must name the host of the URL (an IP address SAN for `tcp+tls://192.168.1.10:802`, a DNS name for `tcp+tls://plc.example:802`). A missing or unreadable certificate, key or CA file is invalid input (exit 3) and nothing is sent; a device the CA does not vouch for, or one that rejects the client certificate, is a transport error (exit 4). A capture made over TLS records the target's transport as `tls`; the certificate files are not stored in it. `server static` and `server replay` serve a capture over plain Modbus TCP.
+The device certificate must name the host of the URL (an IP address SAN for `tcp+tls://192.168.1.10:802`, a DNS name for `tcp+tls://plc.example:802`). A missing or unreadable certificate, key or CA file is invalid input (exit 3) and nothing is sent; a device the CA does not vouch for, or one that rejects the client certificate, is a transport error (exit 4). A capture made over TLS records the target's transport as `tls`; the certificate files are not stored in it. `server static` and `server replay` serve over TLS too: see [Serving over Modbus/TCP Security](#serving-over-modbustcp-security).
 
 Good to know:
 
@@ -472,7 +472,7 @@ Good to know:
 - **One request at a time on a serial line.** With `rtu://` and `ascii://`, `--parallel` is ignored and units are queried one after the other.
 - **Unit IDs matter on a bus.** A unit that is not present does not answer, so each missing unit costs one `--timeout`. Use a short timeout (for example `--timeout 300`) when sweeping units with `--unit 1-32`.
 - **Captures** made over a serial line record the device path and serial settings (baud, parity, data and stop bits) of the target; the full URL is kept in the target's `url` tag.
-- **`server` and `discover` are Modbus TCP only** (no TLS).
+- **`server static` and `server replay` serve Modbus TCP, or Modbus/TCP Security with `--tls-cert`;** `discover` is Modbus TCP only (no TLS).
 - UDP transports are not part of the Modbus specification; vendors use either `udp://` (MBAP framing) or `rtuoverudp://`. Try both if unsure.
 
 ### Common Commands
@@ -936,6 +936,7 @@ modbusctl server replay --input session.mbcap --speed 10 --loops 3 --from 5m
 Both servers:
 
 - listen on every interface, or on the address given with `--listen` (for example `127.0.0.1`);
+- serve plain Modbus TCP, or Modbus/TCP Security with `--tls-cert`, `--tls-key` and `--tls-ca` (see below);
 - accept up to `--max-clients` concurrent connections (default 10) and close further ones;
 - print a summary when stopped (`📊 Served N requests: …`), counting the answers, exceptions, silences and requests for data the capture does not hold; with `--debug` they also name each such request and log the Modbus frames;
 - answer **FC01–04** from the values recorded per address (any range whose addresses were all recorded, even one never requested as such), **FC43** device identification from the recorded objects, and **FC07**, **FC08** (sub-functions that return data: 0x00, 0x02, 0x0B–0x12), **FC11**, **FC12**, **FC17**, **FC20** and **FC24** with the data of the response recorded for exactly that request;
@@ -943,6 +944,27 @@ Both servers:
 - refuse writes (Illegal Function): a replayed device is read-only;
 - answer what the capture does not hold according to `--missing`: **exception** (default: Illegal Function for a function never recorded, Illegal Data Address otherwise), **zero** (unrecorded registers and coils read 0), or **silence** (no answer: the client times out);
 - before an address is first sampled, serve its first sample (`--before-first hold`, default) or treat it as unrecorded (`--before-first absent`; replay only).
+
+#### Serving over Modbus/TCP Security
+
+With `--tls-cert` both servers serve `tcp+tls` instead of plain Modbus TCP. The server presents its certificate and requires every client to present a certificate signed by the `--tls-ca` bundle (mutual TLS, as the Modbus/TCP Security specification requires), so `--tls-ca` is required too. The files are PEM:
+
+| Flag | Environment | Purpose |
+|------|-------------|---------|
+| `--tls-cert` | `MODBUSCTL_TLS_CERT` | Server certificate; turns TLS on. The file may also hold the key |
+| `--tls-key` | `MODBUSCTL_TLS_KEY` | Server private key (default: read from `--tls-cert`) |
+| `--tls-ca` | `MODBUSCTL_TLS_CA` | CA certificates that sign the client certificates (required with `--tls-cert`) |
+
+```console
+# Serve a capture over TLS on the Modbus/TCP Security port
+modbusctl server static --input plant.mbcap --port 802 --tls-cert server.pem --tls-key server-key.pem --tls-ca plant-ca.pem
+
+# Replay it, and read it back with a client certificate of the same PKI
+modbusctl server replay --input plant.mbcap --port 802 --tls-cert server.pem --tls-key server-key.pem --tls-ca plant-ca.pem
+modbusctl client read --url tcp+tls://127.0.0.1:802 --tls-cert client.pem --tls-key client-key.pem --tls-ca plant-ca.pem --start 100 --count 4
+```
+
+The server certificate must name the address clients connect to (an IP address SAN, or a DNS name). The server prints `🚀 Serving Modbus TCP Security (tcp+tls, client certificates required) on … port N` once it listens. A client without a certificate the bundle vouches for, or one speaking plain Modbus TCP, gets no answer. A missing or unreadable file, a key that does not match, or `--tls-cert` without `--tls-ca` is invalid input (exit 3), before the server binds. A capture is served over TLS whatever transport it was recorded over.
 
 #### Inspect, verify and convert a capture
 
@@ -1098,9 +1120,9 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_SPEED**       | string   | **`server replay`**: speed factor (1 = original, 10 = ten times faster, 0.1 = ten times slower) | `--speed` | 1 |
 | **MODBUSCTL_SUBNETS**     | string   | Subnets to scan for Modbus devices (comma-separated)     | `--subnets`     |            |
 | **MODBUSCTL_TARGET**      | uint32   | Capture target to use: **`server static`/`replay`** (0 = every target), **`capture decode`/`extract`/`strings`/`frequencies`** (0 = the only one) | `--target` | 0 |
-| **MODBUSCTL_TLS_CA**      | string   | **`tcp+tls://`** only: CA certificates (PEM) that sign the device certificate | `--tls-ca` | system roots |
-| **MODBUSCTL_TLS_CERT**    | string   | **`tcp+tls://`** only: client certificate (PEM), may also hold the key | `--tls-cert` |            |
-| **MODBUSCTL_TLS_KEY**     | string   | **`tcp+tls://`** only: client private key (PEM)         | `--tls-key`     | from `--tls-cert` |
+| **MODBUSCTL_TLS_CA**      | string   | Client, **`tcp+tls://`** only: CA certificates (PEM) that sign the device certificate; **`server static`/`replay`**: CA certificates that sign the client certificates (required with `--tls-cert`) | `--tls-ca` | client: system roots |
+| **MODBUSCTL_TLS_CERT**    | string   | Client, **`tcp+tls://`** only: client certificate (PEM), may also hold the key; **`server static`/`replay`**: server certificate (PEM), serves Modbus/TCP Security | `--tls-cert` |            |
+| **MODBUSCTL_TLS_KEY**     | string   | Client, **`tcp+tls://`** only: client private key (PEM); **`server static`/`replay`**: server private key (PEM) | `--tls-key`     | from `--tls-cert` |
 | **MODBUSCTL_TIMEOUT**     | uint16   | Request timeout in ms and dial cap; **0 = 10000** ms default | `--timeout`     | 0 (most client commands) |
 | **MODBUSCTL_UNIT**        | string   | Unit ID (1-255); for multi-unit commands: single, range (1-10), list (1,5,25), mixed (1-10,255), or `all`; **`server static`/`replay`**: serve the target on this unit id (0 = its recorded unit id) | `--unit` | 1 (servers: 0) |
 | **MODBUSCTL_URL**         | string   | Modbus URL for client commands: `tcp://`, `tcp+tls://`, `udp://`, `rtu://`, `ascii://`, `rtuovertcp://`, `rtuoverudp://` or `asciiovertcp://` (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port | `--url`  |         |
