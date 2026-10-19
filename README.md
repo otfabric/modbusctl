@@ -468,7 +468,7 @@ The device certificate must name the host of the URL (an IP address SAN for `tcp
 
 Good to know:
 
-- **Defaults differ between tools.** Many devices ship as 9600 8N1; the Modbus specification default is 19200 8E1. If a serial device does not answer, check `--baud`, `--parity` and `--stop-bits` against its manual first.
+- **Defaults differ between tools.** modbusctl defaults to 19200 8N2 (no parity, 2 stop bits, as go-modbus does); the Modbus specification default is 19200 8E1, and many devices ship as 9600 8N1. If a serial device does not answer, check `--baud`, `--parity` and `--stop-bits` against its manual first.
 - **One request at a time on a serial line.** With `rtu://` and `ascii://`, `--parallel` is ignored and units are queried one after the other.
 - **Unit IDs matter on a bus.** A unit that is not present does not answer, so each missing unit costs one `--timeout`. Use a short timeout (for example `--timeout 300`) when sweeping units with `--unit 1-32`.
 - **Captures** made over a serial line record the device path and serial settings (baud, parity, data and stop bits) of the target; the full URL is kept in the target's `url` tag.
@@ -1073,7 +1073,7 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 
 | Variable               | Type     | Description                                                 | Flag            | Default    |
 |------------------------|----------|-------------------------------------------------------------|-----------------|------------|
-| **MODBUSCTL_ADDRESS**     | uint16   | Start address for **`client read`**, **`decode`**, **`poll`** and **`write`** (`write` has no default) | `--start`       | 1          |
+| **MODBUSCTL_ADDRESS**     | uint16   | Start address for **`client read`**, **`decode`**, **`poll`** and **`write`** | `--start`       | 1 (read, decode), 0 (poll), none (write: required) |
 | **MODBUSCTL_ALGO**        | string   | Scan algorithm: safe, smart, deep, stepped, linear, boundary, or sunspec | `--algo`        | safe       |
 | **MODBUSCTL_BAUD**        | uint     | Serial baud rate for `rtu://` and `ascii://` URLs (0 = 19200) | `--baud`        | 0          |
 | **MODBUSCTL_CODEC**       | string   | Codec ID for **`client decode`**, **`poll`** and **`write`** (e.g. float32/layout:4321, ascii/registers:8, ip_addr) | `--codec`       |            |
@@ -1113,10 +1113,6 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_RETRY_TIMEOUT**    | uint8  | Retry once on timeout/transport (0=no, 1=yes)           | `--retry-timeout`   | 0    |
 | **MODBUSCTL_SEED_START**  | uint16   | Boundary algo: seed start address (known-good read)       | `--seed-start`  | 0          |
 | **MODBUSCTL_SEED_COUNT**  | uint16   | Boundary algo: seed register count (1–125)                | `--seed-count`  | 0          |
-| **MODBUSCTL_SUNSPEC_BASE** | uint16  | Sunspec algo: known base address (skip detection)         | `--sunspec-base` | 0         |
-| **MODBUSCTL_SUNSPEC_BASES** | string | Sunspec algo: comma-separated candidate base addresses    | `--sunspec-bases` |          |
-| **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Sunspec algo: max model headers to read (0=256)         | `--sunspec-max-models` | 0   |
-| **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Sunspec algo: max address span from base (0=no limit)  | `--sunspec-max-span` | 0     |
 | **MODBUSCTL_SPEED**       | string   | **`server replay`**: speed factor (1 = original, 10 = ten times faster, 0.1 = ten times slower) | `--speed` | 1 |
 | **MODBUSCTL_SUBNETS**     | string   | Subnets to scan for Modbus devices (comma-separated)     | `--subnets`     |            |
 | **MODBUSCTL_TARGET**      | uint32   | Capture target to use: **`server static`/`replay`** (0 = every target), **`capture decode`/`extract`/`strings`/`frequencies`** (0 = the only one) | `--target` | 0 |
@@ -1128,10 +1124,10 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_URL**         | string   | Modbus URL for client commands: `tcp://`, `tcp+tls://`, `udp://`, `rtu://`, `ascii://`, `rtuovertcp://`, `rtuoverudp://` or `asciiovertcp://` (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port | `--url`  |         |
 | **MODBUSCTL_VALUES**      | string   | **`client write`**: comma-separated values to write       | `--values`      |            |
 | **MODBUSCTL_REGTYPE**     | string   | Register type for sunspec: holding or input | `--regtype` | holding |
-| **MODBUSCTL_SUNSPEC_BASES** | string | Comma-separated base addresses to probe (sunspec detect) | `--bases` | 0,40000,50000,… |
-| **MODBUSCTL_SUNSPEC_BASE** | uint16  | Known SunSpec base address; skip detection when set (sunspec models/map) | `--base` | 0 |
-| **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Maximum model headers to read; 0 = 256 (sunspec models) | `--max-models` | 0 |
-| **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Maximum address span from base; 0 = no limit (sunspec models) | `--max-address-span` | 0 |
+| **MODBUSCTL_SUNSPEC_BASES** | string | Comma-separated base addresses to probe: **`sunspec detect`**, and **`client scan --algo sunspec`** | `--bases` (sunspec detect), `--sunspec-bases` (scan) | 0,40000,50000,… |
+| **MODBUSCTL_SUNSPEC_BASE** | uint16  | Known SunSpec base address; skip detection when set: **`sunspec models`/`map`**, and **`client scan --algo sunspec`** | `--base` (sunspec models/map), `--sunspec-base` (scan) | 0 |
+| **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Maximum model headers to read; 0 = 256: **`sunspec models`**, and **`client scan --algo sunspec`** | `--max-models` (sunspec models), `--sunspec-max-models` (scan) | 0 |
+| **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Maximum address span from base; 0 = no limit: **`sunspec models`**, and **`client scan --algo sunspec`** | `--max-address-span` (sunspec models), `--sunspec-max-span` (scan) | 0 |
 | **MODBUSCTL_VERBOSE**     | bool     | Show probe attempts or extra detail (e.g. sunspec detect) | `--verbose` | false |
 | **MODBUSCTL_OUTPUT_FORMAT** | string | Client stdout format: **text**, **json**, or **table** (identify, read, decode, write, poll, scan, record, reportserverid, fingerprint, diagnostic, sunspec, …). Empty/unset defaults to **text**. | `--format` | text |
 

@@ -8,7 +8,7 @@
 | 2 | Usage / CLI misuse (`KindUsage`) — reserved |
 | 3 | Invalid input / bad flags or config (`KindInvalidInput`) |
 | 4 | Transport / connection (`KindTransport`): TCP/UDP dial failure or a serial port that cannot be opened |
-| 5 | Timeout (`KindTimeout`) — reserved for typed timeouts |
+| 5 | Timeout (`KindTimeout`): a request or network operation timed out (`request_timeout`, `transport_timeout`) and that is the command's fatal error, e.g. a timed-out `client read` or `client write`. SunSpec and FC08 diagnostics steps report a timeout under their own codes and exit `6` |
 | 6 | Protocol / Modbus exception (`KindProtocol`, `KindModbus`) |
 | 7 | Partial success (`ExitPartial`): a **valid** result was written to stdout, but aggregate semantics include embedded failures (e.g. any failed unit on `identify` / `reportserverid`, a `fingerprint` unit with no usable result or an interrupted partial probe, failed scan requests on `client scan`, or any failed poll on `client poll`) |
 | 10 | Output / internal / unknown (`KindOutput`, `KindInternal`, or unrecognized errors) |
