@@ -1,5 +1,32 @@
 # modbusctl Releases
 
+## v3.2.1
+
+**Date:** 2026-10-29
+**Previous release:** v3.2.0
+
+### Summary
+
+Dependency update for Modbus RTU and ASCII over serial lines: go-serial v0.1.8 fixes two POSIX serial I/O bugs. No command or flag changes.
+
+### Dependencies
+
+- go-modbus v1.7.1 → v1.7.2, go-serial v0.1.6 → v0.1.8.
+
+### Fixes (from go-serial v0.1.8)
+
+- `Write` no longer loses data when the serial port's output buffer is
+  full. It used to return a short count with a nil error (or `n == -1`
+  with `EAGAIN`); it now blocks until every byte is written.
+- `Read` works when the port's file descriptor is 1024 or higher. It used
+  to return a spurious `io.EOF` at once.
+
+### Other
+
+- Documentation: exit code 5, the `MODBUSCTL_*` table and the serial defaults match the code; security contact is security@otfabric.io.
+
+---
+
 ## v3.2.0
 
 **Date:** unreleased
