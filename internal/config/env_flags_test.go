@@ -276,3 +276,22 @@ func TestRegisterFlags_panicsOnUnsupportedKinds(t *testing.T) {
 	}
 	assert.Panics(t, func() { RegisterFlags(&cobra.Command{}, &nested{}) })
 }
+
+func TestLoadFromEnv_formatSpellings(t *testing.T) {
+	for _, c := range []struct{ canonical, legacy, want string }{
+		{"", "", ""},
+		{"json", "", "json"},
+		{"", "json", "json"},
+		{"table", "json", "table"},
+	} {
+		t.Setenv("MODBUSCTL_FORMAT", c.canonical)
+		t.Setenv("MODBUSCTL_OUTPUT_FORMAT", c.legacy)
+		var cfg ReadConfig
+		if err := LoadFromEnv(&cfg); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.OutputFormat != c.want {
+			t.Errorf("canonical %q, legacy %q: got %q, want %q", c.canonical, c.legacy, cfg.OutputFormat, c.want)
+		}
+	}
+}

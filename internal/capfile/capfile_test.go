@@ -176,8 +176,8 @@ func TestWrapError(t *testing.T) {
 		{fmt.Errorf("%w; choose one: ...", ErrAmbiguousSelection), errs.KindInvalidInput, errs.CodeCaptureSelectionAmbiguous},
 		{fmt.Errorf("%w for target 2", ErrEmptySelection), errs.KindInvalidInput, errs.CodeCaptureSelectionEmpty},
 		{fmt.Errorf("x: %w: sample 3", ErrUnsupportedFunction), errs.KindInvalidInput, errs.CodeCaptureUnsupportedFunction},
-		{fmt.Errorf("x: %w", capture.ErrTruncated), errs.KindOutput, errs.CodeCaptureLoadFailed},
-		{os.ErrNotExist, errs.KindOutput, errs.CodeCaptureLoadFailed},
+		{fmt.Errorf("x: %w", capture.ErrTruncated), errs.KindInvalidInput, errs.CodeCaptureLoadFailed},
+		{os.ErrNotExist, errs.KindInvalidInput, errs.CodeCaptureLoadFailed},
 		{errs.InvalidInput(errs.CodeInvalidInput, "already typed", nil), errs.KindInvalidInput, errs.CodeInvalidInput},
 	} {
 		e, ok := errs.As(WrapError(tc.err))

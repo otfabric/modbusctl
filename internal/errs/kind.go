@@ -12,4 +12,5 @@ const (
 	KindModbus       Kind = "modbus_exception"
 	KindOutput       Kind = "output"
 	KindInternal     Kind = "internal"
+	KindInterrupted  Kind = "interrupted"
 )

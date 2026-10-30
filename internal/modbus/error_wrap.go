@@ -32,7 +32,7 @@ func classifyUnwrappedCollect(err error) (kind errs.Kind, code string, ok bool) 
 		return errs.KindTimeout, errs.CodeRequestTimeout, true
 	}
 	if errors.Is(err, context.Canceled) {
-		return errs.KindInternal, errs.CodeContextCanceled, true
+		return errs.KindInterrupted, errs.CodeContextCanceled, true
 	}
 	var ex *gm.ExceptionError
 	if errors.As(err, &ex) {

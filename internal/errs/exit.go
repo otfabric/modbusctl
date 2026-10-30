@@ -10,6 +10,8 @@ const (
 	ExitProtocol     = 6
 	ExitPartial      = 7
 	ExitInternal     = 10
+	// ExitInterrupted is SIGINT or SIGTERM before a result (128 + SIGINT, the shell convention).
+	ExitInterrupted = 130
 )
 
 // ExitCodeForKind maps Kind to exit code for fatal errors.
@@ -25,6 +27,8 @@ func ExitCodeForKind(k Kind) int {
 		return ExitTimeout
 	case KindProtocol, KindModbus:
 		return ExitProtocol
+	case KindInterrupted:
+		return ExitInterrupted
 	case KindOutput, KindInternal:
 		return ExitInternal
 	default:

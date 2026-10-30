@@ -84,6 +84,7 @@ func TestRenderFatal_exitCodes(t *testing.T) {
 		errs.KindModbus:       errs.ExitProtocol,
 		errs.KindOutput:       errs.ExitInternal,
 		errs.KindInternal:     errs.ExitInternal,
+		errs.KindInterrupted:  errs.ExitInterrupted,
 	} {
 		var stderr bytes.Buffer
 		got := RenderFatal(nil, fmt.Errorf("wrapped: %w", errs.New(kind, "c", "m", nil)), &bytes.Buffer{}, &stderr, false)

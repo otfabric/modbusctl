@@ -45,7 +45,7 @@ func TestWrapCollectError_contextCanceled(t *testing.T) {
 	got := WrapCollectError(context.Canceled)
 	e, ok := errs.As(got)
 	require.True(t, ok)
-	require.Equal(t, errs.KindInternal, e.Kind)
+	require.Equal(t, errs.KindInterrupted, e.Kind)
 	require.Equal(t, errs.CodeContextCanceled, e.Code)
 }
 

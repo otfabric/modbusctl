@@ -351,7 +351,7 @@ func TestFailures(t *testing.T) {
 		wantContains(t, r.err.Error(), "no target 9", "1 (unit 1)")
 
 		r = run(t, "server", sub, "--input", garbage, "--port", port)
-		wantKind(t, r, errs.KindOutput)
+		wantKind(t, r, errs.KindInvalidInput)
 
 		busyArgs := []string{"server", sub, "--input", in, "--port", busyPort}
 		if sub == "replay" {

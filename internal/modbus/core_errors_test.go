@@ -37,7 +37,7 @@ func TestCoreClassifyUnwrappedCollect(t *testing.T) {
 		{name: "fc43 unsupported", err: fmt.Errorf("unit 1: %w", ErrFC43NotSupported), wantOK: true, wantKind: errs.KindProtocol, wantCode: errs.CodeDeviceIdentificationUnsupported},
 		{name: "request timeout", err: fmt.Errorf("read: %w", gomodbus.ErrRequestTimedOut), wantOK: true, wantKind: errs.KindTimeout, wantCode: errs.CodeRequestTimeout},
 		{name: "deadline", err: context.DeadlineExceeded, wantOK: true, wantKind: errs.KindTimeout, wantCode: errs.CodeRequestTimeout},
-		{name: "canceled", err: fmt.Errorf("scan: %w", context.Canceled), wantOK: true, wantKind: errs.KindInternal, wantCode: errs.CodeContextCanceled},
+		{name: "canceled", err: fmt.Errorf("scan: %w", context.Canceled), wantOK: true, wantKind: errs.KindInterrupted, wantCode: errs.CodeContextCanceled},
 		{name: "modbus exception", err: fmt.Errorf("read: %w", &gomodbus.ExceptionError{ExceptionCode: 0x02}), wantOK: true, wantKind: errs.KindModbus, wantCode: errs.CodeModbusException},
 		{name: "network timeout", err: &net.OpError{Op: "read", Err: coreTimeoutError{}}, wantOK: true, wantKind: errs.KindTimeout, wantCode: errs.CodeTransportTimeout},
 		{name: "network error", err: &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, wantOK: true, wantKind: errs.KindTransport, wantCode: errs.CodeTransportConnectFailed},

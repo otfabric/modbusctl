@@ -14,8 +14,8 @@ import (
 //     capture_selection_ambiguous or capture_selection_empty (exit 3);
 //   - a sample of a function modbusctl does not support (vendor or unknown
 //     function codes): invalid input, capture_unsupported_function (exit 3);
-//   - anything else (a missing, unreadable, corrupt or truncated file): output,
-//     capture_load_failed (exit 10).
+//   - anything else (a missing, unreadable, corrupt or truncated file): invalid
+//     input, capture_load_failed (exit 3).
 //
 // An error that is already typed is returned as it is.
 func WrapError(err error) error {
@@ -35,5 +35,5 @@ func WrapError(err error) error {
 	case errors.Is(err, ErrUnsupportedFunction):
 		return errs.InvalidInput(errs.CodeCaptureUnsupportedFunction, err.Error(), err)
 	}
-	return errs.Output(errs.CodeCaptureLoadFailed, err)
+	return errs.InvalidInput(errs.CodeCaptureLoadFailed, err.Error(), err)
 }

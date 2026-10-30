@@ -169,7 +169,7 @@ The following features are available:
 | Frequencies      | Find potential frequency readings around 50 Hz in captured registers to help find the right data ranges                  |
 | Discovery        | Discover Modbus devices within specified subnets.                                                                         |
 | SunSpec          | Transport-level SunSpec discovery: detect marker/base, enumerate model headers, print address map, or combined probe (no semantic decoding). |
-| Client `--format` | Many **`modbusctl client`** commands accept **`--format text\|json\|table`** (or **`MODBUSCTL_OUTPUT_FORMAT`**) for structured stdout. |
+| Client `--format` | Many **`modbusctl client`** commands accept **`--format text\|json\|table`** (or **`MODBUSCTL_FORMAT`**) for structured stdout. |
 | Completion       | Generate shell completion scripts for bash, zsh, fish, or PowerShell; enum flags (**`--format`**, **`--algo`**, **`--function`**, **`--codec`**, **`--regtype`**, **`--sub-function`**, etc.) support tab completion. |
 
 The following tree view gives the overview of available commands.
@@ -366,7 +366,7 @@ What modbusctl adds:
 
 **Client address:** All client commands accept either `--url` (e.g. `tcp://192.168.1.10:502` or `rtu:///dev/ttyUSB0`) or `--ip` and optionally `--port` (Modbus TCP); the two styles are **mutually exclusive** (you must set one and cannot set both). See [Transports and serial settings](#transports-and-serial-settings).
 
-**Client stdout format (`--format`):** Commands **identify**, **read**, **decode**, **write**, **poll**, **scan**, **record**, **reportserverid**, **fingerprint**, **diagnostic**, and **client sunspec** (detect, models, map, probe) accept **`--format text`** (default), **`json`**, or **`table`**, or set **`MODBUSCTL_OUTPUT_FORMAT`**. This controls **only** the final human- or machine-readable **result on stdout**. Capture files take their encoding from the file name (`.mbcap`, `.mbcap.jsonl`, `.mbcap.csv`).
+**Client stdout format (`--format`):** Commands **identify**, **read**, **decode**, **write**, **poll**, **scan**, **record**, **reportserverid**, **fingerprint**, **diagnostic**, and **client sunspec** (detect, models, map, probe) accept **`--format text`** (default), **`json`**, or **`table`**, or set **`MODBUSCTL_FORMAT`**. This controls **only** the final human- or machine-readable **result on stdout**. Capture files take their encoding from the file name (`.mbcap`, `.mbcap.jsonl`, `.mbcap.csv`).
 
 **Scan and record:** Live progress (scan lines, per-block lines, worst-case hints, **`--debug`** traces, record iteration messages) goes to **stderr**; **stdout** is a **single** formatted result after the run (summary for scan/record). When using **`--format json`**, redirect or separate streams if scripts must not mix progress with JSON.
 
@@ -1047,7 +1047,7 @@ modbusctl client sunspec probe --url tcp://192.168.1.10:502 --unit 1
 modbusctl client sunspec probe --ip 192.168.1.10 --unit 1 --format json
 ```
 
-SunSpec subcommands use the same `--format` / `MODBUSCTL_OUTPUT_FORMAT` as other client commands (`text` default, `json`, `table`). A hidden parent flag `--json` is deprecated and maps to `--format json`.
+SunSpec subcommands use the same `--format` / `MODBUSCTL_FORMAT` as other client commands (`text` default, `json`, `table`). A hidden parent flag `--json` is deprecated and maps to `--format json`.
 
 #### Shell completion (install)
 
@@ -1129,7 +1129,7 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_SUNSPEC_MAX_MODELS** | int | Maximum model headers to read; 0 = 256: **`sunspec models`**, and **`client scan --algo sunspec`** | `--max-models` (sunspec models), `--sunspec-max-models` (scan) | 0 |
 | **MODBUSCTL_SUNSPEC_MAX_SPAN** | uint16 | Maximum address span from base; 0 = no limit: **`sunspec models`**, and **`client scan --algo sunspec`** | `--max-address-span` (sunspec models), `--sunspec-max-span` (scan) | 0 |
 | **MODBUSCTL_VERBOSE**     | bool     | Show probe attempts or extra detail (e.g. sunspec detect) | `--verbose` | false |
-| **MODBUSCTL_OUTPUT_FORMAT** | string | Client stdout format: **text**, **json**, or **table** (identify, read, decode, write, poll, scan, record, reportserverid, fingerprint, diagnostic, sunspec, …). Empty/unset defaults to **text**. | `--format` | text |
+| **MODBUSCTL_FORMAT** | string | (`MODBUSCTL_OUTPUT_FORMAT` stays accepted) Client stdout format: **text**, **json**, or **table** (identify, read, decode, write, poll, scan, record, reportserverid, fingerprint, diagnostic, sunspec, …). Empty/unset defaults to **text**. | `--format` | text |
 
 </details>
 
@@ -1184,7 +1184,7 @@ MBCAP is the capture format of modbusctl 3, defined by [go-modbus-capture](https
 
 ### How do I use modbusctl in scripts and CI?
 
-Pass `--format json` (or set `MODBUSCTL_OUTPUT_FORMAT=json`). Progress goes to stderr, a single result goes to stdout, and failures return one JSON error object with a stable exit code. See [General CLI usage](#general-cli-usage) and [docs/exitcodes.md](docs/exitcodes.md).
+Pass `--format json` (or set `MODBUSCTL_FORMAT=json`). Progress goes to stderr, a single result goes to stdout, and failures return one JSON error object with a stable exit code. See [General CLI usage](#general-cli-usage) and [docs/exitcodes.md](docs/exitcodes.md).
 
 ### How is modbusctl different from mbpoll and modpoll?
 
