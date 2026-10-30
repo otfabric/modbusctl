@@ -13,6 +13,7 @@ import (
 
 	"github.com/otfabric/go-modbus/codec"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/plan"
 	"github.com/otfabric/modbusctl/internal/types"
@@ -333,6 +334,24 @@ func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
 	}
 	if _, err := modbus.ParseUnitIDs(cfg.UnitID); err != nil {
 		return err
+	}
+	return nil
+}
+
+// CheckConfirmed refuses what changes a device without --yes. what names it in the message.
+func CheckConfirmed(yes bool, what string) error {
+	if yes {
+		return nil
+	}
+	return errs.New(errs.KindUsage, errs.CodeConfirmationRequired,
+		what+" changes the state of the device: confirm with --yes (nothing was sent)", nil)
+}
+
+// CheckDiagnosticConfirmed is [CheckConfirmed] for the FC08 sub-functions that change the
+// state of the device. An unknown sub-function is left to [CheckDiagnosticConfig].
+func CheckDiagnosticConfirmed(cfg config.DiagnosticConfig) error {
+	if code, err := config.ParseDiagnosticSubFunction(cfg.SubFunction); err == nil && config.DiagnosticChangesState(code) {
+		return CheckConfirmed(cfg.Yes, "client diagnostic --sub-function "+cfg.SubFunction)
 	}
 	return nil
 }

@@ -76,8 +76,7 @@ func execute(t *testing.T, args ...string) (code int, stdout, stderr string) {
 
 	resetRoot()
 	defer resetRoot()
-	rootCmd.SetArgs(args)
-	code = Execute()
+	code = run(args)
 	restore()
 
 	read := func(f *os.File) string {
@@ -210,7 +209,7 @@ func TestExecute_endToEnd(t *testing.T) {
 	url := "tcp://" + d.ServeTCP(t)
 	tmp := t.TempDir()
 
-	code, stdout, stderr := execute(t, "client", "write", "--url", url, "--start", "100", "--values", "10,20,30", "--format", "json")
+	code, stdout, stderr := execute(t, "client", "write", "--yes", "--url", url, "--start", "100", "--values", "10,20,30", "--format", "json")
 	if code != errs.ExitOK {
 		t.Fatalf("write: exit %d\n%s\n%s", code, stdout, stderr)
 	}
@@ -390,4 +389,119 @@ func TestExecute_help(t *testing.T) {
 		t.Fatalf("no arguments: exit %d", code)
 	}
 	wantContains(t, stdout, "Available Commands:")
+}
+
+func TestRequestedInvocation(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		env  string
+		args []string
+		json bool
+	}{
+		{name: "nothing"},
+		{name: "flag", args: []string{"--format", "json"}, json: true},
+		{name: "flag with =", args: []string{"--format=JSON"}, json: true},
+		{name: "flag at the end without a value", args: []string{"--format"}},
+		{name: "environment", env: "json", args: []string{"client"}, json: true},
+		{name: "flag wins over the environment", env: "json", args: []string{"--format", "text"}},
+		{name: "last flag wins", args: []string{"--format", "json", "--format", "table"}},
+		{name: "invalid format", args: []string{"--format", "xml"}},
+		{name: "after --", args: []string{"--", "--format", "json"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MODBUSCTL_FORMAT", tt.env)
+			if got := requestedInvocation(tt.args).HasOutputFormat; got != tt.json {
+				t.Fatalf("HasOutputFormat = %v, want %v", got, tt.json)
+			}
+		})
+	}
+}
+
+// wantFatalJSON fails the test unless stdout is exactly one error object, of the given kind
+// and code, with nothing on stderr.
+func wantFatalJSON(t *testing.T, stdout, stderr string, kind errs.Kind, code string) {
+	t.Helper()
+	if stderr != "" {
+		t.Fatalf("stderr: %q", stderr)
+	}
+	dec := json.NewDecoder(strings.NewReader(stdout))
+	var env struct {
+		Error *types.ErrorInfo `json:"error"`
+	}
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&env); err != nil {
+		t.Fatalf("stdout is not one error object: %v\n%s", err, stdout)
+	}
+	if dec.More() {
+		t.Fatalf("more than one JSON value on stdout:\n%s", stdout)
+	}
+	if env.Error == nil || env.Error.Kind != string(kind) || env.Error.Code != code || env.Error.Message == "" {
+		t.Fatalf("error object %+v, want kind %s, code %s", env.Error, kind, code)
+	}
+}
+
+func TestExecute_fatalJSON(t *testing.T) {
+	url := refusedURL(t)
+	for _, tt := range []struct {
+		name string
+		env  string
+		args []string
+		kind errs.Kind
+		code string
+		exit int
+	}{
+		{name: "unknown flag", args: []string{"client", "read", "--format", "json", "--nope"},
+			kind: errs.KindUsage, code: errs.CodeInvalidUsage, exit: errs.ExitUsage},
+		{name: "unknown flag, format with =", args: []string{"client", "read", "--nope", "--format=json"},
+			kind: errs.KindUsage, code: errs.CodeInvalidUsage, exit: errs.ExitUsage},
+		{name: "unknown flag, format in the environment", env: "json", args: []string{"client", "read", "--nope"},
+			kind: errs.KindUsage, code: errs.CodeInvalidUsage, exit: errs.ExitUsage},
+		{name: "unknown command", args: []string{"no-such-command", "--format", "json"},
+			kind: errs.KindUsage, code: errs.CodeInvalidUsage, exit: errs.ExitUsage},
+		{name: "unknown subcommand", env: "json", args: []string{"client", "no-such-command"},
+			kind: errs.KindUsage, code: errs.CodeInvalidUsage, exit: errs.ExitUsage},
+		{name: "unknown subcommand of a nested group", env: "json", args: []string{"client", "sunspec", "no-such-command"},
+			kind: errs.KindUsage, code: errs.CodeInvalidUsage, exit: errs.ExitUsage},
+		{name: "flag value of the wrong type", args: []string{"client", "read", "--format", "json", "--port", "x"},
+			kind: errs.KindUsage, code: errs.CodeInvalidUsage, exit: errs.ExitUsage},
+		{name: "missing required flag", args: []string{"discover", "--format", "json"},
+			kind: errs.KindUsage, code: errs.CodeInvalidUsage, exit: errs.ExitUsage},
+		{name: "wrong arguments", args: []string{"completion", "nope", "--format", "json"},
+			kind: errs.KindUsage, code: errs.CodeInvalidUsage, exit: errs.ExitUsage},
+		{name: "validation before the format is attached", args: []string{"discover", "--subnets", "x", "--format", "json"},
+			kind: errs.KindInvalidInput, code: errs.CodeInvalidInput, exit: errs.ExitInvalidInput},
+		{name: "missing --yes", args: []string{"client", "write", "--url", url, "--start", "1", "--values", "1", "--format", "json"},
+			kind: errs.KindUsage, code: errs.CodeConfirmationRequired, exit: errs.ExitUsage},
+		{name: "transport", args: []string{"client", "write", "--yes", "--url", url, "--start", "1", "--values", "1", "--format", "json"},
+			kind: errs.KindTransport, code: errs.CodeTransportConnectFailed, exit: errs.ExitTransport},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MODBUSCTL_FORMAT", tt.env)
+			code, stdout, stderr := execute(t, tt.args...)
+			if code != tt.exit {
+				t.Fatalf("exit %d, want %d\n%s\n%s", code, tt.exit, stdout, stderr)
+			}
+			wantFatalJSON(t, stdout, stderr, tt.kind, tt.code)
+		})
+	}
+}
+
+func TestExecute_fatalNotJSON(t *testing.T) {
+	t.Setenv("MODBUSCTL_FORMAT", "json")
+	code, stdout, stderr := execute(t, "client", "read", "--nope", "--format", "text")
+	if code != errs.ExitUsage || stdout != "" || stderr != "error: unknown flag: --nope\n" {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+func TestExecute_unknownSubcommandText(t *testing.T) {
+	code, stdout, stderr := execute(t, "server", "no-such-command")
+	if code != errs.ExitUsage || stdout != "" || !strings.HasPrefix(stderr, "error: unknown command") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// A group on its own still shows its help.
+	code, stdout, _ = execute(t, "client")
+	if code != errs.ExitOK || !strings.Contains(stdout, "sunspec") {
+		t.Fatalf("exit %d, stdout %q", code, stdout)
+	}
 }

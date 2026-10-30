@@ -75,6 +75,7 @@ type WriteConfig struct {
 	StartAddress uint16   `env:"MODBUSCTL_ADDRESS" desc:"Address of the first coil or register to write" flag:"start"`
 	Values       []string `env:"MODBUSCTL_VALUES" desc:"Comma-separated values to write: registers 0-65535, 0x hex or -32768..-1; coils 1/0, true/false or on/off; with --codec one typed value per entry" flag:"values"`
 	Codec        string   `env:"MODBUSCTL_CODEC" desc:"Encode each value with this codec before writing (e.g. float32/layout:4321); see 'client codecs'" flag:"codec"`
+	Yes          bool     `desc:"Confirm the write, which changes the state of the device (required; no environment variable)" flag:"yes"`
 	OutputFormat string   `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Debug        bool     // set from global --debug (root persistent flag)
 }
@@ -246,6 +247,7 @@ type DiagnosticConfig struct {
 	Timeout      uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in ms for the request and TCP dial cap (0 = 10000)" flag:"timeout"`
 	SubFunction  string `env:"MODBUSCTL_SUB_FUNCTION" desc:"FC08 sub-function name (e.g. returnquerydata, clearcountersanddiagnosticreg)" flag:"sub-function"`
 	Data         string `env:"MODBUSCTL_DATA" desc:"Hex-encoded request data (e.g. 'A537'); defaults to 0000" flag:"data"`
+	Yes          bool   `desc:"Confirm a sub-function that changes the state of the device (required for those; no environment variable)" flag:"yes"`
 	Debug        bool   // set from global --debug (root persistent flag)
 	OutputFormat string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 }

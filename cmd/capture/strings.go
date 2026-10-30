@@ -30,7 +30,7 @@ func init() {
 		InputFile:  "",
 		OutputFile: "",
 	}
-	config.MustLoadFromEnv(&cfg)
+	config.DeferLoadFromEnv(&cfg)
 	config.RegisterFlags(stringsCmd, &cfg)
 	cli.MustMarkFlagRequired(stringsCmd, "input")
 	CaptureCmd.AddCommand(stringsCmd)

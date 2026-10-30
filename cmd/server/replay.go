@@ -39,7 +39,7 @@ func init() {
 		Loops:     0,
 		InputFile: "",
 	}
-	config.MustLoadFromEnv(&cfg)
+	config.DeferLoadFromEnv(&cfg)
 	config.RegisterFlags(replayCmd, &cfg)
 	cli.MustMarkFlagRequired(replayCmd, "input")
 	ServerCmd.AddCommand(replayCmd)
@@ -49,7 +49,7 @@ func init() {
 		if err := validate.CheckReplayServerConfig(cfg); err != nil {
 			return errs.WrapValidation(err)
 		}
-		if err := modbus.ServeReplay(cmd.Context(), cfg, cmd.OutOrStdout()); err != nil {
+		if err := modbus.ServeReplay(cmd.Context(), cfg, cmd.ErrOrStderr()); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}

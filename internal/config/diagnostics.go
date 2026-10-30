@@ -8,24 +8,25 @@ import (
 
 // Diagnostic sub-functions (match github.com/boeboe/modbus DiagnosticSubFunction). Single source of truth for names and codes.
 var diagnosticSubFunctions = []struct {
-	name string
-	code uint16
+	name    string
+	code    uint16
+	changes bool // changes the state of the device: needs --yes
 }{
-	{"returnquerydata", 0x0000},
-	{"restartcommunications", 0x0001},
-	{"returndiagnosticregister", 0x0002},
-	{"changeasciiinputdelimiter", 0x0003},
-	{"forcelistenonlymode", 0x0004},
-	{"clearcountersanddiagnosticreg", 0x000A},
-	{"returnbusmessagecount", 0x000B},
-	{"returnbuscommunicationerrorcount", 0x000C},
-	{"returnbusexceptionerrorcount", 0x000D},
-	{"returnservermessagecount", 0x000E},
-	{"returnservernoresponsecount", 0x000F},
-	{"returnservernakcount", 0x0010},
-	{"returnserverbusycount", 0x0011},
-	{"returnbuscharacteroverruncount", 0x0012},
-	{"clearoverruncounterandflag", 0x0014},
+	{"returnquerydata", 0x0000, false},
+	{"restartcommunications", 0x0001, true},
+	{"returndiagnosticregister", 0x0002, false},
+	{"changeasciiinputdelimiter", 0x0003, true},
+	{"forcelistenonlymode", 0x0004, true},
+	{"clearcountersanddiagnosticreg", 0x000A, true},
+	{"returnbusmessagecount", 0x000B, false},
+	{"returnbuscommunicationerrorcount", 0x000C, false},
+	{"returnbusexceptionerrorcount", 0x000D, false},
+	{"returnservermessagecount", 0x000E, false},
+	{"returnservernoresponsecount", 0x000F, false},
+	{"returnservernakcount", 0x0010, false},
+	{"returnserverbusycount", 0x0011, false},
+	{"returnbuscharacteroverruncount", 0x0012, false},
+	{"clearoverruncounterandflag", 0x0014, true},
 }
 
 // diagnosticSubFunctionNames is populated in init (valid --sub-function values).
@@ -46,6 +47,17 @@ func init() {
 // DiagnosticSubFunctions returns valid FC08 --sub-function names (completion and validation).
 func DiagnosticSubFunctions() []string {
 	return slices.Clone(diagnosticSubFunctionNames)
+}
+
+// DiagnosticChangesState reports whether the FC08 sub-function code changes the state of
+// the device. A code outside the table counts as changing it.
+func DiagnosticChangesState(code uint16) bool {
+	for _, sf := range diagnosticSubFunctions {
+		if sf.code == code {
+			return sf.changes
+		}
+	}
+	return true
 }
 
 // ParseDiagnosticSubFunction returns the uint16 value for the given sub-function name (case-insensitive).

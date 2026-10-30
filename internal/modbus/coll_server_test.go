@@ -132,7 +132,8 @@ func collStartServer(t *testing.T, serve func(ctx context.Context, a collAddr) e
 		t.Cleanup(func() {
 			cancel()
 			select {
-			case <-s.done:
+			case err := <-s.done:
+				t.Logf("server stopped: %v", err)
 			case <-time.After(5 * time.Second):
 				t.Error("server did not stop after its context was canceled")
 			}

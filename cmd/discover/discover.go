@@ -50,7 +50,7 @@ func init() {
 		OutputFormat:     string(format.FormatText),
 		ForceLargeScan:   false,
 	}
-	config.MustLoadFromEnv(&cfg)
+	config.DeferLoadFromEnv(&cfg)
 	config.RegisterFlags(DiscoverCmd, &cfg)
 	cli.MustMarkFlagRequired(DiscoverCmd, "subnets")
 	runner.RegisterStdoutFormatCompletion(DiscoverCmd)

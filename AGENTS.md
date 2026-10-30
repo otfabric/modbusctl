@@ -22,7 +22,7 @@ This repository follows **otfabric/engineering policy 1.0**, profile **cli** (`.
 ## Hard rules
 
 1. Exit codes and JSON output are a public contract: changing a code or a field is a breaking change with a RELEASE.md note.
-2. `client write` validates everything before sending and is never retried (docs/exitcodes.md).
+2. `client write` needs `--yes`, validates everything before sending and is never retried (docs/exitcodes.md). Any new command or sub-function that changes a device needs `--yes` too, with no environment variable.
 3. Never lower `COVERAGE_MIN`, add lint suppressions, or skip or delete tests to make CI pass.
 4. go-modbus and go-modbus-capture are pinned to released tags; no `replace` directives.
 5. Format with `make fmt`: the gofmt of the Go version in go.mod is what CI uses, and `make fmt-check` needs the local gofmt to agree too.

@@ -83,7 +83,7 @@ func freePort(t *testing.T) string {
 // server is a "modbusctl server ..." command running in the background.
 type server struct {
 	port   string
-	stdout *syncBuffer
+	stderr *syncBuffer // progress of the server
 	cancel context.CancelFunc
 	done   chan cmdResult
 }
@@ -106,25 +106,25 @@ func startServer(t *testing.T, args ...string) *server {
 // tryStartServer is one attempt of startServer; nil means the port was taken.
 func tryStartServer(t *testing.T, args []string) *server {
 	t.Helper()
-	s := &server{port: freePort(t), stdout: &syncBuffer{}, done: make(chan cmdResult, 1)}
+	s := &server{port: freePort(t), stderr: &syncBuffer{}, done: make(chan cmdResult, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	full := append(append([]string{"server"}, args...), "--listen", "127.0.0.1", "--port", s.port)
-	go func() { s.done <- runTo(t, ctx, s.stdout, full...) }()
+	go func() { s.done <- runStreams(t, ctx, io.Discard, s.stderr, full...) }()
 	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(s.stdout.String(), "🚀 Serving Modbus TCP") {
+	for !strings.Contains(s.stderr.String(), "🚀 Serving Modbus TCP") {
 		select {
 		case r := <-s.done:
 			cancel()
 			if r.err != nil && errors.Is(r.err, syscall.EADDRINUSE) {
 				return nil
 			}
-			t.Fatalf("server exited before serving: %v\n%s", r.err, s.stdout.String())
+			t.Fatalf("server exited before serving: %v\n%s", r.err, s.stderr.String())
 		default:
 		}
 		if time.Now().After(deadline) {
 			cancel()
-			t.Fatalf("server on port %s did not report that it is serving:\n%s", s.port, s.stdout.String())
+			t.Fatalf("server on port %s did not report that it is serving:\n%s", s.port, s.stderr.String())
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -209,7 +209,7 @@ func TestStatic(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
-	wantContains(t, s.stdout.String(), "Static server ready on port "+s.port+" with the last recorded values of "+in,
+	wantContains(t, s.stderr.String(), "Static server ready on port "+s.port+" with the last recorded values of "+in,
 		"Unit 1: target 1, ", "Serving Modbus TCP on 127.0.0.1 port "+s.port)
 }
 
@@ -243,7 +243,7 @@ func TestStatic_coils(t *testing.T) {
 	if r := s.stop(t); r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
-	wantContains(t, s.stdout.String(), "Unit 1: target 1")
+	wantContains(t, s.stderr.String(), "Unit 1: target 1")
 }
 
 func TestReplay(t *testing.T) {
@@ -284,7 +284,7 @@ func TestReplay(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
-	wantContains(t, s.stdout.String(), "Replay server ready on port "+s.port+": ", " of "+in+" at 1x, looping 1 time(s)",
+	wantContains(t, s.stderr.String(), "Replay server ready on port "+s.port+": ", " of "+in+" at 1x, looping 1 time(s)",
 		"Unit 1: target 1")
 }
 
@@ -313,7 +313,7 @@ func TestReplay_loopsForever(t *testing.T) {
 	if r := s.stop(t); r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
-	wantContains(t, s.stdout.String(), "looping forever")
+	wantContains(t, s.stderr.String(), "looping forever")
 }
 
 func TestFailures(t *testing.T) {
@@ -370,8 +370,8 @@ func TestFailures(t *testing.T) {
 		if r.err != nil {
 			t.Fatalf("server %s with a cancelled context: %v", sub, r.err)
 		}
-		if strings.Contains(r.stdout, "Serving") {
-			t.Fatalf("server %s served despite a cancelled context:\n%s", sub, r.stdout)
+		if strings.Contains(r.stderr, "Serving") {
+			t.Fatalf("server %s served despite a cancelled context:\n%s", sub, r.stderr)
 		}
 	}
 }

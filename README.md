@@ -12,7 +12,7 @@ It is built for commissioning and site surveys, troubleshooting, reverse-enginee
 
 **Quick links:** [Quick start](#quick-start) · [Comparison](#modbusctl-vs-mbpoll-and-modpoll) · [Features](#features) · [Transports](#transports-and-serial-settings) · [Scan algorithms](#scan-algorithms-detailed) · [Capture files](#capture-files-mbcap) · [FAQ](#faq)
 
-> **Responsible use:** modbusctl sends real Modbus requests. Only use it on devices and networks you own or are authorized to test. Some devices react badly to scanning, so start with `--algo safe` and a `--delay`. `client write` changes coils and registers, and FC08 diagnostic sub-functions can change device state (for example restart communications, clear counters or force listen-only mode): know what an address controls before you write to it.
+> **Responsible use:** modbusctl sends real Modbus requests. Only use it on devices and networks you own or are authorized to test. Some devices react badly to scanning, so start with `--algo safe` and a `--delay`. `client write` changes coils and registers, and FC08 diagnostic sub-functions can change device state (for example restart communications, clear counters or force listen-only mode): these need `--yes`, so know what an address controls before you confirm.
 
 ---
 
@@ -52,7 +52,7 @@ modbusctl client decode --ip 192.168.1.10 --start 40001 --codec float32/layout:4
 modbusctl client poll --ip 192.168.1.10 --start 100 --count 4
 
 # Write a holding register on a serial RTU device
-modbusctl client write --url rtu:///dev/ttyUSB0 --baud 9600 --unit 3 --start 100 --values 1234
+modbusctl client write --url rtu:///dev/ttyUSB0 --baud 9600 --unit 3 --start 100 --values 1234 --yes
 
 # Serve the scan results as a simulated Modbus TCP device on port 1502
 modbusctl server static --input scan.mbcap --port 1502
@@ -368,9 +368,11 @@ What modbusctl adds:
 
 **Client stdout format (`--format`):** Commands **identify**, **read**, **decode**, **write**, **poll**, **scan**, **record**, **reportserverid**, **fingerprint**, **diagnostic**, and **client sunspec** (detect, models, map, probe) accept **`--format text`** (default), **`json`**, or **`table`**, or set **`MODBUSCTL_FORMAT`**. This controls **only** the final human- or machine-readable **result on stdout**. Capture files take their encoding from the file name (`.mbcap`, `.mbcap.jsonl`, `.mbcap.csv`).
 
+**Commands that change a device:** `client write` and the state-changing sub-functions of `client diagnostic` need **`--yes`**, and exit `2` without it. Everything else only reads.
+
 **Scan and record:** Live progress (scan lines, per-block lines, worst-case hints, **`--debug`** traces, record iteration messages) goes to **stderr**; **stdout** is a **single** formatted result after the run (summary for scan/record). When using **`--format json`**, redirect or separate streams if scripts must not mix progress with JSON.
 
-**Fatal errors:** With `--format json`, client commands write a **single JSON error object** to stdout on failure (fields `kind`, `code`, `message`) and use stable exit codes. With **text** or **table**, fatals use a single **`error:`** line on stderr and leave stdout empty. See [docs/exitcodes.md](docs/exitcodes.md) for the exit-code table. Per-unit failures in JSON success payloads use a structured **`error`** object (`kind`, `code`, `message`) on each affected row where applicable (**identify**, **reportserverid**, **fingerprint**).
+**Fatal errors:** With `--format json` or `MODBUSCTL_FORMAT=json`, every fatal error, usage and parser errors included, is a **single JSON error object** on stdout (`{"error":{"kind","code","message"}}`) with a stable exit code. With **text** or **table**, fatals use a single **`error:`** line on stderr and leave stdout empty. See [docs/exitcodes.md](docs/exitcodes.md) for the exit-code table. Per-unit failures in JSON success payloads use a structured **`error`** object (`kind`, `code`, `message`) on each affected row where applicable (**identify**, **reportserverid**, **fingerprint**).
 
 ```console
 modbusctl [command] [flags]
@@ -565,28 +567,28 @@ Example output:
 ```
 
 #### Diagnostics (FC08)
-Send an FC08 Diagnostics request. Use `--sub-function` with the sub-function **name** (lowercase, e.g. `returnquerydata`, `clearcountersanddiagnosticreg`). Default is **returnquerydata** (loopback). Tab completion is available for `--sub-function`.
+Send an FC08 Diagnostics request. Use `--sub-function` with the sub-function **name** (lowercase, e.g. `returnquerydata`, `clearcountersanddiagnosticreg`). Default is **returnquerydata** (loopback). Tab completion is available for `--sub-function`. Sub-functions that change the state of the device need **`--yes`**: without it the command exits `2` (`confirmation_required`) and sends nothing. The others only read.
 
 <details>
 <summary>FC08 sub-function names and codes</summary>
 
-| CLI name (--sub-function)        | Code   |
-|----------------------------------|--------|
-| returnquerydata                  | 0x0000 |
-| restartcommunications            | 0x0001 |
-| returndiagnosticregister         | 0x0002 |
-| changeasciiinputdelimiter        | 0x0003 |
-| forcelistenonlymode              | 0x0004 |
-| clearcountersanddiagnosticreg    | 0x000A |
-| returnbusmessagecount            | 0x000B |
-| returnbuscommunicationerrorcount | 0x000C |
-| returnbusexceptionerrorcount     | 0x000D |
-| returnservermessagecount         | 0x000E |
-| returnservernoresponsecount      | 0x000F |
-| returnservernakcount             | 0x0010 |
-| returnserverbusycount            | 0x0011 |
-| returnbuscharacteroverruncount   | 0x0012 |
-| clearoverruncounterandflag       | 0x0014 |
+| CLI name (--sub-function)        | Code   | `--yes` |
+|----------------------------------|--------|---------|
+| returnquerydata                  | 0x0000 | — |
+| restartcommunications            | 0x0001 | required |
+| returndiagnosticregister         | 0x0002 | — |
+| changeasciiinputdelimiter        | 0x0003 | required |
+| forcelistenonlymode              | 0x0004 | required |
+| clearcountersanddiagnosticreg    | 0x000A | required |
+| returnbusmessagecount            | 0x000B | — |
+| returnbuscommunicationerrorcount | 0x000C | — |
+| returnbusexceptionerrorcount     | 0x000D | — |
+| returnservermessagecount         | 0x000E | — |
+| returnservernoresponsecount      | 0x000F | — |
+| returnservernakcount             | 0x0010 | — |
+| returnserverbusycount            | 0x0011 | — |
+| returnbuscharacteroverruncount   | 0x0012 | — |
+| clearoverruncounterandflag       | 0x0014 | required |
 
 </details>
 
@@ -720,7 +722,7 @@ A poll that fails — timeout, Modbus exception, lost connection — is printed 
 
 #### Write coils and registers
 
-`client write` writes coils (FC05, FC15) or holding registers (FC06, FC16). `--values` takes one value or a comma-separated list, written to consecutive addresses starting at `--start`.
+`client write` writes coils (FC05, FC15) or holding registers (FC06, FC16). `--values` takes one value or a comma-separated list, written to consecutive addresses starting at `--start`. **`--yes` is required:** without it the command exits `2` (`confirmation_required`) and sends nothing. The flag has no environment variable.
 
 | `--function` | Writes | Values |
 |---|---|---|
@@ -734,22 +736,22 @@ Register values are `0`–`65535`, `0x`-prefixed hex, or `-32768`–`-1` (writte
 
 ```console
 # One holding register (FC06)
-modbusctl client write --ip 192.168.1.10 --start 100 --values 1234
+modbusctl client write --ip 192.168.1.10 --start 100 --values 1234 --yes
 
 # Three holding registers (FC16)
-modbusctl client write --ip 192.168.1.10 --start 100 --values 10,0x00FF,-1
+modbusctl client write --ip 192.168.1.10 --start 100 --values 10,0x00FF,-1 --yes
 
 # Switch coil 8 on (FC05)
-modbusctl client write --ip 192.168.1.10 --function 5 --start 8 --values on
+modbusctl client write --ip 192.168.1.10 --function 5 --start 8 --values on --yes
 
 # Four coils (FC15)
-modbusctl client write --ip 192.168.1.10 --function 15 --start 8 --values 1,0,1,1
+modbusctl client write --ip 192.168.1.10 --function 15 --start 8 --values 1,0,1,1 --yes
 
 # A big-endian float32 setpoint: two registers, FC16
-modbusctl client write --ip 192.168.1.10 --start 200 --codec float32/layout:4321 --values 21.5
+modbusctl client write --ip 192.168.1.10 --start 200 --codec float32/layout:4321 --values 21.5 --yes
 
 # Modbus RTU on a serial line
-modbusctl client write --url rtu:///dev/ttyUSB0 --baud 9600 --parity even --unit 3 --start 100 --values 1234
+modbusctl client write --url rtu:///dev/ttyUSB0 --baud 9600 --parity even --unit 3 --start 100 --values 1234 --yes
 ```
 
 ```console
@@ -1168,7 +1170,7 @@ Yes. Pass a serial URL to any client command, for example `modbusctl client read
 
 ### Can modbusctl write registers or coils?
 
-Yes. `modbusctl client write --ip 192.168.1.10 --start 100 --values 1234` writes a holding register; `--function 5` or `15` writes coils, and `--codec` writes typed values such as floats. See [Write coils and registers](#write-coils-and-registers).
+Yes. `modbusctl client write --ip 192.168.1.10 --start 100 --values 1234 --yes` writes a holding register; `--function 5` or `15` writes coils, and `--codec` writes typed values such as floats. See [Write coils and registers](#write-coils-and-registers).
 
 ### How do I poll Modbus registers continuously?
 

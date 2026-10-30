@@ -1,4 +1,4 @@
-# `--format json` field conventions (client commands)
+# `--format json` field conventions
 
 These conventions are a **stable contract** for scripting. Prefer **typed structs** in `internal/types/*_output.go` with explicit `json` tags; avoid `map[string]any` unless unavoidable.
 
@@ -9,10 +9,31 @@ These conventions are a **stable contract** for scripting. Prefer **typed struct
 | Function / registers | `function`, `start_address`, `register_count` when applicable |
 | Repeated rows | `objects`, `blocks`, `units`, etc. as **arrays of objects** |
 | Per-unit or row failure | `error` object (`kind`, `code`, `message`); omitted when OK |
+| Fatal error | one object `{"error": {"kind", "code", "message"}}` on stdout, nothing else, also when the invocation itself is wrong (an unknown flag, a missing argument, a missing `--yes`, a malformed environment variable) and JSON was asked for with `--format json` or `MODBUSCTL_FORMAT=json`; see [exitcodes.md](exitcodes.md). Logs and progress stay on stderr, also of `client poll`, whose earlier records remain on stdout before the error object |
 | Run-level metadata | Prefer a single pattern: either nested `meta` or consistent top-level keys — pick one per command family and reuse |
 | Scan final summary | `ScanSummaryResult`: `target`, `algo`, request/capture counters, `duration`, `capture_output_path` (the MBCAP capture file written) (live scan progress stays on stderr) |
 | Write result | `WriteResult`: `target`, `unit_id`, `function` (resolved: 5, 6, 15 or 16), `start_address`, `count`, and either `coils` (booleans) or `registers` (numbers) with `raw_data_hex`; `codec` when one was used |
 | Poll sample (stream) | `PollSample`, **one compact JSON object per line** (JSON Lines), written as each poll completes: `poll` (1-based), `timestamp` (RFC 3339, UTC, milliseconds), `unit_id`, `function`, `start_address`, `count`, `address_step` (address distance between consecutive `values`: the codec register width, or 1), `rtt_ms`, `raw_data_hex`, `values` (booleans for functions 1/2, numbers for 3/4, codec-typed values with `codec`), and `error` (`kind`, `code`, `message`) on a failed poll, in which case `values` is empty. The end-of-run summary goes to stderr as text |
 | Record final summary | `RecordSummaryResult`: `target`, `blocks_recorded`, `iterations`, `capture_output_path` (the MBCAP capture file written) (per-iteration progress stays on stderr) |
+
+## Error object
+
+Used for a fatal error (`{"error": {…}}`) and for a row that failed.
+
+| Field | Meaning |
+|-------|---------|
+| `kind` | `usage`, `invalid_input`, `transport`, `timeout`, `protocol`, `modbus_exception`, `output`, `internal` or `interrupted` |
+| `code` | stable code; see [exitcodes.md](exitcodes.md) |
+| `message` | text for people; do not parse it |
+
+```json
+{
+  "error": {
+    "kind": "usage",
+    "code": "confirmation_required",
+    "message": "client write changes the state of the device: confirm with --yes (nothing was sent)"
+  }
+}
+```
 
 Breaking changes to names or shapes should be called out in release notes.

@@ -31,7 +31,7 @@ func init() {
 		DeviceProfile: "",
 		OutputFile:    "",
 	}
-	config.MustLoadFromEnv(&cfg)
+	config.DeferLoadFromEnv(&cfg)
 	config.RegisterFlags(decodeCmd, &cfg)
 	CaptureCmd.AddCommand(decodeCmd)
 

@@ -4,6 +4,8 @@ package errs
 const (
 	// An invocation cobra rejected: unknown command or flag, bad flag value, wrong arguments.
 	CodeInvalidUsage = "invalid_usage"
+	// A command that changes a device was not confirmed with --yes.
+	CodeConfirmationRequired = "confirmation_required"
 
 	CodeInvalidFormat          = "invalid_format"
 	CodeInvalidInput           = "invalid_input"

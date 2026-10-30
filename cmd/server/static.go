@@ -38,7 +38,7 @@ func init() {
 		Port:      502,
 		InputFile: "",
 	}
-	config.MustLoadFromEnv(&cfg)
+	config.DeferLoadFromEnv(&cfg)
 	config.RegisterFlags(staticCmd, &cfg)
 	cli.MustMarkFlagRequired(staticCmd, "input")
 	ServerCmd.AddCommand(staticCmd)
@@ -48,7 +48,7 @@ func init() {
 		if err := validate.CheckStaticServerConfig(cfg); err != nil {
 			return errs.WrapValidation(err)
 		}
-		if err := modbus.ServeStatic(cmd.Context(), cfg, cmd.OutOrStdout()); err != nil {
+		if err := modbus.ServeStatic(cmd.Context(), cfg, cmd.ErrOrStderr()); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
