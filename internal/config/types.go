@@ -36,7 +36,7 @@ type UnitClientConfig struct {
 type IdentifyConfig struct {
 	UnitClientConfig
 	Debug        bool   // set from global --debug (root persistent flag)
-	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	OutputFormat string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Basic        bool   `env:"MODBUSCTL_IDENTIFY_BASIC" desc:"Request Basic category only (VendorName, ProductCode, MajorMinorRevision)" flag:"basic"`
 	Regular      bool   `env:"MODBUSCTL_IDENTIFY_REGULAR" desc:"Request Regular category only (Basic + VendorUrl, ProductName, ModelName, UserApplicationName)" flag:"regular"`
 	Extended     bool   `env:"MODBUSCTL_IDENTIFY_EXTENDED" desc:"Request Extended category only (Regular + vendor-specific objects)" flag:"extended"`
@@ -50,7 +50,7 @@ type ReadConfig struct {
 	StartAddress  uint16 `env:"MODBUSCTL_ADDRESS" desc:"Starting register address" flag:"start"`
 	RegisterCount uint16 `env:"MODBUSCTL_COUNT" desc:"Number of registers to read" flag:"count"`
 	OutputFile    string `env:"MODBUSCTL_OUTPUT" desc:"Output capture file (.mbcap) or directory" flag:"output"`
-	OutputFormat  string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	OutputFormat  string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Debug         bool   // set from global --debug (root persistent flag)
 }
 
@@ -63,7 +63,7 @@ type DecodeConfig struct {
 	StartAddress  uint16 `env:"MODBUSCTL_ADDRESS" desc:"Starting register address" flag:"start"`
 	Codec         string `env:"MODBUSCTL_CODEC" desc:"Codec ID (e.g. float32/layout:4321, ascii/registers:8, ip_addr); see 'client codecs'" flag:"codec"`
 	RegisterCount uint16 `env:"MODBUSCTL_COUNT" desc:"Registers to read (0 = one codec value; otherwise a multiple of the codec register width)" flag:"count"`
-	OutputFormat  string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	OutputFormat  string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Debug         bool   // set from global --debug (root persistent flag)
 }
 
@@ -75,7 +75,7 @@ type WriteConfig struct {
 	StartAddress uint16   `env:"MODBUSCTL_ADDRESS" desc:"Address of the first coil or register to write" flag:"start"`
 	Values       []string `env:"MODBUSCTL_VALUES" desc:"Comma-separated values to write: registers 0-65535, 0x hex or -32768..-1; coils 1/0, true/false or on/off; with --codec one typed value per entry" flag:"values"`
 	Codec        string   `env:"MODBUSCTL_CODEC" desc:"Encode each value with this codec before writing (e.g. float32/layout:4321); see 'client codecs'" flag:"codec"`
-	OutputFormat string   `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	OutputFormat string   `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Debug        bool     // set from global --debug (root persistent flag)
 }
 
@@ -89,7 +89,7 @@ type PollConfig struct {
 	Codec         string `env:"MODBUSCTL_CODEC" desc:"Decode registers with this codec (functions 3 and 4 only); see 'client codecs'" flag:"codec"`
 	Interval      uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between the start of consecutive polls" flag:"interval"`
 	Polls         uint32 `env:"MODBUSCTL_POLLS" desc:"Number of polls before exiting (0 = until interrupted)" flag:"polls"`
-	OutputFormat  string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json (one object per line), or table" flag:"format"`
+	OutputFormat  string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json (one object per line), or table" flag:"format"`
 	Debug         bool   // set from global --debug (root persistent flag)
 }
 
@@ -102,7 +102,7 @@ type RecordConfig struct {
 	BlocksFile   string `env:"MODBUSCTL_BLOCKS_FILE" desc:"JSON recording plan: address blocks [{start_address, register_count}, ...] read with --function, and/or requests of any read function [{function, ...}] (see README)" flag:"blocks-file"`
 	OutputFile   string `env:"MODBUSCTL_OUTPUT" desc:"Output capture file (.mbcap) or directory" flag:"output"`
 	Exceptions   bool   `env:"MODBUSCTL_RECORD_EXCEPTIONS" desc:"Also record exception responses in the capture" flag:"record-exceptions"`
-	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	OutputFormat string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 	Debug        bool   // set from global --debug (root persistent flag)
 }
 
@@ -154,7 +154,7 @@ type ScanConfig struct {
 	SunSpecBases            string `env:"MODBUSCTL_SUNSPEC_BASES" desc:"Sunspec algo: comma-separated candidate base addresses" flag:"sunspec-bases"`
 	SunSpecMaxModels        int    `env:"MODBUSCTL_SUNSPEC_MAX_MODELS" desc:"Sunspec algo: max model headers to read (0=256)" flag:"sunspec-max-models"`
 	SunSpecMaxSpan          uint16 `env:"MODBUSCTL_SUNSPEC_MAX_SPAN" desc:"Sunspec algo: max address span from base (0=no limit)" flag:"sunspec-max-span"`
-	OutputFormat            string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table (final summary on stdout; progress on stderr)" flag:"format"`
+	OutputFormat            string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table (final summary on stdout; progress on stderr)" flag:"format"`
 	Debug                   bool   // set from global --debug (root persistent flag)
 	// NormalizedAlgo is set by [validate.CheckScanConfig] to the canonical lowercase algorithm (including ""→safe).
 	// Not loaded from env or flags.
@@ -216,7 +216,7 @@ type DiscoverConfig struct {
 	ResolveMAC       bool     `env:"MODBUSCTL_RESOLVE_MAC" desc:"Resolve MAC addresses of discovered devices" flag:"resolve-mac"`
 	NetworkInterface string   `env:"MODBUSCTL_INTERFACE" desc:"Network interface to use for discovery" flag:"interface"`
 	OutputFile       string   `env:"MODBUSCTL_OUTPUT" desc:"Output file for discovered devices" flag:"output"`
-	OutputFormat     string   `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Stdout format: text, json, or table" flag:"format"`
+	OutputFormat     string   `env:"MODBUSCTL_FORMAT" desc:"Stdout format: text, json, or table" flag:"format"`
 	ForceLargeScan   bool     `env:"MODBUSCTL_DISCOVER_FORCE_LARGE" desc:"Allow discovery when unique host count exceeds the safety cap (default 65536)" flag:"force-large-scan"`
 	Debug            bool     // set from global --debug (root persistent flag)
 }
@@ -232,7 +232,7 @@ type FingerprintConfig struct {
 	Timeout      uint16 `env:"MODBUSCTL_TIMEOUT" desc:"Timeout in ms per probe and TCP dial cap (0 = 10000)" flag:"timeout"`
 	Interval     uint32 `env:"MODBUSCTL_INTERVAL" desc:"Interval in milliseconds between probes" flag:"interval"`
 	Debug        bool   // set from global --debug (root persistent flag)
-	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	OutputFormat string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 }
 
 // DiagnosticConfig is used by the diagnostic command (FC08 Diagnostics).
@@ -247,14 +247,14 @@ type DiagnosticConfig struct {
 	SubFunction  string `env:"MODBUSCTL_SUB_FUNCTION" desc:"FC08 sub-function name (e.g. returnquerydata, clearcountersanddiagnosticreg)" flag:"sub-function"`
 	Data         string `env:"MODBUSCTL_DATA" desc:"Hex-encoded request data (e.g. 'A537'); defaults to 0000" flag:"data"`
 	Debug        bool   // set from global --debug (root persistent flag)
-	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	OutputFormat string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 }
 
 // ReportServerIDConfig is used by the reportserverid command (FC17 Report Server ID).
 type ReportServerIDConfig struct {
 	UnitClientConfig
 	Debug        bool   // set from global --debug (root persistent flag)
-	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	OutputFormat string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 }
 
 type DeviceProfileDecodeConfig struct {
@@ -276,7 +276,7 @@ type SunSpecBaseConfig struct {
 	Regtype      string `env:"MODBUSCTL_REGTYPE" desc:"Register type: holding (FC03) or input (FC04)" flag:"regtype"`
 	Verbose      bool   `env:"MODBUSCTL_VERBOSE" desc:"Show probe attempts or extra detail" flag:"verbose"`
 	Debug        bool   // set from global --debug (root persistent flag)
-	OutputFormat string `env:"MODBUSCTL_OUTPUT_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
+	OutputFormat string `env:"MODBUSCTL_FORMAT" desc:"Output format: text, json, or table" flag:"format"`
 }
 
 // SunSpecDetectConfig is used by client sunspec detect.
