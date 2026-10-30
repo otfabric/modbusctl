@@ -279,10 +279,9 @@ func TestRegisterClientCommandCfg(t *testing.T) {
 	assert.Equal(t, []string{"none", "even", "odd"}, got)
 }
 
-func TestRegisterClientCommandCfg_invalidEnvironmentPanics(t *testing.T) {
+func TestRegisterClientCommandCfg_invalidEnvironmentIsDeferred(t *testing.T) {
 	t.Setenv("MODBUSCTL_TIMEOUT", "soon")
 	var cfg config.PollConfig
-	assert.PanicsWithValue(t,
-		`modbusctl: invalid environment: MODBUSCTL_TIMEOUT="soon": strconv.ParseUint: parsing "soon": invalid syntax`,
-		func() { RegisterClientCommandCfg(&cobra.Command{Use: "poll"}, &cfg) })
+	assert.NotPanics(t, func() { RegisterClientCommandCfg(&cobra.Command{Use: "poll"}, &cfg) })
+	assert.EqualError(t, config.EnvError(), `MODBUSCTL_TIMEOUT="soon": strconv.ParseUint: parsing "soon": invalid syntax`)
 }

@@ -117,15 +117,21 @@ func TestLoadFromEnv_ignoresNonStructPointers(t *testing.T) {
 	assert.NoError(t, LoadFromEnv(&np))
 }
 
-func TestMustLoadFromEnv(t *testing.T) {
+func TestDeferLoadFromEnv(t *testing.T) {
+	t.Cleanup(func() { envErr = nil })
 	t.Setenv("MBT_U16", "1502")
 	c := allKinds{}
-	assert.NotPanics(t, func() { MustLoadFromEnv(&c) })
+	DeferLoadFromEnv(&c)
+	assert.NoError(t, EnvError())
 	assert.Equal(t, uint16(1502), c.U16)
 
 	t.Setenv("MBT_U16", "70000")
-	assert.PanicsWithValue(t, `modbusctl: invalid environment: MBT_U16="70000": value overflows uint16`,
-		func() { MustLoadFromEnv(&allKinds{}) })
+	DeferLoadFromEnv(&allKinds{})
+	assert.EqualError(t, EnvError(), `MBT_U16="70000": value overflows uint16`)
+
+	t.Setenv("MBT_U16", "70001")
+	DeferLoadFromEnv(&allKinds{})
+	assert.EqualError(t, EnvError(), `MBT_U16="70000": value overflows uint16`, "the first error stays")
 }
 
 func TestLoadFromEnv_realConfigs(t *testing.T) {
@@ -240,7 +246,7 @@ func TestRegisterFlags_envThenFlagPrecedence(t *testing.T) {
 	t.Setenv("MODBUSCTL_BAUD", "9600")
 	t.Setenv("MODBUSCTL_PARITY", "odd")
 	var cfg ReadConfig
-	MustLoadFromEnv(&cfg)
+	assert.NoError(t, LoadFromEnv(&cfg))
 	cmd := &cobra.Command{Use: "read"}
 	RegisterFlags(cmd, &cfg)
 

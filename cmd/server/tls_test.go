@@ -101,7 +101,7 @@ func TestTLS_staticAndReplay(t *testing.T) {
 	if r := s.stop(t); r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
-	wantContains(t, s.stdout.String(), "Serving Modbus TCP Security (tcp+tls, client certificates required) on 127.0.0.1 port "+s.port)
+	wantContains(t, s.stderr.String(), "Serving Modbus TCP Security (tcp+tls, client certificates required) on 127.0.0.1 port "+s.port)
 
 	s = startServer(t, append([]string{"replay", "--input", in, "--loops", "1", "--speed", "4"}, serverTLSFlags(pki)...)...)
 	deadline := time.Now().Add(5 * time.Second)
@@ -121,7 +121,7 @@ func TestTLS_staticAndReplay(t *testing.T) {
 	if r := s.stop(t); r.err != nil {
 		t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 	}
-	wantContains(t, s.stdout.String(), "Serving Modbus TCP Security (tcp+tls, client certificates required) on 127.0.0.1 port "+s.port)
+	wantContains(t, s.stderr.String(), "Serving Modbus TCP Security (tcp+tls, client certificates required) on 127.0.0.1 port "+s.port)
 }
 
 // A client whose certificate another CA signed is rejected; so is a plain Modbus TCP client.
@@ -139,7 +139,7 @@ func TestTLS_untrustedClientRejected(t *testing.T) {
 		if r := s.stop(t); r.err != nil {
 			t.Fatalf("an interrupted server must exit cleanly, got %v", r.err)
 		}
-		wantContains(t, s.stdout.String(), "📊 Served 0 requests")
+		wantContains(t, s.stderr.String(), "📊 Served 0 requests")
 	}
 }
 

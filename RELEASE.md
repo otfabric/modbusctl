@@ -7,14 +7,36 @@
 
 ### Summary
 
-**Breaking for scripts:** the exit codes follow the OT Fabric organisation table (ADR-0006 of otfabric/engineering). Three cases change; no command or flag changes.
+**Breaking for scripts**, three times: the exit codes follow the OT Fabric organisation table (ADR-0006 of otfabric/engineering), commands that change a device need `--yes`, and in JSON mode every fatal error is one JSON object on stdout.
+
+### `--yes` on commands that change a device
+
+`client write` and the `client diagnostic` sub-functions that change the state of the device now need `--yes`. Without it they exit 2 (kind `usage`, new code `confirmation_required`) and send nothing. **Add `--yes` to scripts that call these commands.** The flag has no environment variable. Everything else stays read-only and needs no confirmation.
+
+| Command | Needs `--yes` |
+|---|---|
+| `client write` | always |
+| `client diagnostic --sub-function` | `restartcommunications`, `changeasciiinputdelimiter`, `forcelistenonlymode`, `clearcountersanddiagnosticreg`, `clearoverruncounterandflag` |
+
+### JSON errors
+
+With `--format json` or `MODBUSCTL_FORMAT=json`, a fatal error is exactly one `{"error":{"kind","code","message"}}` object on stdout, as in bacnetctl, with nothing on stderr unless `--debug` is set. Cases that were text on stderr before:
+
+- Invocations rejected by the command line parser: unknown command or flag, flag value of the wrong type, missing required flag, wrong arguments (kind `usage`, code `invalid_usage`).
+- `discover` input rejected before the format was read (kind `invalid_input`).
+- A malformed `MODBUSCTL_*` variable (kind `invalid_input`, exit 3). It was a Go panic with a stack trace and exit 2; it is now one `error:` line in text mode too.
+
+Two related changes:
+
+- An unknown subcommand of a group (`client nope`, `server nope`, `client sunspec nope`) exits 2. It printed the help of the group to stdout and exited 0.
+- `server static` and `server replay` print their progress to stderr, not stdout. Scripts that read those lines from stdout must read stderr.
 
 ### Exit codes
 
 | Case | Old | New | JSON error |
 |---|---|---|---|
 | Interrupted by SIGINT or SIGTERM before a result (`context_canceled`) | 10 | 130 | kind `interrupted`, was `internal`; also on an embedded `error` of a result, such as a unit of `fingerprint`, whose exit code stays 7 |
-| Invocation rejected by the command line parser: unknown command or flag, flag value of the wrong type, missing required flag, wrong arguments | 10 | 2 | none, as before: printed to stderr; new code `invalid_usage` |
+| Invocation rejected by the command line parser: unknown command or flag, flag value of the wrong type, missing required flag, wrong arguments | 10 | 2 | kind `usage`, new code `invalid_usage`: the object is new, see [JSON errors](#json-errors) |
 | Input file not usable: `capture_load_failed`, `input_file_open_failed`, `input_decode_failed` | 10 | 3 | kind `invalid_input`, was `output` |
 
 Every other exit code is unchanged. See [docs/exitcodes.md](docs/exitcodes.md).

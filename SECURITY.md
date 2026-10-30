@@ -34,8 +34,10 @@ Modbus TCP, UDP, RTU and ASCII carry no authentication and no encryption: anyone
 
 ### Commands That Change Device State
 
+`client write` and the state-changing sub-functions of `client diagnostic` refuse to run without `--yes` (exit 2, nothing sent).
+
 - **`client write`** changes coils and holding registers. On real equipment this can start, stop or reconfigure a process. Know what an address controls before writing to it. All values are validated before anything is sent, and a write is sent exactly once (never retried)
-- **`client diagnostic`** (FC08) includes sub-functions that restart communications, clear counters or force listen-only mode
+- **`client diagnostic`** (FC08) includes sub-functions that restart communications, change the ASCII delimiter, clear counters or force listen-only mode
 - **`client scan`** and **`discover`** generate many requests. Some devices and gateways react badly to this; start with `--algo safe` and a `--delay`, and scan production equipment only inside an agreed maintenance window
 
 ### Running a Server

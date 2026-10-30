@@ -86,6 +86,74 @@ func TestCLI_fatalJSON_stdoutEnvelope_emptyStderr(t *testing.T) {
 	}
 }
 
+func TestCLI_malformedEnvironment(t *testing.T) {
+	bin := buildModbusctl(t)
+	for _, tt := range []struct {
+		name         string
+		env          []string
+		wantStdout   string
+		wantInStderr string
+	}{
+		{name: "json", env: []string{"MODBUSCTL_FORMAT=json"}, wantStdout: `"code": "invalid_input"`},
+		{name: "text", wantInStderr: "error: invalid environment: MODBUSCTL_TIMEOUT"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := exec.Command(bin, "client", "read", "--start", "1")
+			cmd.Env = append(append(modbusctlEnv(), tt.env...), "MODBUSCTL_TIMEOUT=abc")
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			var ee *exec.ExitError
+			if !errors.As(err, &ee) || ee.ExitCode() != 3 {
+				t.Fatalf("want exit 3, got %v\n%s\n%s", err, stdout.String(), stderr.String())
+			}
+			if strings.Contains(stderr.String(), "panic") || strings.Contains(stderr.String(), "goroutine") {
+				t.Fatalf("panic: %s", stderr.String())
+			}
+			if !strings.Contains(stdout.String(), tt.wantStdout) || !strings.Contains(stderr.String(), tt.wantInStderr) {
+				t.Fatalf("stdout %q, stderr %q", stdout.String(), stderr.String())
+			}
+			if tt.wantStdout != "" {
+				var env struct {
+					Error json.RawMessage `json:"error"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &env); err != nil || stderr.Len() != 0 {
+					t.Fatalf("stdout %q (%v), stderr %q", stdout.String(), err, stderr.String())
+				}
+			}
+		})
+	}
+}
+
+func TestCLI_unknownFlag_jsonOnStdout(t *testing.T) {
+	bin := buildModbusctl(t)
+	cmd := exec.Command(bin, "client", "read", "--nope", "--format", "json")
+	cmd.Env = modbusctlEnv()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 2 {
+		t.Fatalf("want exit 2, got %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr: %q", stderr.String())
+	}
+	var env struct {
+		Error struct {
+			Kind, Code, Message string
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, stdout.String())
+	}
+	if env.Error.Kind != "usage" || env.Error.Code != "invalid_usage" || env.Error.Message == "" {
+		t.Fatalf("error object: %s", stdout.String())
+	}
+}
+
 func modbusctlEnv() []string {
 	var out []string
 	for _, e := range os.Environ() {

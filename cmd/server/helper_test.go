@@ -98,6 +98,14 @@ func resetFlags(root *cobra.Command) {
 func runTo(t *testing.T, ctx context.Context, out io.Writer, args ...string) cmdResult {
 	t.Helper()
 	var stderr syncBuffer
+	r := runStreams(t, ctx, out, &stderr, args...)
+	r.stderr = stderr.String()
+	return r
+}
+
+// runStreams runs the test root with args, writing stdout to out and stderr to errOut.
+func runStreams(t *testing.T, ctx context.Context, out, errOut io.Writer, args ...string) cmdResult {
+	t.Helper()
 	inv := &runner.Invocation{}
 	ctx = runner.WithInvocation(ctx, inv)
 	resetFlags(testRoot)
@@ -105,11 +113,11 @@ func runTo(t *testing.T, ctx context.Context, out io.Writer, args ...string) cmd
 	walkCommands(testRoot, func(c *cobra.Command) {
 		c.SetContext(ctx)
 		c.SetOut(out)
-		c.SetErr(&stderr)
+		c.SetErr(errOut)
 	})
 	testRoot.SetArgs(args)
 	err := testRoot.ExecuteContext(ctx)
-	return cmdResult{stderr: stderr.String(), err: err, inv: inv}
+	return cmdResult{err: err, inv: inv}
 }
 
 // runCtx runs the test root with args and ctx, capturing stdout and stderr.

@@ -92,13 +92,13 @@ func TestMain_exitCodes(t *testing.T) {
 	}
 
 	// 3: invalid input, rendered once on stderr.
-	code, stdout, stderr = runMain(t, "client", "write", "--url", url, "--values", "1")
+	code, stdout, stderr = runMain(t, "client", "write", "--yes", "--url", url, "--values", "1")
 	if code != 3 || stdout != "" || !strings.HasPrefix(stderr, "error: ") {
 		t.Fatalf("write without --start: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 
 	// 6: Modbus exception.
-	code, _, stderr = runMain(t, "client", "write", "--url", url, "--start", "9000", "--values", "1")
+	code, _, stderr = runMain(t, "client", "write", "--yes", "--url", url, "--start", "9000", "--values", "1")
 	if code != 6 || !strings.Contains(stderr, "Illegal Data Address") {
 		t.Fatalf("write to an unmapped register: exit %d, stderr %q", code, stderr)
 	}

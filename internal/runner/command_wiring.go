@@ -5,10 +5,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// RegisterClientCommandCfg runs [config.MustLoadFromEnv], [config.RegisterFlags],
+// RegisterClientCommandCfg runs [config.DeferLoadFromEnv], [config.RegisterFlags],
 // [RegisterStdoutFormatCompletion], [config.RegisterParityCompletion], then optional hooks (extra completions, required flags, etc.).
 func RegisterClientCommandCfg(cmd *cobra.Command, cfg any, hooks ...func(*cobra.Command)) {
-	config.MustLoadFromEnv(cfg)
+	config.DeferLoadFromEnv(cfg)
 	config.RegisterFlags(cmd, cfg)
 	RegisterStdoutFormatCompletion(cmd)
 	config.RegisterParityCompletion(cmd)

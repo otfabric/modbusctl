@@ -121,15 +121,33 @@ func TestDiagnosticSubFunctions_ParseDiagnosticSubFunction(t *testing.T) {
 	}
 }
 
-func TestMustLoadFromEnv_panicsOnBadUint(t *testing.T) {
+func TestDeferLoadFromEnv_keepsBadUint(t *testing.T) {
 	type cfg struct {
 		Port uint16 `env:"TEST_MODBUSCTL_PORT"`
 	}
+	t.Cleanup(func() { envErr = nil })
 	t.Setenv("TEST_MODBUSCTL_PORT", "not-a-number")
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("expected panic")
+	DeferLoadFromEnv(&cfg{})
+	if EnvError() == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestDiagnosticChangesState(t *testing.T) {
+	changes := map[string]bool{
+		"restartcommunications": true, "changeasciiinputdelimiter": true, "forcelistenonlymode": true,
+		"clearcountersanddiagnosticreg": true, "clearoverruncounterandflag": true,
+	}
+	for _, name := range DiagnosticSubFunctions() {
+		code, err := ParseDiagnosticSubFunction(name)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}()
-	MustLoadFromEnv(&cfg{})
+		if got := DiagnosticChangesState(code); got != changes[name] {
+			t.Errorf("%s: DiagnosticChangesState = %v", name, got)
+		}
+	}
+	if !DiagnosticChangesState(0xFFFF) {
+		t.Error("a code outside the table must count as changing the device")
+	}
 }

@@ -19,20 +19,30 @@ func LoadFromEnv(cfg interface{}) error {
 	return loadFromEnvStruct(v.Elem())
 }
 
-// MustLoadFromEnv calls [LoadFromEnv] and panics if any env value is invalid (startup safety).
-func MustLoadFromEnv(cfg interface{}) {
-	if err := LoadFromEnv(cfg); err != nil {
-		panic(fmt.Sprintf("modbusctl: invalid environment: %v", err))
+// envErr is the first error of [DeferLoadFromEnv], reported by [EnvError].
+var envErr error
+
+// DeferLoadFromEnv calls [LoadFromEnv] and keeps the first error for [EnvError]. Commands
+// are wired in package init, before anything can render a fatal error, so that a malformed
+// variable must not end the process here.
+func DeferLoadFromEnv(cfg interface{}) {
+	if err := LoadFromEnv(cfg); err != nil && envErr == nil {
+		envErr = err
 	}
+}
+
+// EnvError returns the first malformed environment variable [DeferLoadFromEnv] met, or nil.
+func EnvError() error {
+	return envErr
 }
 
 // legacyEnv maps a canonical environment variable to its older spelling, which stays
 // accepted (ADR-0006 of otfabric/engineering).
 var legacyEnv = map[string]string{"MODBUSCTL_FORMAT": "MODBUSCTL_OUTPUT_FORMAT"}
 
-// getenv returns the value of the environment variable name. The older spelling is read
+// Getenv returns the value of the environment variable name. The older spelling is read
 // when name is empty; the canonical name wins when both are set.
-func getenv(name string) string {
+func Getenv(name string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
 	}
@@ -61,7 +71,7 @@ func loadFromEnvStruct(v reflect.Value) error {
 		if tag == "" {
 			continue
 		}
-		envValue := getenv(tag)
+		envValue := Getenv(tag)
 		if envValue == "" {
 			continue
 		}

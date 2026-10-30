@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -250,7 +251,7 @@ func TestWrite_registers(t *testing.T) {
 	d, url := newDevice(t)
 
 	// One value: FC6.
-	r := run(t, "client", "write", "--url", url, "--start", "100", "--values", "1234")
+	r := run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--values", "1234")
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "function code 6", "[100] 1234 (0x04D2)", "Wrote 1 register(s) to unit 1")
 	if got := d.Holding(100, 1); got[0] != 1234 {
@@ -261,7 +262,7 @@ func TestWrite_registers(t *testing.T) {
 	}
 
 	// Several values: FC16, with hex and negative notations.
-	r = run(t, "client", "write", "--url", url, "--start", "100", "--values", "10,0x00FF,-1", "--format", "json")
+	r = run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--values", "10,0x00FF,-1", "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var res types.WriteResult
 	decodeJSON(t, r.stdout, &res)
@@ -277,7 +278,7 @@ func TestWrite_registers(t *testing.T) {
 	}
 
 	// Explicit FC16 for a single value.
-	r = run(t, "client", "write", "--url", url, "--start", "104", "--function", "16", "--values", "9", "--format", "table")
+	r = run(t, "client", "write", "--yes", "--url", url, "--start", "104", "--function", "16", "--values", "9", "--format", "table")
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "104", "9")
 	if got := d.Holding(104, 1); got[0] != 9 {
@@ -287,7 +288,7 @@ func TestWrite_registers(t *testing.T) {
 
 func TestWrite_codec(t *testing.T) {
 	d, url := newDevice(t)
-	r := run(t, "client", "write", "--url", url, "--start", "200", "--codec", "float32/layout:4321", "--values", "21.5", "--format", "json")
+	r := run(t, "client", "write", "--yes", "--url", url, "--start", "200", "--codec", "float32/layout:4321", "--values", "21.5", "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var res types.WriteResult
 	decodeJSON(t, r.stdout, &res)
@@ -307,21 +308,21 @@ func TestWrite_codec(t *testing.T) {
 		t.Fatalf("decoded %v, want [21.5]", dec.Values)
 	}
 
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "200", "--codec", "float32/layout:4321", "--values", "abc"), errs.KindInvalidInput)
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "200", "--codec", "nope", "--values", "1"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "200", "--codec", "float32/layout:4321", "--values", "abc"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "200", "--codec", "nope", "--values", "1"), errs.KindInvalidInput)
 }
 
 func TestWrite_coils(t *testing.T) {
 	d, url := newDevice(t)
 
-	r := run(t, "client", "write", "--url", url, "--function", "5", "--start", "20", "--values", "on")
+	r := run(t, "client", "write", "--yes", "--url", url, "--function", "5", "--start", "20", "--values", "on")
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "function code 5")
 	if got := d.Coils(20, 1); !got[0] {
 		t.Fatal("coil 20 was not switched on")
 	}
 
-	r = run(t, "client", "write", "--url", url, "--function", "15", "--start", "30", "--values", "1,0,1,1", "--format", "json")
+	r = run(t, "client", "write", "--yes", "--url", url, "--function", "15", "--start", "30", "--values", "1,0,1,1", "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var res types.WriteResult
 	decodeJSON(t, r.stdout, &res)
@@ -332,7 +333,7 @@ func TestWrite_coils(t *testing.T) {
 		t.Fatalf("coils[30..33] = %v", got)
 	}
 
-	r = run(t, "client", "write", "--url", url, "--function", "5", "--start", "20", "--values", "off", "--format", "table")
+	r = run(t, "client", "write", "--yes", "--url", url, "--function", "5", "--start", "20", "--values", "off", "--format", "table")
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "coil")
 	if got := d.Coils(20, 1); got[0] {
@@ -343,19 +344,19 @@ func TestWrite_coils(t *testing.T) {
 func TestWrite_failures(t *testing.T) {
 	d, url := newDevice(t)
 
-	r := run(t, "client", "write", "--url", url, "--values", "1234")
+	r := run(t, "client", "write", "--yes", "--url", url, "--values", "1234")
 	wantKind(t, r, errs.KindInvalidInput)
 	wantContains(t, r.err.Error(), "--start")
 
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "100"), errs.KindInvalidInput)
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "100", "--values", "70000"), errs.KindInvalidInput)
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "100", "--values", "abc"), errs.KindInvalidInput)
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "100", "--function", "3", "--values", "1"), errs.KindInvalidInput)
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "100", "--function", "5", "--values", "maybe"), errs.KindInvalidInput)
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "100", "--function", "5", "--values", "1,0"), errs.KindInvalidInput)
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "100", "--function", "6", "--values", "1,2"), errs.KindInvalidInput)
-	wantKind(t, run(t, "client", "write", "--start", "100", "--values", "1"), errs.KindInvalidInput)
-	wantKind(t, run(t, "client", "write", "--url", url, "--start", "100", "--values", "1", "--format", "xml"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "100"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--values", "70000"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--values", "abc"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--function", "3", "--values", "1"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--function", "5", "--values", "maybe"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--function", "5", "--values", "1,0"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--function", "6", "--values", "1,2"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--start", "100", "--values", "1"), errs.KindInvalidInput)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--values", "1", "--format", "xml"), errs.KindInvalidInput)
 	if n := len(d.Requests()); n != 0 {
 		t.Fatalf("invalid writes must not reach the device, saw %d requests", n)
 	}
@@ -363,11 +364,11 @@ func TestWrite_failures(t *testing.T) {
 		t.Fatalf("holding[100] changed to %d by a rejected write", got[0])
 	}
 
-	wantKind(t, run(t, "client", "write", "--url", refusedURL(t), "--start", "100", "--values", "1"), errs.KindTransport)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", refusedURL(t), "--start", "100", "--values", "1"), errs.KindTransport)
 
 	// A device exception fails the write, and the request is not retried.
 	d.OnRequest = func(mbtest.Request) mbtest.Action { return mbtest.Action{Exception: mbtest.ExIllegalDataAddress} }
-	r = run(t, "client", "write", "--url", url, "--start", "100", "--values", "5")
+	r = run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--values", "5")
 	wantKind(t, r, errs.KindModbus)
 	wantExit(t, r, errs.ExitProtocol)
 	if n := d.RequestCount(0x06); n != 1 {
@@ -379,7 +380,7 @@ func TestWrite_addressFromEnv(t *testing.T) {
 	d, url := newDevice(t)
 	// With MODBUSCTL_ADDRESS set, --start may be omitted (the value was bound at start-up).
 	t.Setenv("MODBUSCTL_ADDRESS", "0")
-	r := run(t, "client", "write", "--url", url, "--values", "77", "--format", "json")
+	r := run(t, "client", "write", "--yes", "--url", url, "--values", "77", "--format", "json")
 	wantExit(t, r, errs.ExitOK)
 	var res types.WriteResult
 	decodeJSON(t, r.stdout, &res)
@@ -391,7 +392,7 @@ func TestWrite_addressFromEnv(t *testing.T) {
 func TestWrite_transports(t *testing.T) {
 	t.Run("udp", func(t *testing.T) {
 		d := mbtest.NewDevice().SetHolding(0, 0, 0)
-		r := run(t, "client", "write", "--url", "udp://"+d.ServeUDP(t), "--start", "0", "--values", "7,8")
+		r := run(t, "client", "write", "--yes", "--url", "udp://"+d.ServeUDP(t), "--start", "0", "--values", "7,8")
 		wantExit(t, r, errs.ExitOK)
 		if got := d.Holding(0, 2); !reflect.DeepEqual(got, []uint16{7, 8}) {
 			t.Fatalf("holding = %v", got)
@@ -399,7 +400,7 @@ func TestWrite_transports(t *testing.T) {
 	})
 	t.Run("rtuovertcp", func(t *testing.T) {
 		d := mbtest.NewDevice().SetHolding(0, 0)
-		r := run(t, "client", "write", "--url", "rtuovertcp://"+d.ServeRTUOverTCP(t), "--unit", "3", "--start", "0", "--values", "42")
+		r := run(t, "client", "write", "--yes", "--url", "rtuovertcp://"+d.ServeRTUOverTCP(t), "--unit", "3", "--start", "0", "--values", "42")
 		wantExit(t, r, errs.ExitOK)
 		if got := d.Holding(0, 1); got[0] != 42 {
 			t.Fatalf("holding = %v", got)
@@ -410,7 +411,7 @@ func TestWrite_transports(t *testing.T) {
 	})
 	t.Run("asciiovertcp", func(t *testing.T) {
 		d := mbtest.NewDevice().SetCoils(0, false)
-		r := run(t, "client", "write", "--url", "asciiovertcp://"+d.ServeASCIIOverTCP(t), "--function", "5", "--start", "0", "--values", "true")
+		r := run(t, "client", "write", "--yes", "--url", "asciiovertcp://"+d.ServeASCIIOverTCP(t), "--function", "5", "--start", "0", "--values", "true")
 		wantExit(t, r, errs.ExitOK)
 		if got := d.Coils(0, 1); !got[0] {
 			t.Fatal("coil 0 was not switched on")
@@ -419,7 +420,7 @@ func TestWrite_transports(t *testing.T) {
 	t.Run("rtu serial", func(t *testing.T) {
 		d := mbtest.NewDevice().SetHolding(0, 0, 0)
 		path := d.ServeRTUSerial(t)
-		r := run(t, "client", "write", "--url", "rtu://"+path, "--baud", "9600", "--parity", "even", "--unit", "3",
+		r := run(t, "client", "write", "--yes", "--url", "rtu://"+path, "--baud", "9600", "--parity", "even", "--unit", "3",
 			"--start", "0", "--values", "1234,5678", "--format", "json")
 		wantExit(t, r, errs.ExitOK)
 		var res types.WriteResult
@@ -444,7 +445,7 @@ func TestWrite_transports(t *testing.T) {
 	t.Run("ascii serial", func(t *testing.T) {
 		d := mbtest.NewDevice().SetHolding(0, 0)
 		path := d.ServeASCIISerial(t)
-		r := run(t, "client", "write", "--url", "ascii://"+path, "--baud", "9600", "--data-bits", "7", "--parity", "odd", "--stop-bits", "1",
+		r := run(t, "client", "write", "--yes", "--url", "ascii://"+path, "--baud", "9600", "--data-bits", "7", "--parity", "odd", "--stop-bits", "1",
 			"--start", "0", "--values", "99")
 		wantExit(t, r, errs.ExitOK)
 		if got := d.Holding(0, 1); got[0] != 99 {
@@ -452,9 +453,9 @@ func TestWrite_transports(t *testing.T) {
 		}
 	})
 	t.Run("serial settings are validated", func(t *testing.T) {
-		wantKind(t, run(t, "client", "write", "--url", "rtu:///dev/null", "--parity", "mark", "--start", "0", "--values", "1"), errs.KindInvalidInput)
-		wantKind(t, run(t, "client", "write", "--url", "rtu:///dev/null", "--data-bits", "9", "--start", "0", "--values", "1"), errs.KindInvalidInput)
-		wantKind(t, run(t, "client", "write", "--url", "rtu:///dev/null", "--stop-bits", "3", "--start", "0", "--values", "1"), errs.KindInvalidInput)
+		wantKind(t, run(t, "client", "write", "--yes", "--url", "rtu:///dev/null", "--parity", "mark", "--start", "0", "--values", "1"), errs.KindInvalidInput)
+		wantKind(t, run(t, "client", "write", "--yes", "--url", "rtu:///dev/null", "--data-bits", "9", "--start", "0", "--values", "1"), errs.KindInvalidInput)
+		wantKind(t, run(t, "client", "write", "--yes", "--url", "rtu:///dev/null", "--stop-bits", "3", "--start", "0", "--values", "1"), errs.KindInvalidInput)
 	})
 }
 
@@ -601,7 +602,7 @@ func TestOutputWriteFailure(t *testing.T) {
 	wantKind(t, r, errs.KindOutput)
 	wantExit(t, r, errs.ExitInternal)
 	for _, format := range []string{"text", "json", "table"} {
-		r = runTo(t, context.Background(), failWriter{}, "client", "write", "--url", url, "--start", "100", "--values", "1", "--format", format)
+		r = runTo(t, context.Background(), failWriter{}, "client", "write", "--yes", "--url", url, "--start", "100", "--values", "1", "--format", format)
 		wantKind(t, r, errs.KindOutput)
 	}
 }
@@ -1029,8 +1030,8 @@ func TestClientCommandTree(t *testing.T) {
 
 	// Flags stay at their defaults between invocations of the helper.
 	_, url := newDevice(t)
-	wantExit(t, run(t, "client", "write", "--url", url, "--start", "100", "--values", "5"), errs.ExitOK)
-	wantKind(t, run(t, "client", "write", "--url", url, "--values", "5"), errs.KindInvalidInput)
+	wantExit(t, run(t, "client", "write", "--yes", "--url", url, "--start", "100", "--values", "5"), errs.ExitOK)
+	wantKind(t, run(t, "client", "write", "--yes", "--url", url, "--values", "5"), errs.KindInvalidInput)
 
 	// The sunspec subtree is reachable from the client command.
 	d := mbtest.NewDevice().SetHolding(40000, 0x5375, 0x6E53, 1, 2, 0, 0, 0xFFFF, 0)
@@ -1045,4 +1046,90 @@ func TestClientCommandTree(t *testing.T) {
 	r = run(t, "client", "--help")
 	wantExit(t, r, errs.ExitOK)
 	wantContains(t, r.stdout, "poll", "write", "sunspec")
+}
+
+// requestCounter counts the requests d receives.
+func requestCounter(d *mbtest.Device) *atomic.Int32 {
+	var n atomic.Int32
+	d.OnRequest = func(mbtest.Request) mbtest.Action {
+		n.Add(1)
+		return mbtest.Action{}
+	}
+	return &n
+}
+
+func wantCode(t *testing.T, r cmdResult, kind errs.Kind, code string) {
+	t.Helper()
+	wantKind(t, r, kind)
+	if e, _ := errs.As(r.err); e.Code != code {
+		t.Fatalf("error code %q, want %q", e.Code, code)
+	}
+}
+
+func TestWrite_needsYes(t *testing.T) {
+	d := mbtest.NewDevice().SetHolding(100, 1)
+	n := requestCounter(d)
+	url := "tcp://" + d.ServeTCP(t)
+
+	for name, args := range map[string][]string{
+		"register":        {"--url", url, "--start", "100", "--values", "5"},
+		"coil":            {"--url", url, "--function", "5", "--start", "8", "--values", "on"},
+		"yes=false":       {"--url", url, "--start", "100", "--values", "5", "--yes=false"},
+		"before an error": {"--url", url, "--values", "not-a-number"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := run(t, append([]string{"client", "write"}, args...)...)
+			wantCode(t, r, errs.KindUsage, errs.CodeConfirmationRequired)
+			wantExit(t, r, errs.ExitUsage)
+			wantContains(t, r.err.Error(), "--yes", "nothing was sent")
+		})
+	}
+	if got := n.Load(); got != 0 {
+		t.Fatalf("%d requests reached the device without --yes", got)
+	}
+	if got := d.Holding(100, 1); got[0] != 1 {
+		t.Fatalf("holding = %v", got)
+	}
+
+	// No variable stands in for the flag.
+	t.Setenv("MODBUSCTL_YES", "true")
+	wantCode(t, run(t, "client", "write", "--url", url, "--start", "100", "--values", "5"), errs.KindUsage, errs.CodeConfirmationRequired)
+
+	wantExit(t, run(t, "client", "write", "--url", url, "--start", "100", "--values", "5", "--yes"), errs.ExitOK)
+	if got := d.Holding(100, 1); got[0] != 5 {
+		t.Fatalf("holding = %v", got)
+	}
+}
+
+func TestDiagnostic_stateChangingNeedsYes(t *testing.T) {
+	d := mbtest.NewDevice()
+	n := requestCounter(d)
+	url := "tcp://" + d.ServeTCP(t)
+
+	for _, sub := range []string{"restartcommunications", "changeasciiinputdelimiter", "forcelistenonlymode",
+		"clearcountersanddiagnosticreg", "clearoverruncounterandflag", "ForceListenOnlyMode"} {
+		r := run(t, "client", "diagnostic", "--url", url, "--sub-function", sub)
+		wantCode(t, r, errs.KindUsage, errs.CodeConfirmationRequired)
+		wantExit(t, r, errs.ExitUsage)
+	}
+	if got := n.Load(); got != 0 {
+		t.Fatalf("%d requests reached the device without --yes", got)
+	}
+
+	// With --yes the request goes out; the test device answers it or refuses it, either is its own.
+	r := run(t, "client", "diagnostic", "--url", url, "--sub-function", "clearcountersanddiagnosticreg", "--yes")
+	if e, ok := errs.As(r.err); ok && e.Code == errs.CodeConfirmationRequired {
+		t.Fatalf("refused with --yes: %v", r.err)
+	}
+	if got := n.Load(); got == 0 {
+		t.Fatal("no request reached the device with --yes")
+	}
+
+	// Sub-functions that only read stay free, and --yes does them no harm.
+	wantExit(t, run(t, "client", "diagnostic", "--url", url), errs.ExitOK)
+	wantExit(t, run(t, "client", "diagnostic", "--url", url, "--sub-function", "returnbusmessagecount"), errs.ExitOK)
+	wantExit(t, run(t, "client", "diagnostic", "--url", url, "--yes"), errs.ExitOK)
+
+	// An unknown sub-function is invalid input, not a question of confirmation.
+	wantKind(t, run(t, "client", "diagnostic", "--url", url, "--sub-function", "nope"), errs.KindInvalidInput)
 }
