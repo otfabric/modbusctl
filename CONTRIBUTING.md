@@ -19,7 +19,7 @@ Thank you for your interest in contributing to `modbusctl`! This document covers
 
 ### Prerequisites
 
-- Go 1.25+ (see [go.mod](go.mod))
+- Go 1.26+ (see [go.mod](go.mod))
 - [staticcheck](https://staticcheck.dev/) and [golangci-lint](https://golangci-lint.run/) for linting
 - No hardware: the test suite brings its own Modbus device (see [Testing](#testing))
 

@@ -1,5 +1,16 @@
 # modbusctl Releases
 
+## v3.4.0
+
+**Date:** 2026-10-30
+**Previous release:** v3.3.0
+
+### Dependencies
+
+- `go-modbus` v1.7.2 → v1.10.0, `golang.org/x/net` → v0.62.0 (govulncheck). Requires Go 1.26, as that `x/net` does.
+
+---
+
 ## v3.3.0
 
 **Date:** 2026-10-30
