@@ -18,7 +18,7 @@ jobs:
       run-govulncheck: true
       coverage-min: "85"
       codecov-name: modbusctl
-      go-versions: '["1.25", "1.26"]'
+      go-versions: '["1.26"]'
       # Test the cmd packages as well (the shared default skips /cmd) and attribute
       # coverage across the whole module, matching `make coverage`.
       test-exclude-regex: "/example(s)?($|/)"

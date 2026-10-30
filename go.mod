@@ -1,10 +1,10 @@
 module github.com/otfabric/modbusctl
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/mdlayher/arp v0.0.0-20220512170110-6706a2966875
-	github.com/otfabric/go-modbus v1.7.2
+	github.com/otfabric/go-modbus v1.10.0
 	github.com/otfabric/go-modbus-capture v0.0.2
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
@@ -20,8 +20,8 @@ require (
 	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/otfabric/go-serial v0.1.8 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
