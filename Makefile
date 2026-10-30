@@ -1,4 +1,4 @@
-.PHONY: help all run test coverage cover compile lint lint-ci fmt fmt-check vet build build-nocheck build-all release-all install clean check-legacy
+.PHONY: help all run test coverage cover compile lint lint-ci fmt fmt-check vet build build-nocheck build-all release-all install clean check-legacy vuln e2e
 
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -39,7 +39,7 @@ run: ## Run the application
 	@echo "Running $(APP_NAME)"
 	@go run $(APP_SRC)
 
-check: fmt fmt-check lint lint-ci vet test coverage ## Run all checks (format, lint, vet, test, coverage)
+check: fmt fmt-check lint lint-ci vet vuln test coverage ## Run all checks (format, lint, vet, vulnerability scan, test, coverage)
 
 test: ## Run unit tests with race detector
 	@echo "Running unit tests (race detector)"
@@ -140,6 +140,14 @@ release-all: build-all ## Package the build binaries into tar.gz (Unix) or zip (
 			tar czf $(RELEASE_DIR)/$$bin.tar.gz -C $(RELEASE_DIR) $$bin; \
 		fi; \
 	done
+
+vuln: ## Scan the module and its dependencies for known vulnerabilities (govulncheck)
+	@govulncheck ./...
+
+e2e: ## Build the binary and run the e2e suite against it
+	@mkdir -p bin
+	@go build $(LDFLAGS) -o bin/modbusctl $(APP_SRC)
+	@MODBUSCTL_E2E_BIN=$(CURDIR)/bin/modbusctl MODBUSCTL_E2E_VERSION=$(VERSION) go test -count=1 -tags=e2e ./e2e/...
 
 install: build ## Install the built binary to /usr/local/bin
 	@echo "Installing $(APP_NAME) to /usr/local/bin"

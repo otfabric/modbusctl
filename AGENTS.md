@@ -31,7 +31,8 @@ This repository follows **otfabric/engineering policy 1.0**, profile **cli** (`.
 
 | When you change… | Run |
 |---|---|
-| anything | `make check` (needs staticcheck and golangci-lint) |
+| anything | `make check` (needs staticcheck, golangci-lint and govulncheck) |
+| the command line, exit codes or `main` | `make e2e` (builds the binary and runs it) |
 | tests only | `make test` |
 | coverage | `make coverage` (whole module, `COVERAGE_MIN`) |
 
