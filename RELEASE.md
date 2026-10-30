@@ -2,7 +2,7 @@
 
 ## v3.3.0
 
-**Date:** unreleased
+**Date:** 2026-10-30
 **Previous release:** v3.2.1
 
 ### Summary
