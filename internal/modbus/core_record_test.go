@@ -162,7 +162,7 @@ func TestCoreRecord_setupFailures(t *testing.T) {
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t)}, Timeout: coreShortTimeoutMS, Function: 3, Duration: 10,
 			BlocksFile: filepath.Join(t.TempDir(), "nope.json"), OutputFile: out,
 		}, nil)
-		coreRequireKind(t, err, errs.KindOutput, errs.CodeInputFileOpenFailed)
+		coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeInputFileOpenFailed)
 		require.ErrorIs(t, err, os.ErrNotExist)
 		assert.NoFileExists(t, out)
 	})
@@ -174,7 +174,7 @@ func TestCoreRecord_setupFailures(t *testing.T) {
 			DeviceConfig: config.DeviceConfig{URL: coreClosedURL(t)}, Timeout: coreShortTimeoutMS, Function: 3, Duration: 10,
 			BlocksFile: path, OutputFile: coreCapturePath(t),
 		}, nil)
-		coreRequireKind(t, err, errs.KindOutput, errs.CodeInputDecodeFailed)
+		coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeInputDecodeFailed)
 	})
 
 	t.Run("connect refused", func(t *testing.T) {

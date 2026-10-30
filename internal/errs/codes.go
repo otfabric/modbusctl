@@ -2,6 +2,9 @@ package errs
 
 // Stable machine-oriented codes for JSON error.code and scripts.
 const (
+	// An invocation cobra rejected: unknown command or flag, bad flag value, wrong arguments.
+	CodeInvalidUsage = "invalid_usage"
+
 	CodeInvalidFormat          = "invalid_format"
 	CodeInvalidInput           = "invalid_input"
 	CodeInvalidURL             = "invalid_url"

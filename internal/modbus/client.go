@@ -707,14 +707,14 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 	// when cfg.Debug inside readRegisters; interval sleep has no line (delay 0 skips sleep).
 	data, err := os.ReadFile(cfg.BlocksFile)
 	if err != nil {
-		return nil, errs.Output(errs.CodeInputFileOpenFailed, err)
+		return nil, errs.InvalidInput(errs.CodeInputFileOpenFailed, err.Error(), err)
 	}
 	reqs, err := plan.Parse(data, cfg.Function)
 	var syntax *json.SyntaxError
 	var typ *json.UnmarshalTypeError
 	switch {
 	case errors.As(err, &syntax) || errors.As(err, &typ):
-		return nil, errs.Output(errs.CodeInputDecodeFailed, err)
+		return nil, errs.InvalidInput(errs.CodeInputDecodeFailed, err.Error(), err)
 	case err != nil:
 		return nil, errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
 	}

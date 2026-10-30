@@ -318,7 +318,7 @@ func TestCollServer_errors(t *testing.T) {
 	site := collWriteCapture(t, collSite())
 
 	err := ServeStatic(ctx, config.StaticServerConfig{Port: 1, InputFile: filepath.Join(t.TempDir(), "missing.mbcap")}, nil)
-	coreRequireKind(t, err, errs.KindOutput, errs.CodeCaptureLoadFailed)
+	coreRequireKind(t, err, errs.KindInvalidInput, errs.CodeCaptureLoadFailed)
 
 	v1 := filepath.Join(t.TempDir(), "old.mbcap")
 	require.NoError(t, os.WriteFile(v1, []byte("MCAP\x01\x00\x02{}"), 0o600))

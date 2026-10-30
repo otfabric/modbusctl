@@ -121,12 +121,15 @@ func TestRead_failures(t *testing.T) {
 	wantKind(t, r, errs.KindModbus)
 	wantExit(t, r, errs.ExitProtocol)
 
-	// An unknown flag is a plain cobra error (internal exit code).
+	// An unknown flag is a plain cobra error here; Execute turns it into a usage error
+	// (TestExecute_fatal in package cmd checks that exit code).
 	r = run(t, "client", "read", "--no-such-flag")
 	if r.err == nil {
 		t.Fatal("expected an error for an unknown flag")
 	}
-	wantExit(t, r, errs.ExitInternal)
+	if _, ok := errs.As(r.err); ok {
+		t.Fatalf("unknown flag: want cobra's untyped error, got %v", r.err)
+	}
 }
 
 func TestRead_timeout(t *testing.T) {

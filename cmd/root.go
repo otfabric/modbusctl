@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/otfabric/modbusctl/cmd/capture"
@@ -13,6 +15,7 @@ import (
 	"github.com/otfabric/modbusctl/cmd/discover"
 	"github.com/otfabric/modbusctl/cmd/server"
 	"github.com/otfabric/modbusctl/internal/capfile"
+	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/runner"
 
 	"github.com/spf13/cobra"
@@ -72,6 +75,44 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+var typeRunErrors sync.Once
+
+// typeCommandErrors makes every error a command returns while running typed, which leaves
+// only the errors cobra raises itself untyped: see [classifyFatal].
+func typeCommandErrors(c *cobra.Command) {
+	if run := c.RunE; run != nil {
+		c.RunE = func(cmd *cobra.Command, args []string) error {
+			err := run(cmd, args)
+			if err == nil {
+				return nil
+			}
+			if _, ok := errs.As(err); ok {
+				return err
+			}
+			return errs.New(errs.KindInternal, errs.CodeInternalUnexpected, err.Error(), err)
+		}
+	}
+	for _, sub := range c.Commands() {
+		typeCommandErrors(sub)
+	}
+}
+
+// classifyFatal settles the kind of a fatal error for the exit code. An interruption is
+// interrupted whatever operation it stopped, and an error that is still untyped comes from
+// cobra, which rejected the invocation before a command ran.
+func classifyFatal(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return errs.New(errs.KindInterrupted, errs.CodeContextCanceled, "interrupted", err)
+	}
+	if _, ok := errs.As(err); ok {
+		return err
+	}
+	return errs.New(errs.KindUsage, errs.CodeInvalidUsage, err.Error(), err)
+}
+
 // Execute runs the root command and returns the process exit code (main should call os.Exit).
 func Execute() int {
 	inv := &runner.Invocation{}
@@ -79,8 +120,9 @@ func Execute() int {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	rootCmd.SetContext(ctx)
+	typeRunErrors.Do(func() { typeCommandErrors(rootCmd) })
 
-	err := rootCmd.ExecuteContext(ctx)
+	err := classifyFatal(rootCmd.ExecuteContext(ctx))
 	debug, _ := rootCmd.PersistentFlags().GetBool("debug")
 
 	if err != nil {

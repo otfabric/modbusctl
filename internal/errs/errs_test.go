@@ -133,6 +133,7 @@ func TestExitCodeForKind(t *testing.T) {
 		{KindModbus, ExitProtocol},
 		{KindOutput, ExitInternal},
 		{KindInternal, ExitInternal},
+		{KindInterrupted, ExitInterrupted},
 		{Kind("unknown"), ExitInternal},
 	}
 	for _, tc := range cases {

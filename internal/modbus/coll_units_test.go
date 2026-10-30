@@ -367,7 +367,7 @@ func TestCollFingerprint_contextCanceled(t *testing.T) {
 		for _, u := range res.Units {
 			require.True(t, u.ProbeInterrupted)
 			require.Empty(t, u.SupportedReads)
-			collRequireInfo(t, u.Error, errs.KindInternal, errs.CodeContextCanceled)
+			collRequireInfo(t, u.Error, errs.KindInterrupted, errs.CodeContextCanceled)
 		}
 		require.Equal(t, 3, res.Summary.Failed)
 	})

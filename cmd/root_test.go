@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -320,13 +322,59 @@ func TestExecute_fatal(t *testing.T) {
 	}
 	wantContains(t, stderr, "error:", "Illegal Data Address")
 
-	// Errors cobra raises itself (unknown command or flag) are internal failures.
-	for _, args := range [][]string{{"no-such-command"}, {"client", "read", "--no-such-flag"}} {
+	// Errors cobra raises itself are usage errors: an unknown command or flag, a flag value
+	// of the wrong type, a required flag that is missing, wrong arguments.
+	for _, args := range [][]string{
+		{"no-such-command"},
+		{"client", "read", "--no-such-flag"},
+		{"client", "read", "--port", "no-number"},
+		{"capture", "extract"},
+		{"completion"},
+	} {
 		code, stdout, stderr = execute(t, args...)
-		if code != errs.ExitInternal || stdout != "" {
+		if code != errs.ExitUsage || stdout != "" {
 			t.Fatalf("%v: exit %d, stdout %q", args, code, stdout)
 		}
 		wantContains(t, stderr, "error:")
+	}
+}
+
+func TestClassifyFatal(t *testing.T) {
+	if classifyFatal(nil) != nil {
+		t.Fatal("nil must stay nil")
+	}
+	wrapped := errs.New(errs.KindProtocol, errs.CodeSunSpecDetectFailed, "SunSpec detect failed", context.Canceled)
+	for _, c := range []struct {
+		name string
+		err  error
+		want errs.Kind
+	}{
+		{"cobra", errors.New("unknown flag: --x"), errs.KindUsage},
+		{"typed", errs.New(errs.KindTransport, errs.CodeTransportConnectFailed, "x", nil), errs.KindTransport},
+		{"canceled", fmt.Errorf("read: %w", context.Canceled), errs.KindInterrupted},
+		{"canceled inside a typed error", wrapped, errs.KindInterrupted},
+	} {
+		e, ok := errs.As(classifyFatal(c.err))
+		if !ok || e.Kind != c.want {
+			t.Errorf("%s: got %+v, want kind %s", c.name, e, c.want)
+		}
+	}
+}
+
+// An untyped error from a running command stays internal: only cobra's own errors are usage.
+func TestTypeCommandErrors(t *testing.T) {
+	sub := &cobra.Command{Use: "sub", RunE: func(*cobra.Command, []string) error { return errors.New("disk on fire") }}
+	ok := &cobra.Command{Use: "ok", RunE: func(*cobra.Command, []string) error { return nil }}
+	root := &cobra.Command{Use: "root"}
+	root.AddCommand(sub, ok)
+	typeCommandErrors(root)
+
+	if err := ok.RunE(ok, nil); err != nil {
+		t.Fatal(err)
+	}
+	e, isTyped := errs.As(classifyFatal(sub.RunE(sub, nil)))
+	if !isTyped || e.Kind != errs.KindInternal || e.Message != "disk on fire" {
+		t.Fatalf("got %+v", e)
 	}
 }
 

@@ -1,5 +1,30 @@
 # modbusctl Releases
 
+## v3.3.0
+
+**Date:** unreleased
+**Previous release:** v3.2.1
+
+### Summary
+
+**Breaking for scripts:** the exit codes follow the OT Fabric organisation table (ADR-0006 of otfabric/engineering). Three cases change; no command or flag changes.
+
+### Exit codes
+
+| Case | Old | New | JSON error |
+|---|---|---|---|
+| Interrupted by SIGINT or SIGTERM before a result (`context_canceled`) | 10 | 130 | kind `interrupted`, was `internal`; also on an embedded `error` of a result, such as a unit of `fingerprint`, whose exit code stays 7 |
+| Invocation rejected by the command line parser: unknown command or flag, flag value of the wrong type, missing required flag, wrong arguments | 10 | 2 | none, as before: printed to stderr; new code `invalid_usage` |
+| Input file not usable: `capture_load_failed`, `input_file_open_failed`, `input_decode_failed` | 10 | 3 | kind `invalid_input`, was `output` |
+
+Every other exit code is unchanged. See [docs/exitcodes.md](docs/exitcodes.md).
+
+### Environment
+
+`MODBUSCTL_FORMAT` is now the canonical name of the format variable; `MODBUSCTL_OUTPUT_FORMAT` stays accepted, and `MODBUSCTL_FORMAT` wins when both are set. (`MODBUSCTL_FORMAT` belonged to `mcap convert` until v3.1.0; that command is gone.)
+
+---
+
 ## v3.2.1
 
 **Date:** 2026-10-29

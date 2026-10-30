@@ -109,9 +109,9 @@ func TestMain_exitCodes(t *testing.T) {
 		t.Fatalf("identify with a failing unit: exit %d\n%s", code, stdout)
 	}
 
-	// 10: errors cobra raises itself.
+	// 2: errors cobra raises itself.
 	code, _, stderr = runMain(t, "no-such-command")
-	if code != 10 || !strings.Contains(stderr, "error:") {
+	if code != 2 || !strings.Contains(stderr, "error:") {
 		t.Fatalf("unknown command: exit %d, stderr %q", code, stderr)
 	}
 }

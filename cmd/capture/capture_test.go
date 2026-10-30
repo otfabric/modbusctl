@@ -145,8 +145,8 @@ func TestFailures(t *testing.T) {
 
 		// A file that is not a capture fails while loading.
 		r = run(t, args(garbage, out)...)
-		wantKind(t, r, errs.KindOutput)
-		wantExit(t, r, errs.ExitInternal)
+		wantKind(t, r, errs.KindInvalidInput)
+		wantExit(t, r, errs.ExitInvalidInput)
 
 		// An output path in a directory that does not exist cannot be created.
 		r = run(t, args(in, unwritable)...)
