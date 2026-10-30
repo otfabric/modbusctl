@@ -855,7 +855,7 @@ When non-zero, the summary also reports **Exception**, **Timeout**, and **Transp
 | **boundary** | You have one known-good (start, count); find maximal readable interval around it. |
 | **sunspec** | SunSpec device; protocol-aware base detection + model chain walk to a capture file. |
 
-Failures are classified (success, Modbus exception, timeout, transport error) so strategies can avoid retrying on strong exception evidence (e.g. Illegal Data Address). For a full specification of each algorithm (state, transitions, worst-case counts, and examples suitable for re-implementation), see **[ALGOS.md](ALGOS.md)**. For the optional improvement roadmap (priority queue, stepped offsets, coalesce-smart, etc.), see **[REFACTOR.md](REFACTOR.md)**.
+Failures are classified (success, Modbus exception, timeout, transport error) so strategies can avoid retrying on strong exception evidence (e.g. Illegal Data Address). For a full specification of each algorithm (state, transitions, worst-case counts, and examples suitable for re-implementation), see **[ALGOS.md](ALGOS.md)**.
 
 <details>
 <summary>Scan algorithm internals (full descriptions of each algorithm)</summary>

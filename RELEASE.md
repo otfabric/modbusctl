@@ -153,6 +153,8 @@ Major release: captures are now **MBCAP** files, the format of [**go-modbus-capt
 - Scripts that ran **`mcap convert --format json`**: use `--format jsonl` (one JSON object per line: header, target, stream, sample and end records with hex PDUs).
 - The JSON summaries of **`client read`**, **`scan`** and **`record`** keep the key `mcap_output_path`; it names the `.mbcap` file.
 
+---
+
 ## v2.4.1
 
 **Date:** 2026-10-11  
@@ -168,6 +170,8 @@ Patch release: adopts **go-modbus v1.3.0**, which hardens the client against los
 - **No stale answers after a timeout (TCP/TLS):** After a request times out or a response is malformed, the connection is replaced before the next request. A late response to the timed-out request can no longer be taken for the answer to the next one, which matters most for **`client poll`**, **`client record`** and **`client scan`** against slow devices.
 - **Reconnects by itself:** A long-running **`client poll`** or **`client record`** whose connection drops fails that one sample and continues on a new connection with the next.
 - **Ctrl-C and `--timeout` take effect immediately:** A request in flight is interrupted instead of running to its timeout.
+
+---
 
 ## v2.4.0
 
