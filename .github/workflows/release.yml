@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   release-modbusctl-binary:
-    uses: otfabric/.github/.github/workflows/go-binary-release.yml@v3.2.0
+    uses: otfabric/.github/.github/workflows/go-binary-release.yml@v3.3.0
     with:
       bump: ${{ inputs.bump }}
       binary-name: modbusctl
