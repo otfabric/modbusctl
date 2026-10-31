@@ -22,3 +22,10 @@ coverage.*
 
 # Cursor settings
 .cursor/
+
+# Build artefacts live in /bin/ and /release/ (otfabric/engineering REPO-005)
+*.test
+coverage.out
+
+# Output of a bare `go build`, anchored so it can never hide a source folder
+/healthcheck/healthcheck
