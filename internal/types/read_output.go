@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package types defines read command output. RawDataHex is the canonical post-read byte
 // sequence written to the capture file. Typed decoding of these bytes is handled by `client decode`.
 package types

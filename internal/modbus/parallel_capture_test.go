@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package modbus
 
 // Parallel tests of the capture code paths, for the race detector and for

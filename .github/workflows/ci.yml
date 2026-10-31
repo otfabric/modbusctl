@@ -17,6 +17,7 @@ jobs:
     with:
       run-govulncheck: true
       coverage-min: "85"
+      fuzz-time: 10s
       codecov-name: modbusctl
       go-versions: '["1.26"]'
       # Test the cmd packages as well (the shared default skips /cmd) and attribute
@@ -24,3 +25,25 @@ jobs:
       test-exclude-regex: "/example(s)?($|/)"
       coverpkg: ./...
     secrets: inherit
+
+  # The per-package coverage floor (TEST-012). This job also holds the
+  # prerequisites of the gated tests (go, an unprivileged user, the Linux
+  # 127.0.0.0/8 loopback), so MODBUSCTL_REQUIRE_PREREQS fails a test that would
+  # skip.
+  coverage-packages:
+    name: Per-package coverage
+    runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/otfabric/*
+      MODBUSCTL_REQUIRE_PREREQS: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Configure private module access
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.OTFABRIC_READ_TOKEN }}
+        run: git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+      - run: make coverage-pkg-check

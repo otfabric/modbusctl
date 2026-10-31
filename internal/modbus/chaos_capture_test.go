@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package modbus
 
 // Chaos tests of recording and serving captures: a device that randomly

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package capfile connects modbusctl to the MBCAP capture format of
 // github.com/otfabric/go-modbus-capture: a Recorder that writes what a device
 // answers through the go-modbus PDU tap, a loader for capture files in any

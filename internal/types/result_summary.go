@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package types
 
 // ResultSummary counts aggregate outcomes for multi-target client commands (Phase 8 / B2).

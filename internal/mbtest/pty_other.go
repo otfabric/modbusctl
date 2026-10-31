@@ -1,5 +1,7 @@
 //go:build !darwin && !linux
 
+// SPDX-License-Identifier: MIT
+
 package mbtest
 
 import (

@@ -1,5 +1,7 @@
 //go:build linux
 
+// SPDX-License-Identifier: MIT
+
 package mbtest
 
 import (

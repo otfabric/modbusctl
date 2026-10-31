@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package modbus
 
 // End-to-end tests of the capture pipeline: scan a device, turn the scan into

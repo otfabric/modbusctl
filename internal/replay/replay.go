@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package replay answers Modbus requests from a capture as of a replay time T:
 // the data core of a virtual device. It applies sample and hold (a value holds
 // from its sample until the next sample of the same address or request), never

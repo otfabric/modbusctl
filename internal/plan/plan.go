@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package plan reads recording plans: the requests `client record` sends
 // every interval. A plan is a JSON array; an entry with only start_address and
 // register_count is an address block read with the default function (the
