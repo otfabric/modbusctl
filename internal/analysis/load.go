@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package analysis implements the modbusctl capture commands: register-block
 // analyses of MBCAP capture files (decode, extract, strings, frequencies).
 // Inspecting, verifying and converting capture files is left to mbcapctl of

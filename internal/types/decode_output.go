@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package types decode output. DecodeResult is the structured outcome of a `client decode`:
 // raw register bytes plus one or more values decoded with a single codec. CodecList backs
 // the `client codecs` discovery command.

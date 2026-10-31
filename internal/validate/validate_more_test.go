@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package validate
 
 import (
@@ -689,7 +691,10 @@ func TestValidateRanges(t *testing.T) {
 
 func TestValidateJSONFiles_unreadable(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("file permissions are not enforced for root")
+		if os.Getenv("MODBUSCTL_REQUIRE_PREREQS") == "1" {
+			t.Fatal("MODBUSCTL_REQUIRE_PREREQS=1: file permissions are not enforced for root")
+		}
+		t.Skip("file permissions are not enforced for root (MODBUSCTL_REQUIRE_PREREQS=1 makes this a failure)")
 	}
 	path := writeFile(t, "locked.json", `[]`)
 	require.NoError(t, os.Chmod(path, 0o000))

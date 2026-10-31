@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package modbus
 
 // End-to-end tests of the static and replay servers over Modbus/TCP Security:

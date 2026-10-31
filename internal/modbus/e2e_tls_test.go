@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package modbus
 
 // End-to-end tests of Modbus/TCP Security (tcp+tls://): the client presents the

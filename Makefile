@@ -1,4 +1,4 @@
-.PHONY: help all run test coverage cover compile lint lint-ci fmt fmt-check vet build build-nocheck build-all release-all install clean check-legacy vuln e2e
+.PHONY: help all run test coverage cover compile lint lint-ci fmt fmt-check vet build build-nocheck build-all release-all install clean check-legacy vuln e2e fuzz coverage-pkg-check
 
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -32,6 +32,8 @@ RELEASE_DIR   := release
 
 # Minimum total statement coverage (percent) enforced by `make coverage`.
 COVERAGE_MIN ?= 85
+# Per-package floor (TEST-012): what the weakest package measures now, rounded down.
+COVER_PKG_MIN := 80
 
 all: test build build-all ## Test and build the application
 
@@ -39,7 +41,12 @@ run: ## Run the application
 	@echo "Running $(APP_NAME)"
 	@go run $(APP_SRC)
 
-check: fmt fmt-check lint lint-ci vet vuln test coverage ## Run all checks (format, lint, vet, vulnerability scan, test, coverage)
+coverage-pkg-check: coverage ## Fail when a package is below COVER_PKG_MIN
+	@awk -v m="$(COVER_PKG_MIN)" 'NR > 1 { n[$$1] = $$2; if ($$3 > 0) h[$$1] = 1 } \
+	END { for (k in n) { p = k; sub(/\/[^\/]*$$/, "", p); s[p] += n[k]; if (k in h) c[p] += n[k] } \
+	for (p in s) { v = 100 * c[p] / s[p]; if (v < m) { printf "%s: %.1f%% < %s%%\n", p, v, m; bad = 1 } } exit bad }' coverage.out
+
+check: fmt fmt-check lint lint-ci vet vuln test coverage-pkg-check ## Run all checks (format, lint, vet, vulnerability scan, test, coverage)
 
 test: ## Run unit tests with race detector
 	@echo "Running unit tests (race detector)"
@@ -139,6 +146,16 @@ release-all: build-all ## Package the build binaries into tar.gz (Unix) or zip (
 			echo "Packaging $$bin.tar.gz..."; \
 			tar czf $(RELEASE_DIR)/$$bin.tar.gz -C $(RELEASE_DIR) $$bin; \
 		fi; \
+	done
+
+FUZZTIME ?= 10s
+
+fuzz: ## Run every Fuzz target for FUZZTIME (targets discovered, never listed)
+	@for pkg in $$(go list ./...); do \
+		for t in $$(go test -list '^Fuzz' $$pkg | grep '^Fuzz'); do \
+			echo "fuzz $$pkg $$t"; \
+			go test -run '^$$' -fuzz "^$$t$$" -fuzztime $(FUZZTIME) $$pkg || exit 1; \
+		done; \
 	done
 
 vuln: ## Scan the module and its dependencies for known vulnerabilities (govulncheck)

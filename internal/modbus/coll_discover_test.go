@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: MIT
+
 package modbus
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -224,7 +227,7 @@ func TestCollDiscover_sortsDevicesNumerically(t *testing.T) {
 	for _, host := range []string{"127.0.0.2", "127.0.0.14"} {
 		conn, err := net.DialTimeout("tcp4", net.JoinHostPort(host, strconv.Itoa(int(port))), 300*time.Millisecond)
 		if err != nil {
-			t.Skipf("%s is not a usable loopback address on this system: %v", host, err)
+			requireOrSkip(t, fmt.Sprintf("%s is not a usable loopback address on this system: %v", host, err))
 		}
 		require.NoError(t, conn.Close())
 	}

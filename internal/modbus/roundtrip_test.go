@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package modbus
 
 // Record -> file -> replay round trips, over tcp, tcp+tls, rtuovertcp and udp,
@@ -333,13 +335,23 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// requireOrSkip skips a test whose prerequisite is missing here, or fails it
+// when MODBUSCTL_REQUIRE_PREREQS=1 says this machine must have it.
+func requireOrSkip(t *testing.T, why string) {
+	t.Helper()
+	if os.Getenv("MODBUSCTL_REQUIRE_PREREQS") == "1" {
+		t.Fatal("MODBUSCTL_REQUIRE_PREREQS=1: " + why)
+	}
+	t.Skip(why + " (MODBUSCTL_REQUIRE_PREREQS=1 makes this a failure)")
+}
+
 // mbcapctlPath returns the path of a built mbcapctl, skipping the test when
 // the go tool is not available to build it.
 func mbcapctlPath(t *testing.T) string {
 	t.Helper()
 	goBin, err := exec.LookPath("go")
 	if err != nil {
-		t.Skip("go is not on PATH: cannot build mbcapctl")
+		requireOrSkip(t, "go is not on PATH: cannot build mbcapctl")
 	}
 	mbcapctl.once.Do(func() {
 		if mbcapctl.dir, mbcapctl.err = os.MkdirTemp("", "mbcapctl"); mbcapctl.err != nil {

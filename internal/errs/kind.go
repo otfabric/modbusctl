@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package errs
 
 // Kind is a coarse failure category for exit-code mapping and JSON error.kind.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package modbus
 
 // End-to-end tests of the functions the servers answer through go-modbus

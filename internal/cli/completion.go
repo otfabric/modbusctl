@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package cli holds small Cobra helpers shared by commands (e.g. generic enum flag completion).
 package cli
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package errs
 
 // Stable machine-oriented codes for JSON error.code and scripts.

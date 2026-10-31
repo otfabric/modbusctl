@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 package errs
 
 // Process exit codes (single mapping from Kind for fatals).

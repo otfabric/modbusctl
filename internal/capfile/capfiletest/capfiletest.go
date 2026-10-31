@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Package capfiletest builds and reads MBCAP captures in tests, in terms of the
 // register-block records ([types.CaptureRecord]) the tests have always used.
 package capfiletest
