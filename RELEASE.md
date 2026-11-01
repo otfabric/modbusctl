@@ -1,5 +1,17 @@
 # modbusctl Releases
 
+## v3.4.2
+
+**Date:** 2026-11-01
+**Previous release:** v3.4.1
+
+### Changed
+
+- Dependency update, no other change. Picks up the go-modbus fix for a response that arrives during `Client.Close`.
+- Built on go-modbus v1.10.5, go-modbus-capture v0.0.3, go-serial v0.2.1.
+
+---
+
 ## v3.4.1
 
 **Date:** 2026-10-31
