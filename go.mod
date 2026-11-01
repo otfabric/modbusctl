@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/mdlayher/arp v0.0.0-20220512170110-6706a2966875
-	github.com/otfabric/go-modbus v1.10.3
+	github.com/otfabric/go-modbus v1.10.5
 	github.com/otfabric/go-modbus-capture v0.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
