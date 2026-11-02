@@ -1,5 +1,16 @@
 # modbusctl Releases
 
+## v3.4.3
+
+**Date:** 2026-11-02
+**Previous release:** v3.4.2
+
+### Changed
+
+- Built on go-modbus v1.10.6, whose codec count checks compare the full length of a slice. No other change.
+
+---
+
 ## v3.4.2
 
 **Date:** 2026-11-01
