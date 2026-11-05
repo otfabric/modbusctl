@@ -41,9 +41,9 @@ func init() {
 		if err := validate.CheckStringsConfig(cfg); err != nil {
 			return errs.WrapValidation(err)
 		}
-		w, cleanup, err := cli.OpenStdoutOrFile(cfg.OutputFile)
+		w, cleanup, err := cli.OpenStdoutOrFile(cfg.OutputFile, cfg.InputFile)
 		if err != nil {
-			return errs.Output(errs.CodeOutputFileCreateFailed, err)
+			return cli.OutputOpenError(err)
 		}
 		defer cleanup()
 

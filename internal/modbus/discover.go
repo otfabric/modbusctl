@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/netip"
-	"os"
 	"sort"
 	"sync"
 
@@ -18,6 +18,7 @@ import (
 	mb "github.com/otfabric/go-modbus"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
+	"github.com/otfabric/modbusctl/internal/fsutil"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
@@ -138,7 +139,7 @@ func CollectDiscover(ctx context.Context, cfg config.DiscoverConfig, stderr io.W
 		if err != nil {
 			return nil, errs.Output(errs.CodeJSONEncodeFailed, err)
 		}
-		if err := os.WriteFile(cfg.OutputFile, data, 0o644); err != nil {
+		if err := fsutil.WriteOutput(cfg.OutputFile, data); err != nil {
 			return nil, errs.Output(errs.CodeOutputFileWriteFailed, err)
 		}
 	}
@@ -147,7 +148,14 @@ func CollectDiscover(ctx context.Context, cfg config.DiscoverConfig, stderr io.W
 }
 
 // EstimateDiscoverHostCount returns how many unique assignable IPs would be probed for cfg (same rules as [CollectDiscover]).
+// It enumerates every host: for a subnet of unknown size use [DiscoverHostCountAtMost].
 func EstimateDiscoverHostCount(cfg config.DiscoverConfig) (int, error) {
+	return DiscoverHostCountAtMost(cfg, math.MaxInt-1)
+}
+
+// DiscoverHostCountAtMost is [EstimateDiscoverHostCount] that stops counting above limit: it returns limit+1 for a
+// larger scope, without enumerating (and remembering) the hosts of a /8 or an IPv6 /64.
+func DiscoverHostCountAtMost(cfg config.DiscoverConfig, limit int) (int, error) {
 	seen := make(map[string]struct{}, 1024)
 	n := 0
 	for _, subnet := range cfg.Subnets {
@@ -157,10 +165,13 @@ func EstimateDiscoverHostCount(cfg config.DiscoverConfig) (int, error) {
 			}
 			seen[ip] = struct{}{}
 			n++
-			return true
+			return n <= limit
 		})
 		if err != nil {
 			return 0, err
+		}
+		if n > limit {
+			return n, nil
 		}
 	}
 	return n, nil

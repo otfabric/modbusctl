@@ -32,6 +32,8 @@
 
 **Capture files:** a modbusctl 2.x capture file (`capture_legacy_format`), and a `--target`/`--function` selection that matches several or no targets and functions of a capture (`capture_selection_ambiguous`, `capture_selection_empty`), and a capture holding a sample of a vendor or unknown function code, outside the Modbus read functions modbusctl supports (`capture_unsupported_function`), exit `3`. A capture file that cannot be read, or is corrupt or truncated where a command needs it complete (`capture_load_failed`), exits `3`; `server static` and `server replay` serve a truncated capture as far as it goes. Failing to write a capture (`capture_write_failed`) exits `10`.
 
+**Files named on the command line:** an output that names an input file of the same command (`--output` naming the `--input` capture or the `--profile` of `capture decode`, `extract`, `strings` and `frequencies`, or the `--blocks-file` of `client record`, by any path or link) exits `3` (`invalid_flag_combination`) before anything is truncated. An output path that is a symbolic link is refused (`output_file_create_failed`, exit `10`): modbusctl does not write through links. A blocks file or device profile larger than 16 MiB exits `3`. Files modbusctl creates (captures, exports, discovery results) are owner-only (`0600`).
+
 **Interruption with a result:** an interrupted `fingerprint` writes its result and exits `7`, and `client poll` ends normally (see below). `server static` and `server replay` serve until they are stopped: Ctrl-C ends them normally with `0`.
 
 **Format variable:** `MODBUSCTL_FORMAT` is the name to use; `MODBUSCTL_OUTPUT_FORMAT` stays accepted. When both are set, `MODBUSCTL_FORMAT` wins.

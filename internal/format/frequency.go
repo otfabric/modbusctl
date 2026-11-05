@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/otfabric/modbusctl/internal/conv"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
@@ -77,10 +78,13 @@ func processFrequency(records []types.CaptureRecord) []decodeAttempt {
 					continue
 				}
 
-				addr := rec.StartAddress + uint16(i/2)
+				addr := int(rec.StartAddress) + i/2
+				if addr+d.Size/2-1 > math.MaxUint16 {
+					break // past the last register address
+				}
 				matches = append(matches, decodeAttempt{
-					Addr:       addr,
-					Regs:       uint16(d.Size / 2),
+					Addr:       conv.Uint16(addr),
+					Regs:       conv.Uint16(d.Size / 2),
 					Format:     d.Name,
 					Value:      val,
 					Confidence: conf,

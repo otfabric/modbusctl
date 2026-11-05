@@ -10,6 +10,7 @@ import (
 
 	"github.com/otfabric/go-modbus/sunspec"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/conv"
 	"github.com/otfabric/modbusctl/internal/errs"
 )
 
@@ -185,7 +186,7 @@ func (s *safeStrategy) Next() (ScanTask, bool) {
 		return ScanTask{}, false
 	}
 	if s.candidates == nil || s.candidateIndex >= len(s.candidates) {
-		s.candidates = candidateCountsSafe(uint16(s.current), s.end)
+		s.candidates = candidateCountsSafe(conv.Addr16(s.current), s.end)
 		s.candidateIndex = 0
 		if len(s.candidates) == 0 {
 			s.done = true
@@ -196,7 +197,7 @@ func (s *safeStrategy) Next() (ScanTask, bool) {
 	}
 	count := s.candidates[s.candidateIndex]
 	s.candidateIndex++
-	return ScanTask{Start: uint16(s.current), Count: count}, true
+	return ScanTask{Start: conv.Addr16(s.current), Count: count}, true
 }
 
 func (s *safeStrategy) OnResult(task ScanTask, result ScanResult) {
@@ -280,7 +281,7 @@ func (s *smartStrategy) Init(cfg scanSettings) {
 	end := uint32(cfg.EndAddress)
 	for start := uint32(cfg.StartAddress); start <= end; {
 		count := min(end-start+1, MaxBlockSize)
-		heap.Push(&s.queue, Interval{Start: uint16(start), Count: uint16(count)})
+		heap.Push(&s.queue, Interval{Start: conv.Addr16(start), Count: conv.Addr16(count)})
 		start += count
 	}
 	scanDebugf(&s.cfg, "DEBUG [smart] init: range [%d,%d] initial intervals=%d\n", cfg.StartAddress, cfg.EndAddress, s.queue.Len())
@@ -408,8 +409,7 @@ func (s *deepStrategy) hasFailureAdjacent(addr uint16, leftBound bool) bool {
 }
 
 func (s *deepStrategy) buildRefinementQueue() {
-	globalStart := s.cfg.StartAddress
-	globalEnd := s.cfg.EndAddress
+	globalStart, globalEnd := s.cfg.StartAddress, s.cfg.EndAddress
 	for _, iv := range s.readableIntervals {
 		if len(s.refinementQueue) >= deepRefinementCap {
 			break
@@ -418,33 +418,28 @@ func (s *deepStrategy) buildRefinementQueue() {
 		intervalEnd := iv.Start + iv.Count - 1
 		// Left boundary: refine only if there is evidence (failure adjacent to start)
 		if intervalStart > globalStart && s.hasFailureAdjacent(intervalStart, true) {
-			leftStart := max(int32(intervalStart)-deepRefinementWindow, int32(globalStart))
-			leftEnd := min(int32(intervalStart)+deepRefinementWindow, int32(globalEnd))
-			for start := uint16(leftStart); start <= uint16(leftEnd) && len(s.refinementQueue) < deepRefinementCap; start++ {
-				for _, count := range deepRefinementCounts {
-					if int32(start)+int32(count)-1 <= int32(globalEnd) {
-						key := intervalKey(start, count)
-						if !s.refinementSeen[key] {
-							s.refinementSeen[key] = true
-							s.refinementQueue = append(s.refinementQueue, ScanTask{Start: start, Count: count})
-						}
-					}
-				}
-			}
+			s.queueRefinements(int(intervalStart)-deepRefinementWindow, int(intervalStart)+deepRefinementWindow)
 		}
 		// Right boundary: refine only if there is evidence (failure adjacent to end)
 		if intervalEnd < globalEnd && s.hasFailureAdjacent(intervalEnd, false) {
-			rightStart := max(int32(intervalEnd)-deepRefinementWindow, int32(globalStart))
-			rightEnd := min(int32(intervalEnd)+deepRefinementWindow, int32(globalEnd))
-			for start := uint16(rightStart); start <= uint16(rightEnd) && len(s.refinementQueue) < deepRefinementCap; start++ {
-				for _, count := range deepRefinementCounts {
-					if int32(start)+int32(count)-1 <= int32(globalEnd) {
-						key := intervalKey(start, count)
-						if !s.refinementSeen[key] {
-							s.refinementSeen[key] = true
-							s.refinementQueue = append(s.refinementQueue, ScanTask{Start: start, Count: count})
-						}
-					}
+			s.queueRefinements(int(intervalEnd)-deepRefinementWindow, int(intervalEnd)+deepRefinementWindow)
+		}
+	}
+}
+
+// queueRefinements queues the refinement reads starting at from..to, clipped to the
+// configured range. The loop counts in 32 bits: a 16-bit counter at 65535 wraps to 0
+// and would queue reads far outside the range.
+func (s *deepStrategy) queueRefinements(from, to int) {
+	globalEnd := int(s.cfg.EndAddress)
+	for start := max(from, int(s.cfg.StartAddress)); start <= min(to, globalEnd) && len(s.refinementQueue) < deepRefinementCap; start++ {
+		for _, count := range deepRefinementCounts {
+			if start+int(count)-1 <= globalEnd && len(s.refinementQueue) < deepRefinementCap {
+				task := ScanTask{Start: conv.Uint16(start), Count: count}
+				key := intervalKey(task.Start, count)
+				if !s.refinementSeen[key] {
+					s.refinementSeen[key] = true
+					s.refinementQueue = append(s.refinementQueue, task)
 				}
 			}
 		}
@@ -782,7 +777,7 @@ func (s *linearStrategy) Next() (ScanTask, bool) {
 			s.hasGapProbe = false
 			s.lastTaskWasGapProbe = true
 			scanDebugf(&s.cfg, "DEBUG [linear] gap probe: addr=%d (between block and next 125)\n", s.gapProbeAddr)
-			return ScanTask{Start: uint16(s.gapProbeAddr), Count: 1}, true
+			return ScanTask{Start: conv.Addr16(s.gapProbeAddr), Count: 1}, true
 		}
 		if s.probeStart > s.end {
 			s.done = true
@@ -791,7 +786,7 @@ func (s *linearStrategy) Next() (ScanTask, bool) {
 		}
 		count := minU32(125, s.end-s.probeStart+1)
 		scanDebugf(&s.cfg, "DEBUG [linear] phase=Probe probeStart=%d count=%d\n", s.probeStart, count)
-		return ScanTask{Start: uint16(s.probeStart), Count: uint16(count)}, true
+		return ScanTask{Start: conv.Addr16(s.probeStart), Count: conv.Addr16(count)}, true
 	case linearBackward:
 		if s.backwardLow > s.backwardHigh {
 			s.blockStart = s.originalBlockStart - s.backwardBest
@@ -807,7 +802,7 @@ func (s *linearStrategy) Next() (ScanTask, bool) {
 			return s.Next()
 		}
 		scanDebugf(&s.cfg, "DEBUG [linear] phase=Backward mid=%d [%d,%d] (low=%d high=%d best=%d)\n", mid, chunkStart, chunkStart+mid-1, s.backwardLow, s.backwardHigh, s.backwardBest)
-		return ScanTask{Start: uint16(chunkStart), Count: uint16(mid)}, true
+		return ScanTask{Start: conv.Addr16(chunkStart), Count: conv.Addr16(mid)}, true
 	case linearForward:
 		if s.blockEnd > s.end {
 			s.probeStart = s.blockEnd
@@ -818,7 +813,7 @@ func (s *linearStrategy) Next() (ScanTask, bool) {
 		}
 		count := minU32(125, s.end-s.blockEnd+1)
 		scanDebugf(&s.cfg, "DEBUG [linear] phase=Forward blockEnd=%d count=%d\n", s.blockEnd, count)
-		return ScanTask{Start: uint16(s.blockEnd), Count: uint16(count)}, true
+		return ScanTask{Start: conv.Addr16(s.blockEnd), Count: conv.Addr16(count)}, true
 	case linearTail:
 		if s.tailLow > s.tailHigh {
 			if s.tailBest > 0 {
@@ -854,7 +849,7 @@ func (s *linearStrategy) Next() (ScanTask, bool) {
 			return s.Next()
 		}
 		scanDebugf(&s.cfg, "DEBUG [linear] phase=Tail blockEnd=%d mid=%d (low=%d high=%d best=%d)\n", s.blockEnd, mid, s.tailLow, s.tailHigh, s.tailBest)
-		return ScanTask{Start: uint16(s.blockEnd), Count: uint16(mid)}, true
+		return ScanTask{Start: conv.Addr16(s.blockEnd), Count: conv.Addr16(mid)}, true
 	}
 	return ScanTask{}, false
 }
@@ -1004,7 +999,7 @@ func (s *boundaryStrategy) Init(cfg scanSettings) {
 
 // boundaryTask builds the read of [from, to).
 func boundaryTask(from, to uint32) ScanTask {
-	return ScanTask{Start: uint16(from), Count: uint16(to - from)}
+	return ScanTask{Start: conv.Addr16(from), Count: conv.Addr16(to - from)}
 }
 
 // openLeftWindow starts a binary search for the left edge in the window below blockStart.

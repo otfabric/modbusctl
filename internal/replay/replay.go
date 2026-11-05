@@ -14,11 +14,21 @@ package replay
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 
 	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/modbusctl/internal/conv"
+)
+
+// Quantity limits of one FC01–04 read (Modbus application protocol 6.1–6.4).
+const (
+	maxReadBits      = 2000
+	maxReadRegisters = 125
 )
 
 // ErrUnknownTarget is returned by [Build] for a target the capture does not define.
@@ -53,6 +63,11 @@ type respPoint struct {
 	resp []byte
 }
 
+type confPoint struct {
+	at capture.Ticks
+	v  uint8
+}
+
 type objPoint struct {
 	at    capture.Ticks
 	value []byte
@@ -72,7 +87,7 @@ type Device struct {
 	addrs  [5]map[uint16][]point // FC01–04, by address
 	reqs   map[string][]respPoint
 	objs   map[uint8][]objPoint
-	conf   []point // FC43 conformity level
+	conf   []confPoint // FC43 conformity level
 	first  capture.Ticks
 	end    capture.Ticks
 	n      int
@@ -163,7 +178,9 @@ func (d *Device) addIdentity(s *capture.Sample) {
 	if len(r) < 7 || r[0] != 0x2B || r[1] != 0x0E {
 		return
 	}
-	d.conf = appendPoint(d.conf, point{s.At, uint16(r[3])})
+	if n := len(d.conf); n == 0 || d.conf[n-1].v != r[3] {
+		d.conf = append(d.conf, confPoint{s.At, r[3]})
+	}
 	count, p := int(r[6]), 7
 	for i := 0; i < count && p+2 <= len(r); i++ {
 		id, n := r[p], int(r[p+1])
@@ -274,22 +291,19 @@ func (d *Device) Response(t capture.Ticks, req []byte) ([]byte, bool) {
 // in object id order, and the latest conformity level. ok is false when none
 // were recorded (by t).
 func (d *Device) Identification(t capture.Ticks) (conformity uint8, objects []Object, ok bool) {
-	ids := make([]int, 0, len(d.objs))
-	for id := range d.objs {
-		ids = append(ids, int(id))
-	}
-	sort.Ints(ids)
-	for _, id := range ids {
-		pts := d.objs[uint8(id)]
+	for _, id := range slices.Sorted(maps.Keys(d.objs)) {
+		pts := d.objs[id]
 		if i := d.index(len(pts), func(i int) capture.Ticks { return pts[i].at }, t); i >= 0 {
-			objects = append(objects, Object{ID: uint8(id), Value: pts[i].value})
+			objects = append(objects, Object{ID: id, Value: pts[i].value})
 		}
 	}
 	if len(objects) == 0 {
 		return 0, nil, false
 	}
-	c, _ := d.value(d.conf, t)
-	return uint8(c), objects, true
+	if i := d.index(len(d.conf), func(i int) capture.Ticks { return d.conf[i].at }, t); i >= 0 {
+		conformity = d.conf[i].v
+	}
+	return conformity, objects, true
 }
 
 // Read answers a request PDU at time t with a response PDU built from the
@@ -310,8 +324,12 @@ func (d *Device) Read(t capture.Ticks, req []byte) (resp []byte, ok bool) {
 	if len(req) != 5 {
 		return nil, false
 	}
-	start := uint16(req[1])<<8 | uint16(req[2])
-	qty := uint16(req[3])<<8 | uint16(req[4])
+	start := binary.BigEndian.Uint16(req[1:])
+	qty := binary.BigEndian.Uint16(req[3:])
+	// A response must fit its byte count: at most 2000 bits or 125 registers.
+	if (fc <= 2 && qty > maxReadBits) || (fc > 2 && qty > maxReadRegisters) {
+		return nil, false
+	}
 	vals, ok := d.Values(t, fc, start, qty)
 	if !ok {
 		return nil, false
@@ -323,11 +341,11 @@ func (d *Device) Read(t capture.Ticks, req []byte) (resp []byte, ok bool) {
 				data[i/8] |= 1 << (i % 8)
 			}
 		}
-		return append([]byte{fc, byte(len(data))}, data...), true
+		return append([]byte{fc, conv.Uint8(len(data))}, data...), true
 	}
-	resp = []byte{fc, byte(2 * qty)}
+	resp = []byte{fc, conv.Uint8(2 * len(vals))}
 	for _, v := range vals {
-		resp = append(resp, byte(v>>8), byte(v))
+		resp = binary.BigEndian.AppendUint16(resp, v)
 	}
 	return resp, true
 }

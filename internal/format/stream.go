@@ -63,7 +63,7 @@ func (s *StreamWriter) Write(v any) error {
 
 func (s *StreamWriter) writeTable(tm TableMarshaler) error {
 	headers := tm.TableHeaders()
-	rows := tm.TableRows()
+	rows := safeRows(tm.TableRows())
 	if len(headers) == 0 {
 		return fmt.Errorf("table has no headers")
 	}

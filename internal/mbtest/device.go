@@ -8,9 +8,11 @@ package mbtest
 
 import (
 	"encoding/binary"
-	"sort"
+	"slices"
 	"sync"
 	"time"
+
+	"github.com/otfabric/modbusctl/internal/conv"
 )
 
 // Modbus exception codes.
@@ -264,7 +266,7 @@ func (d *Device) readBits(pdu []byte, bits map[uint16]bool) []byte {
 		return exception(pdu[0], ExIllegalDataValue)
 	}
 	out := make([]byte, 2+(int(qty)+7)/8)
-	out[0], out[1] = pdu[0], byte(len(out)-2)
+	out[0], out[1] = pdu[0], conv.Uint8(len(out)-2)
 	for i := 0; i < int(qty); i++ {
 		v, defined := bits[addr+uint16(i)]
 		if !defined || int(addr)+i > 0xFFFF {
@@ -360,7 +362,7 @@ func (d *Device) reportServerID() []byte {
 	}
 	body := append(append([]byte(nil), d.ServerID.ID...), run)
 	body = append(body, d.ServerID.Additional...)
-	return append([]byte{0x11, byte(len(body))}, body...)
+	return append([]byte{0x11, conv.Uint8(len(body))}, body...)
 }
 
 // deviceIdentification answers FC43 / MEI 0x0E. Stream requests (categories 1-3) return
@@ -387,7 +389,7 @@ func (d *Device) deviceIdentification(pdu []byte) []byte {
 		return exception(pdu[0], ExIllegalDataValue)
 	}
 
-	ids := make([]int, 0, len(d.Identification))
+	ids := make([]uint8, 0, len(d.Identification))
 	conformity := uint8(0x81)
 	for id := range d.Identification {
 		switch {
@@ -397,15 +399,15 @@ func (d *Device) deviceIdentification(pdu []byte) []byte {
 			conformity = 0x82
 		}
 		if (category == 0x04 && id == objectID) || (category != 0x04 && id <= maxID) {
-			ids = append(ids, int(id))
+			ids = append(ids, id)
 		}
 	}
-	sort.Ints(ids)
+	slices.Sort(ids)
 
-	out := []byte{pdu[0], 0x0E, category, conformity, 0x00, 0x00, byte(len(ids))}
+	out := []byte{pdu[0], 0x0E, category, conformity, 0x00, 0x00, conv.Uint8(len(ids))}
 	for _, id := range ids {
-		v := d.Identification[uint8(id)]
-		out = append(out, byte(id), byte(len(v)))
+		v := d.Identification[id]
+		out = append(out, id, conv.Uint8(len(v)))
 		out = append(out, v...)
 	}
 	return out

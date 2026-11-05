@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/fsutil"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
@@ -22,14 +22,13 @@ func ExportDeviceProfileDecode(w io.Writer, path string, deviceProfilePath strin
 	if len(records) > 0 && header.Function != 3 && header.Function != 4 {
 		return fmt.Errorf("decode needs register samples (FC03 or FC04); the selection holds FC%02d", header.Function)
 	}
-	profileFile, err := os.Open(deviceProfilePath)
+	content, err := fsutil.ReadInput(deviceProfilePath, fsutil.MaxJSONInput)
 	if err != nil {
 		return fmt.Errorf("failed to open device profile: %w", err)
 	}
-	defer func() { _ = profileFile.Close() }()
 
 	var profile types.DeviceProfile
-	if err := json.NewDecoder(profileFile).Decode(&profile); err != nil {
+	if err := json.Unmarshal(content, &profile); err != nil {
 		return fmt.Errorf("failed to decode device profile: %w", err)
 	}
 
@@ -49,9 +48,11 @@ func ExportDeviceProfileDecode(w io.Writer, path string, deviceProfilePath strin
 		if reg.ControlledPropertyId == "not.used" {
 			continue
 		}
+		// The profile is a file from elsewhere: its names go to a terminal.
+		name, regFormat := types.TerminalSafe(reg.ControlledPropertyId), types.TerminalSafe(reg.Format)
 		var raw []byte
-		found := true
-		for i := uint16(0); i < reg.Size; i++ {
+		found := uint32(reg.Start)+uint32(reg.Size) <= 1<<16 // a register past 65535 is never in the capture
+		for i := uint16(0); found && i < reg.Size; i++ {
 			part, ok := mem[reg.Start+i]
 			if !ok {
 				found = false
@@ -60,25 +61,25 @@ func ExportDeviceProfileDecode(w io.Writer, path string, deviceProfilePath strin
 			raw = append(raw, part...)
 		}
 		if !found {
-			_, _ = fmt.Fprintf(w, "⚠️  Missing data for %s at %d (size %d)\n", reg.ControlledPropertyId, reg.Start, reg.Size)
+			_, _ = fmt.Fprintf(w, "⚠️  Missing data for %s at %d (size %d)\n", name, reg.Start, reg.Size)
 			continue
 		}
 		decoder, ok := types.RegisterDecoders[reg.Format]
 		if !ok {
-			_, _ = fmt.Fprintf(w, "❌ Unsupported format for %s: %s\n", reg.ControlledPropertyId, reg.Format)
+			_, _ = fmt.Fprintf(w, "❌ Unsupported format for %s: %s\n", name, regFormat)
 			continue
 		}
 		if len(raw) < decoder.Size {
-			_, _ = fmt.Fprintf(w, "❌ Not enough bytes for %s: have %d, need %d\n", reg.ControlledPropertyId, len(raw), decoder.Size)
+			_, _ = fmt.Fprintf(w, "❌ Not enough bytes for %s: have %d, need %d\n", name, len(raw), decoder.Size)
 			continue
 		}
 		value, err := decoder.Decode(raw)
 		if err != nil {
-			_, _ = fmt.Fprintf(w, "❌ Failed decoding %s: %v\n", reg.ControlledPropertyId, err)
+			_, _ = fmt.Fprintf(w, "❌ Failed decoding %s: %v\n", name, err)
 			continue
 		}
 		scaled := value * reg.ValueScaleFactor
-		_, _ = fmt.Fprintf(w, "%s = %f\n", reg.ControlledPropertyId, scaled)
+		_, _ = fmt.Fprintf(w, "%s = %f\n", name, scaled)
 	}
 
 	return nil

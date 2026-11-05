@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"protocolData\":{\"registers\":[{\"controlledPropertyId\":\"top\",\"valueScaleFactor\":1,\"start\":65535,\"size\":2,\"format\":\">I\"}]}}")

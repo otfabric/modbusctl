@@ -4,6 +4,7 @@ package modbus
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -272,7 +273,7 @@ func CollectWrite(ctx context.Context, cfg config.WriteConfig) (*types.WriteResu
 	if len(plan.Registers) > 0 {
 		raw := make([]byte, 0, 2*len(plan.Registers))
 		for _, r := range plan.Registers {
-			raw = append(raw, byte(r>>8), byte(r))
+			raw = binary.BigEndian.AppendUint16(raw, r)
 		}
 		res.RawDataHex = fmt.Sprintf("% X", raw)
 	}

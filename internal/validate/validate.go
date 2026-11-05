@@ -9,13 +9,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/otfabric/go-modbus/codec"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
+	"github.com/otfabric/modbusctl/internal/fsutil"
 	"github.com/otfabric/modbusctl/internal/modbus"
 	"github.com/otfabric/modbusctl/internal/plan"
 	"github.com/otfabric/modbusctl/internal/types"
@@ -428,13 +428,13 @@ func CheckDiscoverConfig(cfg config.DiscoverConfig) error {
 	}
 
 	if !cfg.ForceLargeScan {
-		n, err := modbus.EstimateDiscoverHostCount(cfg)
+		const maxDiscoverHosts = 65536
+		n, err := modbus.DiscoverHostCountAtMost(cfg, maxDiscoverHosts)
 		if err != nil {
 			return fmt.Errorf("estimate discovery scope: %w", err)
 		}
-		const maxDiscoverHosts = 65536
 		if n > maxDiscoverHosts {
-			return fmt.Errorf("discovery would probe %d unique hosts (exceeds cap %d); use --force-large-scan to override", n, maxDiscoverHosts)
+			return fmt.Errorf("discovery would probe more than %d unique hosts; use --force-large-scan to override", maxDiscoverHosts)
 		}
 	}
 
@@ -494,10 +494,8 @@ func CheckReplayServerConfig(cfg config.ReplayServerConfig) error {
 	default:
 		return fmt.Errorf("invalid --before-first %q: use hold or absent", cfg.BeforeFirst)
 	}
-	if s := strings.TrimSpace(cfg.Speed); s != "" {
-		if v, err := strconv.ParseFloat(s, 64); err != nil || v <= 0 {
-			return fmt.Errorf("invalid --speed %q: use a positive factor such as 1, 0.1 or 60", cfg.Speed)
-		}
+	if _, err := modbus.ParseSpeed(cfg.Speed); err != nil {
+		return err
 	}
 	if err := checkOffset("from", cfg.From); err != nil {
 		return err
@@ -657,7 +655,7 @@ func validateDeviceProfileFile(path string) error {
 	if info.IsDir() {
 		return fmt.Errorf("device profile file cannot be a directory")
 	}
-	content, err := os.ReadFile(path)
+	content, err := fsutil.ReadInput(path, fsutil.MaxJSONInput)
 	if err != nil {
 		return fmt.Errorf("failed to read device profile file: %w", err)
 	}

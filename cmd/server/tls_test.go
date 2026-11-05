@@ -57,10 +57,12 @@ func recordTLS(t *testing.T, p *mbtest.PKI) (string, uint16) {
 }
 
 // readTLS reads holding registers 100-102 from the server with the modbusctl TLS client.
-func readTLS(s *server, tlsCfg config.TLSConfig) (string, error) {
+// The capture of the read goes to the test's temporary directory, not the package directory.
+func readTLS(t *testing.T, s *server, tlsCfg config.TLSConfig) (string, error) {
+	t.Helper()
 	res, err := modbus.CollectRead(context.Background(), config.ReadConfig{
 		DeviceConfig: config.DeviceConfig{URL: "tcp+tls://127.0.0.1:" + s.port, Unit: 1, TLSConfig: tlsCfg},
-		Timeout:      2000, Function: 3, StartAddress: 100, RegisterCount: 3,
+		Timeout:      2000, Function: 3, StartAddress: 100, RegisterCount: 3, OutputFile: filepath.Join(t.TempDir(), "read.mbcap"),
 	}, nil)
 	if err != nil {
 		return "", err
@@ -96,7 +98,7 @@ func TestTLS_staticAndReplay(t *testing.T) {
 	last := hexWords(iterations, 0xBEEF, 0x1234)
 
 	s := startServer(t, append([]string{"static", "--input", in}, serverTLSFlags(pki)...)...)
-	got, err := readTLS(s, clientTLS(pki))
+	got, err := readTLS(t, s, clientTLS(pki))
 	if err != nil || got != last {
 		t.Fatalf("static over tcp+tls: %q, %v; want %q", got, err, last)
 	}
@@ -108,7 +110,7 @@ func TestTLS_staticAndReplay(t *testing.T) {
 	s = startServer(t, append([]string{"replay", "--input", in, "--loops", "1", "--speed", "4"}, serverTLSFlags(pki)...)...)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		got, err := readTLS(s, clientTLS(pki))
+		got, err := readTLS(t, s, clientTLS(pki))
 		if err != nil {
 			t.Fatalf("replay over tcp+tls: %v", err)
 		}
@@ -132,7 +134,7 @@ func TestTLS_untrustedClientRejected(t *testing.T) {
 	in, _ := recordTLS(t, pki)
 	for _, sub := range []string{"static", "replay"} {
 		s := startServer(t, append([]string{sub, "--input", in}, serverTLSFlags(pki)...)...)
-		if _, err := readTLS(s, config.TLSConfig{TLSCert: other.ClientCertFile, TLSKey: other.ClientKeyFile, TLSCA: pki.CAFile}); err == nil {
+		if _, err := readTLS(t, s, config.TLSConfig{TLSCert: other.ClientCertFile, TLSKey: other.ClientKeyFile, TLSCA: pki.CAFile}); err == nil {
 			t.Fatalf("server %s answered a client certificate of another CA", sub)
 		}
 		if _, err := readHolding(t, s.dial(t), 1, 100, 1); err == nil {

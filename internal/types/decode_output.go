@@ -93,7 +93,7 @@ func FormatDecodedValue(v any) string {
 	case net.IP:
 		return t.String()
 	case string:
-		return t
+		return TerminalSafe(t)
 	default:
 		return fmt.Sprintf("%v", t)
 	}

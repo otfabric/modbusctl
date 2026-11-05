@@ -16,6 +16,8 @@ These conventions are a **stable contract** for scripting. Prefer **typed struct
 | Poll sample (stream) | `PollSample`, **one compact JSON object per line** (JSON Lines), written as each poll completes: `poll` (1-based), `timestamp` (RFC 3339, UTC, milliseconds), `unit_id`, `function`, `start_address`, `count`, `address_step` (address distance between consecutive `values`: the codec register width, or 1), `rtt_ms`, `raw_data_hex`, `values` (booleans for functions 1/2, numbers for 3/4, codec-typed values with `codec`), and `error` (`kind`, `code`, `message`) on a failed poll, in which case `values` is empty. The end-of-run summary goes to stderr as text |
 | Record final summary | `RecordSummaryResult`: `target`, `blocks_recorded`, `iterations`, `capture_output_path` (the MBCAP capture file written) (per-iteration progress stays on stderr) |
 
+**Strings from devices and files** (FC43 identification objects, codec-decoded strings, device profile names): JSON carries the exact value (encoding/json escapes control characters). Text and table output, and the `error:` line on stderr, write control characters, Unicode bidirectional controls and bytes that are not UTF-8 as Go escapes (`\x1b`, `\n`, `\u202e`, `\xff`), so a device cannot drive the terminal or forge output lines.
+
 ## Error object
 
 Used for a fatal error (`{"error": {…}}`) and for a row that failed.

@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,6 +21,7 @@ import (
 	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
+	"github.com/otfabric/modbusctl/internal/fsutil"
 	"github.com/otfabric/modbusctl/internal/plan"
 	"github.com/otfabric/modbusctl/internal/types"
 )
@@ -702,7 +703,7 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 	}
 	// Progress classification: always-on = iteration start, per-block success/failure, read-retry chatter
 	// when cfg.Debug inside readRegisters; interval sleep has no line (delay 0 skips sleep).
-	data, err := os.ReadFile(cfg.BlocksFile)
+	data, err := fsutil.ReadInput(cfg.BlocksFile, fsutil.MaxJSONInput)
 	if err != nil {
 		return nil, errs.InvalidInput(errs.CodeInputFileOpenFailed, err.Error(), err)
 	}
@@ -724,6 +725,9 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 			dir = "./"
 		}
 		out = AutoCapturePath(dir, "record")
+	}
+	if fsutil.SameFile(out, cfg.BlocksFile) {
+		return nil, errs.InvalidInput(errs.CodeInvalidFlagCombination, fsutil.ErrSameFile.Error(), fsutil.ErrSameFile)
 	}
 	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, 1)
 	if err != nil {
@@ -851,14 +855,17 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 			if err != nil {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit range %q: %v", part, err), err)
 			}
-			if lo < 1 || hi > 255 {
+			if lo < 1 || lo > math.MaxUint8 || hi > math.MaxUint8 {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("unit IDs must be 1-255 in range %q", part), nil)
 			}
 			if lo > hi {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit range %q: start > end", part), nil)
 			}
-			for i := lo; i <= hi; i++ {
-				seen[uint8(i)] = struct{}{}
+			for id := uint8(lo); ; id++ { // lo and hi are 1-255 (checked above)
+				seen[id] = struct{}{}
+				if uint64(id) == hi {
+					break
+				}
 			}
 		} else {
 			// Single number
@@ -866,7 +873,7 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 			if err != nil {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit ID %q: %v", part, err), err)
 			}
-			if n < 1 || n > 255 {
+			if n < 1 || n > math.MaxUint8 {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("unit ID must be 1-255, got %d", n), nil)
 			}
 			seen[uint8(n)] = struct{}{}

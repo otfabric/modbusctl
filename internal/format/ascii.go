@@ -5,7 +5,9 @@ package format
 import (
 	"fmt"
 	"io"
+	"math"
 
+	"github.com/otfabric/modbusctl/internal/conv"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
@@ -98,8 +100,13 @@ func reorderASCIIBytes(src []byte, order ASCIIOrder) []byte {
 
 func writeASCIICandidate(w io.Writer, rec *types.CaptureRecord, data []byte, order ASCIIOrder, startByte, endByte int, seen map[string]struct{}) {
 	sub := data[startByte : endByte+1]
-	asciiStartReg := rec.StartAddress + uint16(startByte/2)
-	asciiEndReg := rec.StartAddress + uint16(endByte/2)
+	// Register addresses of the string; one past 65535 (a record that would
+	// wrap the address space) is not reported.
+	startReg, endReg := int(rec.StartAddress)+startByte/2, int(rec.StartAddress)+endByte/2
+	if endReg > math.MaxUint16 {
+		return
+	}
+	asciiStartReg, asciiEndReg := conv.Uint16(startReg), conv.Uint16(endReg)
 	key := fmt.Sprintf("%d:%d:%s", asciiStartReg, asciiEndReg, string(sub))
 	if _, ok := seen[key]; ok {
 		return

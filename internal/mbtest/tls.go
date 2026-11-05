@@ -122,11 +122,17 @@ func (p *PKI) template(name string) *x509.Certificate {
 }
 
 func (p *PKI) write(name string, data []byte) string {
-	path := filepath.Join(p.dir, name)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		p.t.Fatalf("mbtest: write %s: %v", path, err)
+	// The PKI writes into its own directory only: through an os.Root, a name
+	// cannot leave it.
+	root, err := os.OpenRoot(p.dir)
+	if err != nil {
+		p.t.Fatalf("mbtest: open %s: %v", p.dir, err)
 	}
-	return path
+	defer func() { _ = root.Close() }()
+	if err := root.WriteFile(name, data, 0o600); err != nil {
+		p.t.Fatalf("mbtest: write %s: %v", name, err)
+	}
+	return filepath.Join(p.dir, name)
 }
 
 func newKey(t testing.TB) *ecdsa.PrivateKey {

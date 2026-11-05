@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/otfabric/go-modbus-capture/capture"
 	"github.com/otfabric/go-modbus-capture/mbcap"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/fsutil"
 )
 
 // Producer names modbusctl in the header of the captures it writes. It is set
@@ -75,7 +77,7 @@ func Create(path string, opts RecorderOptions) (*Recorder, error) {
 		Producer:   Producer,
 		Tags:       opts.Tags,
 	}
-	f, err := os.Create(path)
+	f, err := fsutil.CreateOutput(path)
 	if err != nil {
 		return nil, err
 	}
@@ -231,10 +233,28 @@ func TargetFor(id uint32, modbusURL string, unit uint8, serial config.SerialConf
 	if config.IsSerialURL(modbusURL) {
 		parity, _ := config.NormalizeParity(serial.Parity)
 		p, _ := capture.ParseParity(parity)
-		t.Serial = capture.Serial{Device: host, Baud: uint32(serial.Baud), Parity: p,
-			DataBits: uint8(serial.DataBits), StopBits: uint8(serial.StopBits)}
+		t.Serial = capture.Serial{Device: host, Baud: fieldUint32(serial.Baud), Parity: p,
+			DataBits: fieldUint8(serial.DataBits), StopBits: fieldUint8(serial.StopBits)}
 	} else {
 		t.Host, t.Port = host, port
 	}
 	return t
+}
+
+// fieldUint32 returns v for an advisory capture field, 0 (unknown) when it
+// does not fit.
+func fieldUint32(v uint) uint32 {
+	if v > math.MaxUint32 {
+		return 0
+	}
+	return uint32(v)
+}
+
+// fieldUint8 returns v for an advisory capture field, 0 (unknown) when it
+// does not fit.
+func fieldUint8(v uint) uint8 {
+	if v > math.MaxUint8 {
+		return 0
+	}
+	return uint8(v)
 }

@@ -5,6 +5,7 @@
 package capfiletest
 
 import (
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/otfabric/go-modbus-capture/capture"
 	"github.com/otfabric/go-modbus-capture/mbcap"
 	"github.com/otfabric/modbusctl/internal/capfile"
+	"github.com/otfabric/modbusctl/internal/conv"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
@@ -41,8 +43,8 @@ func Capture(h types.CaptureHeader, recs ...types.CaptureRecord) *capture.Captur
 	var end capture.Ticks
 	for _, r := range recs {
 		at := capture.Ticks(r.Iteration) * 1_000_000
-		if r.ResponseTimestamp > 0 && h.StartTime > 0 && r.ResponseTimestamp >= h.StartTime {
-			at = capture.Ticks((r.ResponseTimestamp - h.StartTime) / 1000)
+		if d := (r.ResponseTimestamp - h.StartTime) / 1000; r.ResponseTimestamp > 0 && h.StartTime > 0 && d >= 0 {
+			at = capture.Ticks(d)
 		}
 		// The request is sized from the data, as a device would answer it: one word per
 		// register (an odd last byte padded), one bit per coil.
@@ -53,14 +55,14 @@ func Capture(h types.CaptureHeader, recs ...types.CaptureRecord) *capture.Captur
 			if len(data)%2 == 1 {
 				data = append(append([]byte(nil), data...), 0)
 			}
-			qty = uint16(len(data) / 2)
+			qty = conv.Uint16(len(data) / 2)
 		case 1, 2:
 			if (int(qty)+7)/8 != len(data) {
-				qty = uint16(8 * len(data))
+				qty = conv.Uint16(8 * len(data))
 			}
 		}
-		req := []byte{h.Function, byte(r.StartAddress >> 8), byte(r.StartAddress), byte(qty >> 8), byte(qty)}
-		resp := append([]byte{h.Function, byte(len(data))}, data...)
+		req := binary.BigEndian.AppendUint16(binary.BigEndian.AppendUint16([]byte{h.Function}, r.StartAddress), qty)
+		resp := append([]byte{h.Function, conv.Uint8(len(data))}, data...)
 		c.Samples = append(c.Samples, capture.Sample{Stream: 1, At: at, Request: req, Response: resp})
 		end = max(end, at)
 	}
@@ -71,7 +73,7 @@ func Capture(h types.CaptureHeader, recs ...types.CaptureRecord) *capture.Captur
 // Write writes c as an MBCAP file at path.
 func Write(t testing.TB, path string, c *capture.Capture) string {
 	t.Helper()
-	f, err := os.Create(path)
+	f, err := os.Create(filepath.Clean(path))
 	if err != nil {
 		t.Fatal(err)
 	}

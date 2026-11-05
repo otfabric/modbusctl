@@ -3,6 +3,7 @@
 package replay
 
 import (
+	"math"
 	"time"
 
 	"github.com/otfabric/go-modbus-capture/capture"
@@ -35,11 +36,18 @@ func (c Clock) At(elapsed time.Duration) capture.Ticks {
 	}
 	span := float64(c.To - c.From)
 	pos := float64(elapsed) * c.Speed / float64(c.TickNS) // ticks played
-	loop := pos / span
-	if c.Loops > 0 && loop >= float64(c.Loops) {
+	if math.IsNaN(pos) {
+		return c.From
+	}
+	if c.Loops > 0 && pos/span >= float64(c.Loops) {
 		return c.To
 	}
-	into := pos - float64(int64(loop))*span
+	// Position in the current loop. math.Mod keeps it in [0, span) for any
+	// finite pos; an infinite one (NaN here) starts the window again.
+	into := math.Mod(pos, span)
+	if !(into >= 0) {
+		into = 0
+	}
 	if into >= span {
 		into = span - 1
 	}

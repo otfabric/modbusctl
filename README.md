@@ -928,7 +928,7 @@ modbusctl server static --input site.mbcap --target 2 --unit 1 --at 10m
 
 #### Replay recorded data (looped)
 
-The served values follow the recording: at its original speed (`--speed 1`), faster (`--speed 60`: a minute per second) or slower (`--speed 0.1`). `--loops 0` (default) repeats forever; `--loops N` plays N times and then keeps the last values. `--from` starts part-way into the capture.
+The served values follow the recording: at its original speed (`--speed 1`), faster (`--speed 60`: a minute per second, up to `31536000`: a year per second) or slower (`--speed 0.1`). `--loops 0` (default) repeats forever; `--loops N` plays N times and then keeps the last values. `--from` starts part-way into the capture.
 
 ```console
 modbusctl server replay --input session.mbcap --port 1502

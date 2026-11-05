@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // check runs the health check with args and returns its exit code and log output.
@@ -240,5 +241,36 @@ func TestMain_process(t *testing.T) {
 		if !strings.Contains(stderr.String(), tc.log) {
 			t.Fatalf("-tcp %s: stderr %q does not contain %q", tc.addr, stderr.String(), tc.log)
 		}
+	}
+}
+
+func TestRun_invalidHTTPURL(t *testing.T) {
+	srv, hits := httpServer(t, http.StatusOK)
+	for _, u := range []string{"file:///etc/passwd", "ftp://example.com/", "localhost:80", "http://", "http://user:pw@" + srv.Listener.Addr().String() + "/", "http://[::1", ""} {
+		code, out := check(t, "-http", srv.URL, "-http", u)
+		if code != 2 || !strings.HasPrefix(out, "Invalid -http:") {
+			t.Errorf("%q: exit %d, output %q; want exit 2", u, code, out)
+		}
+	}
+	// Every URL is checked before any request goes out.
+	if hits.Load() != 0 {
+		t.Errorf("server saw %d requests", hits.Load())
+	}
+}
+
+func TestRun_hangingPeersFailInsteadOfHanging(t *testing.T) {
+	old := checkTimeout
+	checkTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { checkTimeout = old })
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(func() { close(release); srv.Close() })
+	start := time.Now()
+	code, out := check(t, "-http", srv.URL+"/health?x=1")
+	if code != 1 || !strings.HasSuffix(out, srv.URL+"/health?x=1 : Unreachable\n") {
+		t.Fatalf("exit %d, output %q", code, out)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("the check took %v", d)
 	}
 }

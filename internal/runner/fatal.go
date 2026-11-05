@@ -43,7 +43,7 @@ func fatalExitCode(err error) int {
 
 func writeFatalText(w io.Writer, err error, debug bool) {
 	info := errorInfoFromErr(err)
-	_, _ = fmt.Fprintf(w, "error: %s\n", info.Message)
+	_, _ = fmt.Fprintf(w, "error: %s\n", types.TerminalSafeText(info.Message))
 	if debug {
 		writeCauseChain(w, err)
 	}
