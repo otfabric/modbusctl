@@ -129,7 +129,7 @@ func CRC16(data []byte) uint16 {
 	crc := uint16(0xFFFF)
 	for _, b := range data {
 		crc ^= uint16(b)
-		for i := 0; i < 8; i++ {
+		for range 8 {
 			if crc&1 != 0 {
 				crc = crc>>1 ^ 0xA001
 			} else {

@@ -45,7 +45,7 @@ func processASCII(w io.Writer, rec *types.CaptureRecord) {
 func processASCIIForOrder(w io.Writer, rec *types.CaptureRecord, data []byte, order ASCIIOrder, minASCII int, seen map[string]struct{}) {
 	start := -1
 
-	for i := 0; i < len(data); i++ {
+	for i := range data {
 		b := data[i]
 		if isPrintableASCII(b) {
 			if start == -1 {

@@ -3,6 +3,7 @@
 package format
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/otfabric/modbusctl/internal/types"
@@ -22,7 +23,7 @@ func stitchAdjacentRecords(records []types.CaptureRecord) []types.CaptureRecord 
 	for k := range byIter {
 		iters = append(iters, k)
 	}
-	sort.Slice(iters, func(i, j int) bool { return iters[i] < iters[j] })
+	slices.Sort(iters)
 	var out []types.CaptureRecord
 	for _, iter := range iters {
 		grp := byIter[iter]

@@ -208,8 +208,8 @@ func (r *Recorder) Close() error {
 func TargetFor(id uint32, modbusURL string, unit uint8, serial config.SerialConfig, label string) capture.Target {
 	t := capture.Target{ID: id, Label: label, Unit: unit, Tags: map[string]string{"url": modbusURL}}
 	scheme := modbusURL
-	if i := strings.Index(modbusURL, "://"); i >= 0 {
-		scheme = modbusURL[:i]
+	if before, _, ok := strings.Cut(modbusURL, "://"); ok {
+		scheme = before
 	}
 	switch scheme {
 	case "tcp":

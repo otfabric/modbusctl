@@ -102,10 +102,7 @@ func (s *sunspecStrategy) Next() (ScanTask, bool) {
 
 	case sunspecWalkModels:
 		if s.readingBody {
-			count := s.bodyRemaining
-			if count > 125 {
-				count = 125
-			}
+			count := min(s.bodyRemaining, 125)
 			return ScanTask{Start: s.bodyAddr, Count: count}, true
 		}
 		if s.modelCount >= s.maxModels {

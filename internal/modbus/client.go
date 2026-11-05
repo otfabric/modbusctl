@@ -10,7 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -71,10 +71,7 @@ func dialTimeoutForRequest(request time.Duration) time.Duration {
 	if request <= 0 {
 		return defaultDialTimeout
 	}
-	d := request
-	if d > defaultDialTimeout {
-		d = defaultDialTimeout
-	}
+	d := min(request, defaultDialTimeout)
 	const minDial = 200 * time.Millisecond
 	if d < minDial {
 		d = minDial
@@ -263,8 +260,7 @@ func classifyOutcome(err error, _, _ int64) (ScanOutcomeType, uint8) {
 	if err == nil {
 		return ScanOutcomeSuccess, 0
 	}
-	var excErr *modbus.ExceptionError
-	if errors.As(err, &excErr) {
+	if excErr, ok := errors.AsType[*modbus.ExceptionError](err); ok {
 		return ScanOutcomeException, uint8(excErr.ExceptionCode)
 	}
 	if errors.Is(err, modbus.ErrRequestTimedOut) || errors.Is(err, context.DeadlineExceeded) {
@@ -297,8 +293,7 @@ func shouldReconnect(err error) bool {
 	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ENETRESET) {
 		return true
 	}
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
+	if errno, ok := errors.AsType[syscall.Errno](err); ok {
 		switch errno {
 		case syscall.EPIPE, syscall.ECONNRESET, syscall.ENETRESET:
 			return true
@@ -832,7 +827,7 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 	}
 
 	seen := make(map[uint8]struct{})
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, "unit list has an empty segment (remove extra commas)", nil)
@@ -885,7 +880,7 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 	for id := range seen {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	return ids, nil
 }
 

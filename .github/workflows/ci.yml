@@ -19,7 +19,7 @@ jobs:
       coverage-min: "85"
       fuzz-time: 10s
       codecov-name: modbusctl
-      go-versions: '["1.26"]'
+      go-versions: '["1.26", "1.27"]'
       # Test the cmd packages as well (the shared default skips /cmd) and attribute
       # coverage across the whole module, matching `make coverage`.
       test-exclude-regex: "/example(s)?($|/)"

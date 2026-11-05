@@ -2,7 +2,11 @@
 
 package types
 
-import "github.com/otfabric/modbusctl/internal/errs"
+import (
+	"slices"
+
+	"github.com/otfabric/modbusctl/internal/errs"
+)
 
 // PartialResult marks aggregate client payloads that may include embedded per-target failures.
 // Implementations include multi-unit results, [ScanSummaryResult] (per-request counts), and [SunSpecProbeOutput] (probe/SunSpec errors).
@@ -25,10 +29,8 @@ func (r *FingerprintResult) HasPartialFailure() bool {
 	if r == nil {
 		return false
 	}
-	for _, u := range r.Units {
-		if FingerprintUnitPartial(u) {
-			return true
-		}
+	if slices.ContainsFunc(r.Units, FingerprintUnitPartial) {
+		return true
 	}
 	return summaryHasFailure(r.Summary)
 }

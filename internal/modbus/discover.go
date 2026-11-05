@@ -61,10 +61,8 @@ func CollectDiscover(ctx context.Context, cfg config.DiscoverConfig, stderr io.W
 	)
 
 	par := int(cfg.Parallel)
-	for w := 0; w < par; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range par {
+		wg.Go(func() {
 			for ip := range jobs {
 				select {
 				case <-ctx.Done():
@@ -100,7 +98,7 @@ func CollectDiscover(ctx context.Context, cfg config.DiscoverConfig, stderr io.W
 					mutex.Unlock()
 				}()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

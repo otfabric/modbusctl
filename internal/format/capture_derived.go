@@ -31,10 +31,7 @@ func ExportHeuristicFrequency(w io.Writer, path string, sel config.CaptureSelect
 	}
 
 	matches := processFrequency(stitchAdjacentRecords(records))
-	n := len(matches)
-	if n > 20 {
-		n = 20
-	}
+	n := min(len(matches), 20)
 	for _, m := range matches[:n] {
 		_, _ = fmt.Fprintf(w, "[%d] %d regs (%s) = %.4f → candidate frequency (confidence: %.2f)\n",
 			m.Addr, m.Regs, m.Format, m.Value, m.Confidence)

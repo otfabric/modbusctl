@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -45,12 +46,7 @@ func splitModbusURL(modbusURL string) (scheme, address string, ok bool) {
 }
 
 func hasScheme(schemes []string, scheme string) bool {
-	for _, s := range schemes {
-		if s == scheme {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(schemes, scheme)
 }
 
 // IsSerialURL reports whether modbusURL addresses a serial line (rtu:// or ascii://).

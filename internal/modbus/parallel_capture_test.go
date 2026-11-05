@@ -40,14 +40,12 @@ func TestParallelCapture_staticServerManyClients(t *testing.T) {
 		t.Run(missing, func(t *testing.T) {
 			srv, progress := staticServer(t, config.StaticServerConfig{InputFile: path, Missing: missing, MaxClients: 40})
 			var wg sync.WaitGroup
-			for w := 0; w < 32; w++ {
+			for w := range 32 {
 				c := srv.client(t)
 				rng := rand.New(rand.NewSource(int64(w)))
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					ctx := context.Background()
-					for i := 0; i < 150; i++ {
+					for range 150 {
 						switch rng.Intn(6) {
 						case 0:
 							got, err := c.ReadHoldingRegisters(ctx, 21, 10, 2)
@@ -93,7 +91,7 @@ func TestParallelCapture_staticServerManyClients(t *testing.T) {
 							}
 						}
 					}
-				}()
+				})
 			}
 			wg.Wait()
 			require.ErrorIs(t, srv.stop(t), context.Canceled)
@@ -116,10 +114,8 @@ func TestParallelCapture_sharedRecorder(t *testing.T) {
 	want := map[string]bool{}
 	var mu sync.Mutex
 	for w := 1; w <= 16; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 200; i++ {
+		wg.Go(func() {
+			for i := range 200 {
 				ctx, tok := rec.Begin(context.Background())
 				// The address names the goroutine and attempt.
 				req := readReq(3, uint16(w*1000+i), 1)
@@ -137,7 +133,7 @@ func TestParallelCapture_sharedRecorder(t *testing.T) {
 					t.Error(err)
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	require.Equal(t, len(want), rec.Samples())
@@ -160,19 +156,17 @@ func TestParallelCapture_sharedRecorder(t *testing.T) {
 	require.NoError(t, rec2.AddTarget(capture.Target{ID: 1}))
 	require.NoError(t, rec2.AddStream(capture.Stream{ID: 1, Target: 1}))
 	start := make(chan struct{})
-	for w := 0; w < 8; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for w := range 8 {
+		wg.Go(func() {
 			<-start
-			for i := 0; i < 500; i++ {
+			for i := range 500 {
 				ctx, tok := rec2.Begin(context.Background())
 				rec2.Tap().OnPDU(ctx, gomodbus.PDUExchange{Request: readReq(4, uint16(w*500+i), 1), Response: regsResp(4, 1), Received: time.Now()})
 				if err := rec2.Commit(tok, 1, nil); err != nil {
 					t.Error(err)
 				}
 			}
-		}()
+		})
 	}
 	close(start)
 	time.Sleep(2 * time.Millisecond)
@@ -187,16 +181,14 @@ func TestParallelCapture_sharedRecorder(t *testing.T) {
 // own file, without interfering.
 func TestParallelCapture_concurrentRecordings(t *testing.T) {
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		dev, _ := e2eCountingDevice()
 		url := "tcp://" + dev.ServeTCP(t)
 		dir := t.TempDir()
 		bf := filepath.Join(dir, "blocks.json")
 		require.NoError(t, os.WriteFile(bf, []byte(`[{"start_address":100,"register_count":2},{"start_address":200,"register_count":2}]`), 0o600))
 		out := filepath.Join(dir, "rec.mbcap")
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			sum, err := RecordToCapture(context.Background(), config.RecordConfig{
 				DeviceConfig: config.DeviceConfig{URL: url, Unit: 1}, Timeout: coreTimeoutMS, Function: 3,
 				Interval: 5, Duration: 300, BlocksFile: bf, OutputFile: out,
@@ -225,7 +217,7 @@ func TestParallelCapture_concurrentRecordings(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -238,13 +230,11 @@ func TestParallelCapture_replayClients(t *testing.T) {
 		return ServeReplay(ctx, config.ReplayServerConfig{Port: a.Port, Listen: a.Listen, InputFile: path, Speed: "2", Loops: 1, MaxClients: 20}, a.Progress(nil))
 	})
 	var wg sync.WaitGroup
-	for w := 0; w < 16; w++ {
+	for range 16 {
 		c := srv.client(t)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			var last uint16
-			for i := 0; i < 200; i++ {
+			for range 200 {
 				got, err := c.ReadHoldingRegisters(context.Background(), 1, 100, 2)
 				if err != nil {
 					t.Error(err)
@@ -256,7 +246,7 @@ func TestParallelCapture_replayClients(t *testing.T) {
 				}
 				last = got[0]
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

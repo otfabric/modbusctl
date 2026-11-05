@@ -465,7 +465,7 @@ func TestWrite_transports(t *testing.T) {
 func pollLines(t *testing.T, stdout string) []types.PollSample {
 	t.Helper()
 	var samples []types.PollSample
-	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(stdout), "\n") {
 		var s types.PollSample
 		decodeJSON(t, line, &s)
 		samples = append(samples, s)

@@ -6,7 +6,7 @@ import (
 	"container/heap"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 
 	"github.com/otfabric/go-modbus/sunspec"
 	"github.com/otfabric/modbusctl/internal/config"
@@ -279,10 +279,7 @@ func (s *smartStrategy) Init(cfg scanSettings) {
 	// 32-bit arithmetic: with end at 65535 a 16-bit start would wrap and never pass it.
 	end := uint32(cfg.EndAddress)
 	for start := uint32(cfg.StartAddress); start <= end; {
-		count := end - start + 1
-		if count > MaxBlockSize {
-			count = MaxBlockSize
-		}
+		count := min(end-start+1, MaxBlockSize)
 		heap.Push(&s.queue, Interval{Start: uint16(start), Count: uint16(count)})
 		start += count
 	}
@@ -421,14 +418,8 @@ func (s *deepStrategy) buildRefinementQueue() {
 		intervalEnd := iv.Start + iv.Count - 1
 		// Left boundary: refine only if there is evidence (failure adjacent to start)
 		if intervalStart > globalStart && s.hasFailureAdjacent(intervalStart, true) {
-			leftStart := int32(intervalStart) - deepRefinementWindow
-			if leftStart < int32(globalStart) {
-				leftStart = int32(globalStart)
-			}
-			leftEnd := int32(intervalStart) + deepRefinementWindow
-			if leftEnd > int32(globalEnd) {
-				leftEnd = int32(globalEnd)
-			}
+			leftStart := max(int32(intervalStart)-deepRefinementWindow, int32(globalStart))
+			leftEnd := min(int32(intervalStart)+deepRefinementWindow, int32(globalEnd))
 			for start := uint16(leftStart); start <= uint16(leftEnd) && len(s.refinementQueue) < deepRefinementCap; start++ {
 				for _, count := range deepRefinementCounts {
 					if int32(start)+int32(count)-1 <= int32(globalEnd) {
@@ -443,14 +434,8 @@ func (s *deepStrategy) buildRefinementQueue() {
 		}
 		// Right boundary: refine only if there is evidence (failure adjacent to end)
 		if intervalEnd < globalEnd && s.hasFailureAdjacent(intervalEnd, false) {
-			rightStart := int32(intervalEnd) - deepRefinementWindow
-			if rightStart < int32(globalStart) {
-				rightStart = int32(globalStart)
-			}
-			rightEnd := int32(intervalEnd) + deepRefinementWindow
-			if rightEnd > int32(globalEnd) {
-				rightEnd = int32(globalEnd)
-			}
+			rightStart := max(int32(intervalEnd)-deepRefinementWindow, int32(globalStart))
+			rightEnd := min(int32(intervalEnd)+deepRefinementWindow, int32(globalEnd))
 			for start := uint16(rightStart); start <= uint16(rightEnd) && len(s.refinementQueue) < deepRefinementCap; start++ {
 				for _, count := range deepRefinementCounts {
 					if int32(start)+int32(count)-1 <= int32(globalEnd) {
@@ -544,7 +529,7 @@ func (s *steppedStrategy) Init(cfg scanSettings) {
 			break
 		}
 	}
-	sort.Slice(s.stepPositions, func(i, j int) bool { return s.stepPositions[i] < s.stepPositions[j] })
+	slices.Sort(s.stepPositions)
 	s.stepIndex = 0
 	s.probeTasks = nil
 	s.probeIndex = 0
@@ -580,10 +565,7 @@ func (s *steppedStrategy) buildProbeTasks() {
 	}
 	maxAddr := uint16(65535)
 	if end < 65535 {
-		maxAddr32 := uint32(end) + 1
-		if maxAddr32 > 65535 {
-			maxAddr32 = 65535
-		}
+		maxAddr32 := min(uint32(end)+1, 65535)
 		maxAddr = uint16(maxAddr32)
 	}
 	var positions []uint16
@@ -891,10 +873,7 @@ func (s *linearStrategy) OnResult(task ScanTask, result ScanResult) {
 				s.phase = linearBackward
 				s.originalBlockStart = s.probeStart
 				s.blockEnd = newEnd
-				maxBack := s.originalBlockStart - s.start
-				if maxBack > 125 {
-					maxBack = 125
-				}
+				maxBack := min(s.originalBlockStart-s.start, 125)
 				s.backwardLow = 1
 				s.backwardHigh = maxBack
 				s.backwardBest = 0
@@ -1047,10 +1026,7 @@ func (s *boundaryStrategy) openRightWindow() bool {
 		return false
 	}
 	s.phase = boundaryRightBinary
-	s.rightCeil = s.blockEnd + MaxBlockSize - 1
-	if s.rightCeil > s.end {
-		s.rightCeil = s.end
-	}
+	s.rightCeil = min(s.blockEnd+MaxBlockSize-1, s.end)
 	s.rightLow = s.blockEnd
 	s.rightHigh = s.rightCeil
 	scanDebugf(&s.cfg, "DEBUG [boundary] -> phase RightBinary [rightLow=%d rightHigh=%d]\n", s.rightLow, s.rightHigh)

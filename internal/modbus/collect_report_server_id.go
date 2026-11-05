@@ -64,10 +64,7 @@ func CollectReportServerID(ctx context.Context, cfg config.ReportServerIDConfig)
 		return res, nil
 	}
 
-	n := int(cfg.Parallel)
-	if n > len(units) {
-		n = len(units)
-	}
+	n := min(int(cfg.Parallel), len(units))
 	clients, cleanup, err := openModbusClientPool(n, conf)
 	if err != nil {
 		return nil, err
@@ -86,7 +83,7 @@ func CollectReportServerID(ctx context.Context, cfg config.ReportServerIDConfig)
 	outCh := make(chan job, len(units))
 
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		mc := clients[i]
 		go func() {

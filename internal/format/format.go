@@ -4,6 +4,7 @@ package format
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -38,9 +39,7 @@ func Values() []string {
 // The returned map is a shallow copy; mutating it does not affect canonical definitions.
 func ValueDescriptions() map[string]string {
 	out := make(map[string]string, len(outputFormatDescriptions))
-	for k, v := range outputFormatDescriptions {
-		out[k] = v
-	}
+	maps.Copy(out, outputFormatDescriptions)
 	return out
 }
 

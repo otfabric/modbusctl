@@ -158,7 +158,7 @@ func chaosReplayCapture(t *testing.T) string {
 		Streams: []capture.Stream{{ID: 1, Target: 1, Role: "poll"}},
 		End:     capture.End{Known: true, At: 2_000_000},
 	}
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		c.Samples = append(c.Samples, capture.Sample{Stream: 1, At: capture.Ticks(i * 5000),
 			Request: readReq(3, 100, 2), Response: regsResp(3, uint16(i+1), 0x5A5A)})
 	}
@@ -191,7 +191,7 @@ func chaosClient(addr string, rng *rand.Rand) {
 	case 3: // a request, then close before the answer
 		_, _ = conn.Write(req(2, 1, 3, 0, 100, 0, 2))
 	case 4: // many pipelined requests, then a reset
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			_, _ = conn.Write(req(uint16(i), byte(rng.Intn(3)), 3, 0, byte(rng.Intn(200)), 0, byte(1+rng.Intn(125))))
 		}
 		if tc, ok := conn.(*net.TCPConn); ok {
@@ -223,13 +223,11 @@ func TestChaosCapture_replayServerUnderAbuse(t *testing.T) {
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	var good, bad atomic.Int64
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		c, err := gomodbus.New(gomodbus.Config{URL: "tcp://" + addr, Timeout: 2 * time.Second, Logger: gomodbus.NopLogger()})
 		require.NoError(t, err)
 		require.NoError(t, c.Open())
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { _ = c.Close() }()
 			for {
 				select {
@@ -245,13 +243,11 @@ func TestChaosCapture_replayServerUnderAbuse(t *testing.T) {
 				}
 				good.Add(1)
 			}
-		}()
+		})
 	}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		rng := rand.New(rand.NewSource(int64(i)))
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -260,7 +256,7 @@ func TestChaosCapture_replayServerUnderAbuse(t *testing.T) {
 				}
 				chaosClient(addr, rng)
 			}
-		}()
+		})
 	}
 	time.Sleep(1500 * time.Millisecond)
 	close(stop)
@@ -303,7 +299,7 @@ func TestChaosCapture_damagedFiles(t *testing.T) {
 
 	rng := rand.New(rand.NewSource(42))
 	dir := t.TempDir()
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		src := good
 		if i%3 == 2 {
 			src = jl.Bytes()
