@@ -1,5 +1,16 @@
 # modbusctl Releases
 
+## v3.5.1
+
+**Date:** 2026-11-05
+**Previous release:** v3.5.0
+
+### Changed
+
+- Built on go-modbus-capture v0.1.0 (Go 1.26 floor, no change in behaviour). No other change.
+
+---
+
 ## v3.5.0
 
 **Date:** 2026-11-05

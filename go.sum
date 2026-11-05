@@ -22,8 +22,8 @@ github.com/mdlayher/socket v0.5.1 h1:VZaqt6RkGkt2OE9l3GcC6nZkqD3xKeQLyfleW/uBcos
 github.com/mdlayher/socket v0.5.1/go.mod h1:TjPLHI1UgwEv5J1B5q0zTZq12A/6H7nKmtTanQE37IQ=
 github.com/otfabric/go-modbus v1.11.1 h1:9a5sMUwcpN49VVfCJRSgW72QggcfF7KnqiWNcbmnzSk=
 github.com/otfabric/go-modbus v1.11.1/go.mod h1:FcVASTIAl1MNwPVW8nCMMubztiMueKHIFeVyHm0BDeY=
-github.com/otfabric/go-modbus-capture v0.0.3 h1:M3c4N3ZVe82Uu8/rgwWTeBV8jS8IO9mAuUCMkZ4Bgu8=
-github.com/otfabric/go-modbus-capture v0.0.3/go.mod h1:0EjVYP0QdiwAnU50MeG7o6IBVvdcy87uHPYFET1HlgE=
+github.com/otfabric/go-modbus-capture v0.1.0 h1:5TuDKNQy/TKAxEa413Y1RUpcmTK6Zl80KTJtqP6Z9hc=
+github.com/otfabric/go-modbus-capture v0.1.0/go.mod h1:z+1rnvMln/8Ra4lSzbekw4pybZroJuBf8GPXqCHY8qs=
 github.com/otfabric/go-serial v0.2.1 h1:PCOdnCDAHIHFaxTBNmisC/4SlD+NVd74d+EJPnXrCOw=
 github.com/otfabric/go-serial v0.2.1/go.mod h1:TqbYpWWg6W+IuCLs8YM2cndlMAEaTyaKyUX6Z08gtq8=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
