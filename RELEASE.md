@@ -1,5 +1,17 @@
 # modbusctl Releases
 
+## v3.5.0
+
+**Date:** 2026-11-05
+**Previous release:** v3.4.3
+
+### Changed
+
+- CI runs Go 1.26 and 1.27; `go fix` modernised the code.
+- Built on go-modbus v1.11.0: the server closes a connection whose response cannot be written in time; RTU and ASCII links drain a late answer instead of returning it for the next request; RTU variable-length reads honour the deadline; UDP drops bytes left over from a previous datagram.
+
+---
+
 ## v3.4.3
 
 **Date:** 2026-11-03
