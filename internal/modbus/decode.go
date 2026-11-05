@@ -32,13 +32,14 @@ func CollectDecode(ctx context.Context, cfg config.DecodeConfig, progress io.Wri
 	if !ok {
 		return nil, errs.InvalidInput(errs.CodeInvalidInput, fmt.Sprintf("unknown codec %q (run 'modbusctl client codecs' to list available codecs)", cfg.Codec), nil)
 	}
-	per := int(rc.RegisterSpec().Count)
+	per16 := rc.RegisterSpec().Count
+	per := int(per16)
 	if per == 0 {
 		return nil, errs.InvalidInput(errs.CodeInvalidInput, fmt.Sprintf("codec %q has zero register width", cfg.Codec), nil)
 	}
-	total := int(cfg.RegisterCount)
+	total := cfg.RegisterCount
 	if total == 0 {
-		total = per
+		total = per16
 	}
 
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
@@ -48,7 +49,7 @@ func CollectDecode(ctx context.Context, cfg config.DecodeConfig, progress io.Wri
 	}
 	defer link.Close()
 
-	rawData, _, _, err := readRegisters(ctx, link, cfg.Function, cfg.StartAddress, uint16(total), 1, cfg.Unit, 0, progress)
+	rawData, _, _, err := readRegisters(ctx, link, cfg.Function, cfg.StartAddress, total, 1, cfg.Unit, 0, progress)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +74,7 @@ func CollectDecode(ctx context.Context, cfg config.DecodeConfig, progress io.Wri
 		UnitID:        cfg.Unit,
 		Function:      cfg.Function,
 		StartAddress:  cfg.StartAddress,
-		RegisterCount: uint16(total),
+		RegisterCount: total,
 		Codec:         cfg.Codec,
 		Family:        family,
 		ValueKind:     rc.ValueKind().String(),

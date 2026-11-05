@@ -71,9 +71,9 @@ func (r *IdentifyResult) MarshalTextOutput() (string, error) {
 		}
 		for _, obj := range u.Objects {
 			if obj.Description != "" {
-				_, _ = fmt.Fprintf(&b, " - Object %d: %s [%s]\n", obj.ID, obj.Value, obj.Description)
+				_, _ = fmt.Fprintf(&b, " - Object %d: %s [%s]\n", obj.ID, TerminalSafe(obj.Value), obj.Description)
 			} else {
-				_, _ = fmt.Fprintf(&b, " - Object %d: %s\n", obj.ID, obj.Value)
+				_, _ = fmt.Fprintf(&b, " - Object %d: %s\n", obj.ID, TerminalSafe(obj.Value))
 			}
 		}
 		if rs := u.ReportServerID; rs != nil {

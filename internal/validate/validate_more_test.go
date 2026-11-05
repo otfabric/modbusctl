@@ -677,7 +677,7 @@ func TestValidateRanges(t *testing.T) {
 	assert.EqualError(t, validateInclusiveScanRange(0, 0), "start address (0) must be less than end address (0)")
 	assert.EqualError(t, validateInclusiveScanRange(65535, 65535), "start address (65535) must be less than end address (65535)")
 
-	for fc := uint8(0); fc < 20; fc++ {
+	for fc := range uint8(20) {
 		assert.Equal(t, fc >= 1 && fc <= 4, validateFunctionCode(fc) == nil, "read fc %d", fc)
 		assert.Equal(t, fc == 3 || fc == 4, validateDecodeFunctionCode(fc) == nil, "decode fc %d", fc)
 	}

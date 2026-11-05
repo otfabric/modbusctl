@@ -590,11 +590,9 @@ func TestParallelRoundTrip_everyFunction(t *testing.T) {
 		}
 	}
 	for i := range devices {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			paths[i] = rtRecord(t, urls[i], rtPlan, 20, 120, coreTimeoutMS)
-		}()
+		})
 	}
 	wg.Wait()
 	mbcapctlVerify(t, paths...)
@@ -607,9 +605,7 @@ func TestParallelRoundTrip_everyFunction(t *testing.T) {
 			return ServeReplay(ctx, config.ReplayServerConfig{Port: a.Port, Listen: a.Listen, InputFile: path, Speed: "1", MaxClients: 20}, a.Progress(nil))
 		})
 		for w := range 8 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				port, isStatic := static.port, w%2 == 0
 				if !isStatic {
 					port = replaySrv.port
@@ -645,7 +641,7 @@ func TestParallelRoundTrip_everyFunction(t *testing.T) {
 						}
 					}
 				}
-			}()
+			})
 		}
 	}
 	wg.Wait()

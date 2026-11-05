@@ -5,6 +5,7 @@ package mbtest
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 )
@@ -37,7 +38,7 @@ func (d *Device) servePTY(t testing.TB, serve func(io.ReadWriter)) string {
 	}
 	// Hold the slave side open so that the master does not see a hang-up between two
 	// clients opening and closing the device.
-	slave, err := os.OpenFile(path, os.O_RDWR|syscall.O_NOCTTY, 0)
+	slave, err := os.OpenFile(filepath.Clean(path), os.O_RDWR|syscall.O_NOCTTY, 0)
 	if err != nil {
 		_ = master.Close()
 		t.Skipf("mbtest: cannot open pseudo-terminal %s: %v", path, err)

@@ -11,6 +11,8 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	"github.com/otfabric/modbusctl/internal/conv"
 )
 
 // ServeTCP serves the device as Modbus TCP (MBAP) on a loopback port until the test ends.
@@ -91,7 +93,7 @@ func (d *Device) ServeUDP(t testing.TB) string {
 func mbapFrame(txn []byte, unit uint8, pdu []byte) []byte {
 	out := make([]byte, 7, 7+len(pdu))
 	copy(out, txn)
-	binary.BigEndian.PutUint16(out[4:], uint16(len(pdu)+1))
+	binary.BigEndian.PutUint16(out[4:], conv.Uint16(len(pdu)+1))
 	out[6] = unit
 	return append(out, pdu...)
 }
@@ -129,7 +131,7 @@ func CRC16(data []byte) uint16 {
 	crc := uint16(0xFFFF)
 	for _, b := range data {
 		crc ^= uint16(b)
-		for i := 0; i < 8; i++ {
+		for range 8 {
 			if crc&1 != 0 {
 				crc = crc>>1 ^ 0xA001
 			} else {

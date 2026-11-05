@@ -27,12 +27,12 @@ func TestCollReportServerID_singleUnit(t *testing.T) {
 		wantHex string
 		wantRun *bool
 	}{
-		{name: "running", id: &mbtest.ServerID{ID: []byte{0x12, 0x34}, Running: true}, wantHex: "12 34 FF", wantRun: collPtr(true)},
-		{name: "stopped", id: &mbtest.ServerID{ID: []byte{0x12}, Running: false}, wantHex: "12 00", wantRun: collPtr(false)},
+		{name: "running", id: &mbtest.ServerID{ID: []byte{0x12, 0x34}, Running: true}, wantHex: "12 34 FF", wantRun: new(true)},
+		{name: "stopped", id: &mbtest.ServerID{ID: []byte{0x12}, Running: false}, wantHex: "12 00", wantRun: new(false)},
 		{
 			name:    "additional data follows the run indicator",
 			id:      &mbtest.ServerID{ID: []byte{0x01}, Running: true, Additional: []byte{0xFF}},
-			wantHex: "01 FF FF", wantRun: collPtr(true),
+			wantHex: "01 FF FF", wantRun: new(true),
 		},
 		{name: "single byte has no run indicator", id: &mbtest.ServerID{}, wantHex: "00"},
 	}
@@ -57,8 +57,6 @@ func TestCollReportServerID_singleUnit(t *testing.T) {
 		})
 	}
 }
-
-func collPtr[T any](v T) *T { return &v }
 
 func TestCollReportServerID_unsupported(t *testing.T) {
 	dev := mbtest.NewDevice()

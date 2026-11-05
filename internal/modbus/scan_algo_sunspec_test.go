@@ -21,7 +21,7 @@ func makeSunSpecData(r0, r1 uint16) []byte {
 // makeSunSpecBodyData creates a byte slice of n registers (2*n bytes) with sequential values.
 func makeSunSpecBodyData(n uint16) []byte {
 	b := make([]byte, int(n)*2)
-	for i := uint16(0); i < n; i++ {
+	for i := range n {
 		binary.BigEndian.PutUint16(b[i*2:i*2+2], i+1)
 	}
 	return b
@@ -36,10 +36,7 @@ func drainBody(t *testing.T, s *sunspecStrategy, length uint16) {
 		if !ok {
 			t.Fatalf("expected body read task, remaining=%d", remaining)
 		}
-		expected := remaining
-		if expected > 125 {
-			expected = 125
-		}
+		expected := min(remaining, 125)
 		if task.Count != expected {
 			t.Errorf("body task count = %d, want %d", task.Count, expected)
 		}
@@ -177,7 +174,7 @@ func TestSunSpec_MaxModelsLimit(t *testing.T) {
 
 	// Walk 2 models (header + body each), then should stop even though chain continues.
 	addr := uint16(40002)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		task, ok := s.Next()
 		if !ok {
 			t.Fatalf("expected header task %d", i)

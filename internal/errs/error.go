@@ -61,8 +61,7 @@ func Internal(cause error) *Error {
 
 // As returns (*Error, true) if err unwraps to *Error.
 func As(err error) (*Error, bool) {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e, true
 	}
 	return nil, false

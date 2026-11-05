@@ -28,8 +28,6 @@ func text(t *testing.T, r renderer) string {
 	return s
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func errInfo(msg string) *types.ErrorInfo { return types.EmbeddedModbusError(msg) }
 
 // Nil receivers render as nothing but still describe their columns.
@@ -386,16 +384,16 @@ func TestFingerprintUnitPredicates(t *testing.T) {
 func TestIdentifyResult_multiUnit(t *testing.T) {
 	r := &types.IdentifyResult{Target: "tcp://h:502", Units: []types.IdentifyUnitResult{
 		{
-			UnitID: 1, Category: ptr(uint8(2)), ConformityLevel: ptr(uint8(0x82)), MoreFollows: ptr(true), NextObjectID: ptr(uint8(5)),
+			UnitID: 1, Category: new(uint8(2)), ConformityLevel: new(uint8(0x82)), MoreFollows: new(true), NextObjectID: new(uint8(5)),
 			Objects: []types.IdentifyObjectRow{
 				{ID: 0, Value: "Acme", Description: "VendorName"},
 				{ID: 4, Value: "raw"},
 			},
-			ReportServerID: &types.IdentifyReportServerOutput{DataHex: "0102", RunIndicatorOn: ptr(false)},
+			ReportServerID: &types.IdentifyReportServerOutput{DataHex: "0102", RunIndicatorOn: new(false)},
 		},
 		{UnitID: 2, Error: errInfo("illegal function")},
-		{UnitID: 3, ReportServerID: &types.IdentifyReportServerOutput{Error: errInfo("fc17 unsupported"), RunIndicatorOn: ptr(true)}},
-		{UnitID: 4, Category: ptr(uint8(1)), Objects: []types.IdentifyObjectRow{{ID: 1, Value: "only"}}, ReportServerID: &types.IdentifyReportServerOutput{}},
+		{UnitID: 3, ReportServerID: &types.IdentifyReportServerOutput{Error: errInfo("fc17 unsupported"), RunIndicatorOn: new(true)}},
+		{UnitID: 4, Category: new(uint8(1)), Objects: []types.IdentifyObjectRow{{ID: 1, Value: "only"}}, ReportServerID: &types.IdentifyReportServerOutput{}},
 	}}
 	types.FillIdentifySummary(r, 4)
 	require.Equal(t, &types.ResultSummary{Requested: 4, Succeeded: 3, Failed: 1}, r.Summary)
@@ -428,9 +426,9 @@ func TestIdentifyResult_multiUnit(t *testing.T) {
 
 func TestReportServerIDResult_multiUnit(t *testing.T) {
 	r := &types.ReportServerIDResult{Target: "tcp://h:502", Units: []types.ReportServerIDUnitResult{
-		{UnitID: 1, DataHex: "42ff", RunIndicatorOn: ptr(true)},
+		{UnitID: 1, DataHex: "42ff", RunIndicatorOn: new(true)},
 		{UnitID: 2, Error: errInfo("timeout"), DataHex: "ignored"},
-		{UnitID: 3, RunIndicatorOn: ptr(false)},
+		{UnitID: 3, RunIndicatorOn: new(false)},
 		{UnitID: 4},
 	}}
 	types.FillReportServerIDSummary(r, 4)

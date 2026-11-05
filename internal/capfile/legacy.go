@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/otfabric/go-modbus-capture/capture"
+	"github.com/otfabric/modbusctl/internal/conv"
 	"github.com/otfabric/modbusctl/internal/types"
 )
 
@@ -103,7 +104,7 @@ func Records(l *Loaded, sel Selection) ([]types.CaptureRecord, types.CaptureHead
 			RequestTimestamp:  wall,
 			ResponseTimestamp: wall,
 			StartAddress:      av.Start,
-			RegisterCount:     uint16(len(av.Values)),
+			RegisterCount:     conv.Uint16(len(av.Values)),
 			Data:              append([]byte(nil), s.Response[2:]...),
 		})
 	}

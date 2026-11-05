@@ -5,6 +5,7 @@ package modbus
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 
@@ -60,10 +61,7 @@ func CollectDeviceIdentification(ctx context.Context, cfg config.IdentifyConfig)
 		return res, nil
 	}
 
-	n := int(cfg.Parallel)
-	if n > len(units) {
-		n = len(units)
-	}
+	n := min(int(cfg.Parallel), len(units))
 	clients, cleanup, err := openModbusClientPool(n, conf)
 	if err != nil {
 		return nil, err
@@ -78,7 +76,7 @@ func CollectDeviceIdentification(ctx context.Context, cfg config.IdentifyConfig)
 	resultsCh := make(chan *types.IdentifyUnitResult, len(units))
 
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		mc := clients[i]
 		go func() {
@@ -175,7 +173,7 @@ func collectDeviceIdentificationForUnit(ctx context.Context, mc *modbus.Client, 
 	for id := range objectsByID {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 
 	cat := uint8(header.Category)
 	cl := header.ConformityLevel

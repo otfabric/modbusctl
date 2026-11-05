@@ -71,6 +71,9 @@ func e2eRecordTLSDevice(t *testing.T, pki *mbtest.PKI) (string, []uint16) {
 // tlsRead reads holding registers 100-103 from url with the modbusctl client.
 func tlsRead(t *testing.T, url string, tlsCfg config.TLSConfig, out string) (string, error) {
 	t.Helper()
+	if out == "" { // the capture goes to the test's temporary directory, not the package directory
+		out = filepath.Join(t.TempDir(), "read.mbcap")
+	}
 	res, err := CollectRead(context.Background(), config.ReadConfig{
 		DeviceConfig: config.DeviceConfig{URL: url, Unit: 1, TLSConfig: tlsCfg},
 		Timeout:      coreTimeoutMS, Function: 3, StartAddress: 100, RegisterCount: 4, OutputFile: out,

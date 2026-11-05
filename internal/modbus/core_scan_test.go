@@ -200,7 +200,7 @@ func TestCoreScan_everyAlgorithm(t *testing.T) {
 // bodyLen registers and the end model. Every register holds coreRegValue except the headers.
 func coreSunSpecDevice(base uint16, modelID, bodyLen uint16) (*mbtest.Device, []uint16) {
 	regs := []uint16{0x5375, 0x6E53, modelID, bodyLen}
-	for i := uint16(0); i < bodyLen; i++ {
+	for i := range bodyLen {
 		regs = append(regs, 0x1000+i)
 	}
 	regs = append(regs, 0xFFFF, 0x0000)

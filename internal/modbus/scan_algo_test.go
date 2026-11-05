@@ -248,7 +248,7 @@ func TestSafeStrategy_FullFailureThenDone(t *testing.T) {
 	cfg := config.ScanConfig{StartAddress: 0, EndAddress: 2}
 	s := newSafeStrategy(ss(cfg))
 	s.Init(ss(cfg))
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		task, ok := s.Next()
 		if !ok {
 			break
@@ -379,7 +379,7 @@ func TestSafeStrategy_LeftBoundaryProbeAfterLadder(t *testing.T) {
 	s := newSafeStrategy(ss(cfg))
 	s.Init(ss(cfg))
 	// Exhaust address 0 (all fail so current advances to 1), then fail twice at 1, succeed at (1, 4) -> boundary probe at 0
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		task, ok := s.Next()
 		if !ok {
 			t.Fatalf("expected task at 0 (attempt %d)", i+1)
@@ -565,7 +565,7 @@ func TestSmartStrategy_VisitedDedup(t *testing.T) {
 	// Fail the single 125-block twice (re-split) — but visited dedup prevents re-issuing
 	s.OnResult(task, ScanResult{Success: false, Start: 0, Count: 125})
 	seen := make(map[uint32]int)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		t2, ok := s.Next()
 		if !ok {
 			break
@@ -722,7 +722,7 @@ func TestSteppedStrategy_DoneStates(t *testing.T) {
 		t.Error("stepped should not be done before probes are consumed")
 	}
 	// Consume all probes (all fail)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		task, ok := s.Next()
 		if !ok {
 			break
@@ -1120,7 +1120,7 @@ func TestAllStrategies_MaxBlockSize(t *testing.T) {
 				t.Fatalf("newScanStrategy(%s): %v", tt.name, err)
 			}
 			s.Init(ss(tt.cfg))
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				task, ok := s.Next()
 				if !ok {
 					break

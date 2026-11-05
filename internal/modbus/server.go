@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"math"
 	"net"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +24,7 @@ import (
 	"github.com/otfabric/go-modbus-capture/capture"
 	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/config"
+	"github.com/otfabric/modbusctl/internal/conv"
 	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/replay"
 )
@@ -63,13 +66,18 @@ func ParseBeforeFirst(s string) (replay.BeforeFirst, error) {
 	return 0, fmt.Errorf("invalid --before-first %q: use hold or absent", s)
 }
 
-// ParseSpeed parses the --speed flag: a positive factor, 1 by default.
+// MaxSpeed is the largest --speed: a year of capture per second.
+const MaxSpeed = 365 * 24 * 3600
+
+// ParseSpeed parses the --speed flag: a positive factor up to [MaxSpeed], 1
+// by default. NaN and infinities are refused: they make the replay time
+// undefined.
 func ParseSpeed(s string) (float64, error) {
 	if strings.TrimSpace(s) == "" {
 		return 1, nil
 	}
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil || v <= 0 {
+	if err != nil || math.IsNaN(v) || v <= 0 || v > MaxSpeed {
 		return 0, fmt.Errorf("invalid --speed %q: use a positive factor such as 1, 0.1 or 60", s)
 	}
 	return v, nil
@@ -275,10 +283,10 @@ func (h *captureHandler) HandleCommEventLog(_ context.Context, req *modbus.CommE
 // of the recorded data.
 func (h *captureHandler) HandleDiagnostics(_ context.Context, req *modbus.DiagnosticsRequest) ([]byte, error) {
 	sub := uint16(req.SubFunction)
-	if sub > 0xFF || !capfile.IsDataDiagnostic(uint8(sub)) {
+	if sub > math.MaxUint8 || !capfile.IsDataDiagnostic(uint8(sub)) {
 		return nil, modbus.ErrIllegalFunction
 	}
-	r, err := h.response(req.UnitID, append([]byte{0x08, byte(sub >> 8), byte(sub)}, req.Data...), 2)
+	r, err := h.response(req.UnitID, append(binary.BigEndian.AppendUint16([]byte{0x08}, sub), req.Data...), 2)
 	if err != nil {
 		return nil, err
 	}
@@ -304,10 +312,13 @@ func (h *captureHandler) HandleReportServerID(_ context.Context, req *modbus.Rep
 // HandleReadFileRecords serves FC20 with the records of the response
 // recorded for exactly these sub-requests.
 func (h *captureHandler) HandleReadFileRecords(_ context.Context, req *modbus.ReadFileRecordsRequest) ([][]uint16, error) {
-	pdu := []byte{0x14, byte(7 * len(req.Requests))}
+	if len(req.Requests) == 0 || 2+7*len(req.Requests) > capture.MaxPDULen {
+		return nil, modbus.ErrIllegalDataValue
+	}
+	pdu := []byte{0x14, conv.Uint8(7 * len(req.Requests))}
+	be := binary.BigEndian.AppendUint16
 	for _, s := range req.Requests {
-		pdu = append(pdu, 0x06, byte(s.FileNumber>>8), byte(s.FileNumber), byte(s.RecordNumber>>8), byte(s.RecordNumber),
-			byte(s.RecordLength>>8), byte(s.RecordLength))
+		pdu = be(be(be(append(pdu, 0x06), s.FileNumber), s.RecordNumber), s.RecordLength)
 	}
 	r, err := h.response(req.UnitID, pdu, 1)
 	if err != nil {
@@ -336,7 +347,7 @@ func (h *captureHandler) HandleReadFileRecords(_ context.Context, req *modbus.Re
 
 // HandleReadFIFOQueue serves FC24 with the recorded queue.
 func (h *captureHandler) HandleReadFIFOQueue(_ context.Context, req *modbus.FIFOQueueRequest) ([]uint16, error) {
-	r, err := h.response(req.UnitID, []byte{0x18, byte(req.Addr >> 8), byte(req.Addr)}, 4)
+	r, err := h.response(req.UnitID, binary.BigEndian.AppendUint16([]byte{0x18}, req.Addr), 4)
 	if err != nil {
 		return nil, err
 	}
@@ -416,13 +427,8 @@ func serveTargets(input string, target uint32, unit uint8, opts replay.Options) 
 }
 
 func describeDevices(w io.Writer, devices map[uint8]*replay.Device) {
-	units := make([]int, 0, len(devices))
-	for u := range devices {
-		units = append(units, int(u))
-	}
-	sort.Ints(units)
-	for _, u := range units {
-		d := devices[uint8(u)]
+	for _, u := range slices.Sorted(maps.Keys(devices)) {
+		d := devices[u]
 		t := d.Target()
 		label := ""
 		if t.Label != "" {

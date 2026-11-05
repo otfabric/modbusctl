@@ -36,23 +36,20 @@ func classifyUnwrappedCollect(err error) (kind errs.Kind, code string, ok bool) 
 	if errors.Is(err, context.Canceled) {
 		return errs.KindInterrupted, errs.CodeContextCanceled, true
 	}
-	var ex *gm.ExceptionError
-	if errors.As(err, &ex) {
+	if _, ok := errors.AsType[*gm.ExceptionError](err); ok {
 		return errs.KindModbus, errs.CodeModbusException, true
 	}
 	// The peer closed the connection before or while answering.
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return errs.KindTransport, errs.CodeTransportConnectFailed, true
 	}
-	var ne *net.OpError
-	if errors.As(err, &ne) {
+	if ne, ok := errors.AsType[*net.OpError](err); ok {
 		if ne.Timeout() {
 			return errs.KindTimeout, errs.CodeTransportTimeout, true
 		}
 		return errs.KindTransport, errs.CodeTransportConnectFailed, true
 	}
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
+	if errno, ok := errors.AsType[syscall.Errno](err); ok {
 		switch errno {
 		case syscall.ECONNREFUSED, syscall.ECONNRESET, syscall.EPIPE, syscall.ENETUNREACH, syscall.EHOSTUNREACH:
 			return errs.KindTransport, errs.CodeTransportConnectFailed, true

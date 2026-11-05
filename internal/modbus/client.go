@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
-	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,6 +21,7 @@ import (
 	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
+	"github.com/otfabric/modbusctl/internal/fsutil"
 	"github.com/otfabric/modbusctl/internal/plan"
 	"github.com/otfabric/modbusctl/internal/types"
 )
@@ -71,10 +72,7 @@ func dialTimeoutForRequest(request time.Duration) time.Duration {
 	if request <= 0 {
 		return defaultDialTimeout
 	}
-	d := request
-	if d > defaultDialTimeout {
-		d = defaultDialTimeout
-	}
+	d := min(request, defaultDialTimeout)
 	const minDial = 200 * time.Millisecond
 	if d < minDial {
 		d = minDial
@@ -263,8 +261,7 @@ func classifyOutcome(err error, _, _ int64) (ScanOutcomeType, uint8) {
 	if err == nil {
 		return ScanOutcomeSuccess, 0
 	}
-	var excErr *modbus.ExceptionError
-	if errors.As(err, &excErr) {
+	if excErr, ok := errors.AsType[*modbus.ExceptionError](err); ok {
 		return ScanOutcomeException, uint8(excErr.ExceptionCode)
 	}
 	if errors.Is(err, modbus.ErrRequestTimedOut) || errors.Is(err, context.DeadlineExceeded) {
@@ -297,8 +294,7 @@ func shouldReconnect(err error) bool {
 	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ENETRESET) {
 		return true
 	}
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
+	if errno, ok := errors.AsType[syscall.Errno](err); ok {
 		switch errno {
 		case syscall.EPIPE, syscall.ECONNRESET, syscall.ENETRESET:
 			return true
@@ -707,7 +703,7 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 	}
 	// Progress classification: always-on = iteration start, per-block success/failure, read-retry chatter
 	// when cfg.Debug inside readRegisters; interval sleep has no line (delay 0 skips sleep).
-	data, err := os.ReadFile(cfg.BlocksFile)
+	data, err := fsutil.ReadInput(cfg.BlocksFile, fsutil.MaxJSONInput)
 	if err != nil {
 		return nil, errs.InvalidInput(errs.CodeInputFileOpenFailed, err.Error(), err)
 	}
@@ -729,6 +725,9 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 			dir = "./"
 		}
 		out = AutoCapturePath(dir, "record")
+	}
+	if fsutil.SameFile(out, cfg.BlocksFile) {
+		return nil, errs.InvalidInput(errs.CodeInvalidFlagCombination, fsutil.ErrSameFile.Error(), fsutil.ErrSameFile)
 	}
 	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, 1)
 	if err != nil {
@@ -832,7 +831,7 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 	}
 
 	seen := make(map[uint8]struct{})
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, "unit list has an empty segment (remove extra commas)", nil)
@@ -856,14 +855,17 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 			if err != nil {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit range %q: %v", part, err), err)
 			}
-			if lo < 1 || hi > 255 {
+			if lo < 1 || lo > math.MaxUint8 || hi > math.MaxUint8 {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("unit IDs must be 1-255 in range %q", part), nil)
 			}
 			if lo > hi {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit range %q: start > end", part), nil)
 			}
-			for i := lo; i <= hi; i++ {
-				seen[uint8(i)] = struct{}{}
+			for id := uint8(lo); ; id++ { // lo and hi are 1-255 (checked above)
+				seen[id] = struct{}{}
+				if uint64(id) == hi {
+					break
+				}
 			}
 		} else {
 			// Single number
@@ -871,7 +873,7 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 			if err != nil {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("invalid unit ID %q: %v", part, err), err)
 			}
-			if n < 1 || n > 255 {
+			if n < 1 || n > math.MaxUint8 {
 				return nil, errs.InvalidInput(errs.CodeInvalidUnitSelector, fmt.Sprintf("unit ID must be 1-255, got %d", n), nil)
 			}
 			seen[uint8(n)] = struct{}{}
@@ -885,7 +887,7 @@ func ParseUnitIDs(unitID string) ([]uint8, error) {
 	for id := range seen {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	return ids, nil
 }
 

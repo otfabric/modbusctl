@@ -9,14 +9,16 @@
 package plan
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/otfabric/modbusctl/internal/capfile"
+	"github.com/otfabric/modbusctl/internal/conv"
+	"github.com/otfabric/modbusctl/internal/fsutil"
 )
 
 // FileRecord is one sub-request of an FC20 Read File Record request.
@@ -70,7 +72,7 @@ func Read(path string, defaultFC uint8) ([]Request, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("blocks file path is required (--blocks-file / MODBUSCTL_BLOCKS_FILE)")
 	}
-	data, err := os.ReadFile(path)
+	data, err := fsutil.ReadInput(path, fsutil.MaxJSONInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read blocks file: %w", err)
 	}
@@ -174,21 +176,21 @@ func (r *Request) IDCode() uint8 {
 
 // PDU returns the request PDU r sends (for FC43, its first request).
 func (r *Request) PDU() []byte {
-	be := func(v uint16) []byte { return []byte{byte(v >> 8), byte(v)} }
+	be := binary.BigEndian.AppendUint16
 	switch r.Function {
 	case 1, 2, 3, 4:
-		return append(append([]byte{r.Function}, be(r.StartAddress)...), be(r.RegisterCount)...)
+		return be(be([]byte{r.Function}, r.StartAddress), r.RegisterCount)
 	case 8:
 		data, _ := r.DiagnosticData()
-		return append(append([]byte{8}, be(r.SubFunction)...), data...)
+		return append(be([]byte{8}, r.SubFunction), data...)
 	case 20:
-		pdu := []byte{20, byte(7 * len(r.FileRecords))}
+		pdu := []byte{20, conv.Uint8(7 * len(r.FileRecords))}
 		for _, f := range r.FileRecords {
-			pdu = append(append(append(append(pdu, 6), be(f.File)...), be(f.Record)...), be(f.Length)...)
+			pdu = be(be(be(append(pdu, 6), f.File), f.Record), f.Length)
 		}
 		return pdu
 	case 24:
-		return append([]byte{24}, be(r.FIFOAddress)...)
+		return be([]byte{24}, r.FIFOAddress)
 	case 43:
 		return []byte{43, 0x0E, r.IDCode(), r.ObjectID}
 	}

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/otfabric/modbusctl/internal/types"
 )
 
 // TextMarshaler produces human-oriented CLI text (default --format text).
@@ -65,8 +67,10 @@ func writeJSON(w io.Writer, v any) error {
 	return err
 }
 
+// writeTextWithTrailingNewline writes text output made safe for a terminal
+// ([types.TerminalSafeText]): it carries strings from devices and files.
 func writeTextWithTrailingNewline(w io.Writer, s string) error {
-	s = strings.TrimSuffix(s, "\n")
+	s = strings.TrimSuffix(types.TerminalSafeText(s), "\n")
 	if _, err := io.WriteString(w, s+"\n"); err != nil {
 		return err
 	}

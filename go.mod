@@ -4,11 +4,12 @@ go 1.26.0
 
 require (
 	github.com/mdlayher/arp v0.0.0-20220512170110-6706a2966875
-	github.com/otfabric/go-modbus v1.10.6
+	github.com/otfabric/go-modbus v1.11.1
 	github.com/otfabric/go-modbus-capture v0.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/sys v0.49.0
 )
 
 require (
@@ -22,6 +23,5 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

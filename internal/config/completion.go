@@ -3,6 +3,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/otfabric/go-modbus/codec"
@@ -54,12 +55,7 @@ func ValidScanAlgo(algo string) bool {
 	if algo == "" {
 		return true
 	}
-	for _, v := range scanAlgorithmValues {
-		if algo == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(scanAlgorithmValues, algo)
 }
 
 // RegisterScanAlgoCompletion registers shell completion for the --algo flag (scan command).

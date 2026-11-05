@@ -8,13 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/otfabric/go-modbus-capture/capture"
 	"github.com/otfabric/go-modbus-capture/jsonl"
 	"github.com/otfabric/go-modbus-capture/mbcap"
 	"github.com/otfabric/go-modbus-capture/mbcsv"
+	"github.com/otfabric/modbusctl/internal/fsutil"
 )
 
 // ErrLegacyFormat is returned for a modbusctl 2.x capture file (.mcap), which
@@ -69,7 +69,7 @@ type Loaded struct {
 // says so. A capture holding a sample outside the supported read functions
 // (see [IsSpecRead]) is rejected with [ErrUnsupportedFunction].
 func Load(path string) (*Loaded, error) {
-	f, err := os.Open(path)
+	f, err := fsutil.OpenInput(path)
 	if err != nil {
 		return nil, err
 	}

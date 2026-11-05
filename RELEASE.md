@@ -1,5 +1,35 @@
 # modbusctl Releases
 
+## v3.5.0
+
+**Date:** 2026-11-05
+**Previous release:** v3.4.3
+
+### Security
+
+- Text and table output, and the `error:` line, escape control characters, Unicode bidi controls and bytes that are not UTF-8 in strings from devices and files: FC43 identification, ASCII and UTF-16 codec values in `client decode` and `client poll`, profile names in `capture decode`. A device could inject terminal escape sequences or forge lines. JSON output is unchanged.
+- modbusctl no longer writes through a symbolic link at an output path (exit 10, `output_file_create_failed`). New captures, exports and `discover -o` files are created with mode 0600 instead of 0644.
+
+### Fixed
+
+- `--output` naming the command's own input (the input or profile of `capture decode`, `extract`, `strings` and `frequencies`, or the blocks file of `client record`) exits 3 (`invalid_flag_combination`) instead of truncating the input before reading it.
+- `client scan --algo deep` no longer reads addresses outside `--start`/`--end` when the range ends at 65535 (the address counter wrapped to 0).
+- `server replay --speed` refuses NaN, infinities and values above 31536000 (exit 3); the replay clock stays inside the capture window at extreme speeds. Replay no longer answers reads beyond one response (more than 125 registers or 2000 coils) with a wrapped byte count.
+- `discover` refuses an oversized subnet (`0.0.0.0/0`, an IPv6 /64) at once instead of enumerating every host first; the error message text changed.
+
+### Changed
+
+- Blocks files and device profiles larger than 16 MiB are refused (exit 3).
+- The healthcheck binary has a 10 s timeout per check, and an `-http` value that is not an http(s) URL with a host exits 2.
+- CI runs Go 1.26 and 1.27; `go fix` modernised the code. Built on go-modbus v1.11.1: the server closes a connection whose response cannot be written in time; RTU and ASCII links drain a late answer instead of returning it for the next request; RTU variable-length reads honour the deadline; UDP drops bytes left over from a previous datagram.
+- Integer conversions are range-checked and the pty helpers use golang.org/x/sys/unix instead of unsafe: a static scan reports no finding.
+
+### Tests
+
+- Hostile client, device-string, file and flag tests, and new fuzz targets for replay reads and clock, terminal escaping, capture analyses, device-profile decoding and replay speed.
+
+---
+
 ## v3.4.3
 
 **Date:** 2026-11-03

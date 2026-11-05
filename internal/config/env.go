@@ -13,7 +13,7 @@ import (
 
 // LoadFromEnv populates tagged fields from the process environment.
 // Malformed numeric or boolean values produce errors (joined when multiple vars fail).
-func LoadFromEnv(cfg interface{}) error {
+func LoadFromEnv(cfg any) error {
 	v := reflect.ValueOf(cfg)
 	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct {
 		return nil
@@ -27,7 +27,7 @@ var envErr error
 // DeferLoadFromEnv calls [LoadFromEnv] and keeps the first error for [EnvError]. Commands
 // are wired in package init, before anything can render a fatal error, so that a malformed
 // variable must not end the process here.
-func DeferLoadFromEnv(cfg interface{}) {
+func DeferLoadFromEnv(cfg any) {
 	if err := LoadFromEnv(cfg); err != nil && envErr == nil {
 		envErr = err
 	}

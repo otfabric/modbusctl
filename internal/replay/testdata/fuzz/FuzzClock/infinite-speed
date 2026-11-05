@@ -1,0 +1,7 @@
+go test fuzz v1
+uint64(1000)
+float64(+Inf)
+uint64(100)
+uint64(1000)
+int(0)
+int64(1000000000)

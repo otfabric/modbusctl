@@ -13,7 +13,7 @@ import (
 func ParseSunSpecBases(bases string) ([]uint16, error) {
 	var out []uint16
 	seen := make(map[uint16]struct{})
-	for _, s := range strings.Split(bases, ",") {
+	for s := range strings.SplitSeq(bases, ",") {
 		s = strings.TrimSpace(s)
 		if s == "" {
 			continue
