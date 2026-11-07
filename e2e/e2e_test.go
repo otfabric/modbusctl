@@ -6,6 +6,7 @@ package e2e
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -42,12 +43,26 @@ func TestVersionPrintsTheBuiltVersion(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code %d, want 0\n%s", code, output)
 	}
-	want := os.Getenv("MODBUSCTL_E2E_VERSION")
-	if want == "" {
+	// make e2e sets it to the tag of HEAD, empty off a tag: then the binary is a dev build.
+	want, ok := os.LookupEnv("MODBUSCTL_E2E_VERSION")
+	if !ok {
 		t.Fatal("MODBUSCTL_E2E_VERSION is not set; run make e2e")
 	}
-	if !strings.Contains(output, "modbusctl") || !strings.Contains(output, want) {
-		t.Fatalf("output does not name modbusctl %s:\n%s", want, output)
+	if want == "" {
+		want = "dev"
+	}
+	want = strings.TrimPrefix(want, "v")
+	if !strings.HasPrefix(output, "modbusctl "+want+" (") || strings.Count(output, "\n") != 1 {
+		t.Fatalf("output is not one line naming modbusctl %s:\n%s", want, output)
+	}
+
+	output, code = run(t, "version", "--json")
+	if code != 0 {
+		t.Fatalf("version --json: exit code %d, want 0\n%s", code, output)
+	}
+	var info map[string]any
+	if err := json.Unmarshal([]byte(output), &info); err != nil || info["name"] != "modbusctl" || info["version"] != want {
+		t.Fatalf("version --json is not the build information of modbusctl %s (%v):\n%s", want, err, output)
 	}
 }
 

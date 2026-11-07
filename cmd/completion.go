@@ -21,7 +21,7 @@ var completionShells = []string{completionBash, completionZsh, completionFish, c
 var completionCmd = &cobra.Command{
 	Use:       "completion [bash|zsh|fish|powershell]",
 	Short:     "Generate shell completion script",
-	Long:      "Output a completion script for the given shell. Install with: Bash: source <(modbusctl completion bash); Zsh: source <(modbusctl completion zsh); Fish: modbusctl completion fish | source.",
+	Long:      "Output a completion script for bash, zsh, fish or PowerShell. Installation: see Shell completion in the README.",
 	ValidArgs: completionShells,
 	Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 	RunE: func(cmd *cobra.Command, args []string) error {

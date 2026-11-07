@@ -66,8 +66,8 @@ func TestMain_version(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("version: exit %d, stderr %q", code, stderr)
 	}
-	if want := "modbusctl version: " + version + "\n"; stdout != want {
-		t.Fatalf("version output %q, want %q", stdout, want)
+	if !strings.HasPrefix(stdout, "modbusctl dev (commit ") || strings.Count(stdout, "\n") != 1 {
+		t.Fatalf("version output %q, want one line starting with %q", stdout, "modbusctl dev (commit ")
 	}
 }
 

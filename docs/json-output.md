@@ -40,6 +40,7 @@ The JSON output types live in `internal/types`. Fields marked *optional* are lef
 | `client sunspec map` | `SunSpecMapOutput` | `target`, `base`, `marker_regs` (the two marker registers, `base-base+1`), `models`, `not_detected` (optional) |
 | `client sunspec probe` | `SunSpecProbeOutput` | `target`, `unit_id`, `modbus` (`fc03`, `fc04`, `fc43`: function supported; `fc03_error`, `fc04_error`, `fc43_error`: optional, when the probe itself failed), `sunspec` (`detected`, `base_address`, `models_found`, `end_model`, and the optional `detection_error` and `model_headers_error`) |
 | `discover` | `DiscoverOutput` | `port`, `interface` (optional), `subnets` (optional), `devices`: per device `ip`, `port`, `mac`, `interface`. With `--output`, the file holds the `devices` array alone |
+| `version` | `buildinfo.Info` | `version --json` or `MODBUSCTL_FORMAT=json`: one line, keys in this order, all present: `name`, `version` (no leading `v`; `dev` for a development build), `tag` (`""` when the build has no tag), `commit` (full SHA, `-dirty` for a modified tree, or `unknown`), `built` (RFC 3339 UTC or `unknown`), `libraries` (the OT Fabric libraries the binary is built with: `name`, `version`; `[]` when none), `go`, `platform` (`goos/goarch`) |
 | `capture extract` | `AddressBlock` | the output file is an array of `start_address`, `register_count` |
 
 A SunSpec model header (in `models`) has `id`, `length`, `start_address`, `end_address`, `next_address` and `is_end_model`. A `summary` (`ResultSummary`) has `requested`, `succeeded` and `failed`.

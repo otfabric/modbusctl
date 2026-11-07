@@ -16,6 +16,7 @@ import (
 	"github.com/otfabric/modbusctl/cmd/client"
 	"github.com/otfabric/modbusctl/cmd/discover"
 	"github.com/otfabric/modbusctl/cmd/server"
+	"github.com/otfabric/modbusctl/internal/buildinfo"
 	"github.com/otfabric/modbusctl/internal/capfile"
 	"github.com/otfabric/modbusctl/internal/config"
 	"github.com/otfabric/modbusctl/internal/errs"
@@ -25,17 +26,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// buildMeta holds link-time metadata set from main via SetBuildMeta.
-var buildMeta struct {
-	version, tag, commit, buildDate string
-}
-
 // SetBuildMeta is called from main before Execute; values come from ldflags -X main.*.
 func SetBuildMeta(version, tag, commit, buildDate string) {
-	buildMeta.version = version
-	buildMeta.tag = tag
-	buildMeta.commit = commit
-	buildMeta.buildDate = buildDate
+	buildinfo.Set(version, tag, commit, buildDate)
 	if v := strings.TrimSpace(version); v != "" {
 		capfile.Producer = "modbusctl " + v
 	}
@@ -56,6 +49,7 @@ func init() {
 	rootCmd.AddCommand(server.ServerCmd)
 	rootCmd.AddCommand(versionCmd)
 	refuseUnknownSubcommands(rootCmd)
+	registerFlagCompletions(rootCmd)
 }
 
 // refuseUnknownSubcommands makes the unknown subcommand of a command group a usage error.
@@ -73,23 +67,28 @@ func refuseUnknownSubcommands(c *cobra.Command) {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version of modbusctl",
-	Run: func(cmd *cobra.Command, args []string) {
-		out := cmd.OutOrStdout()
-		ver := strings.TrimSpace(buildMeta.version)
-		if ver == "" {
-			ver = "(unknown)"
+	Long: "Print the version, tag, commit, build date, Go version and platform of modbusctl on one line, " +
+		"or as one JSON object with --json or MODBUSCTL_FORMAT=json.",
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		info := buildinfo.Get("modbusctl")
+		asJSON, _ := cmd.Flags().GetBool("json")
+		if !asJSON {
+			if f, err := format.Parse(config.Getenv("MODBUSCTL_FORMAT")); err == nil && f == format.FormatJSON {
+				asJSON = true
+			}
 		}
-		_, _ = fmt.Fprintf(out, "modbusctl version: %s\n", ver)
-		if s := strings.TrimSpace(buildMeta.tag); s != "" {
-			_, _ = fmt.Fprintf(out, "tag:         %s\n", s)
+		line := info.String()
+		if asJSON {
+			line = info.JSON()
 		}
-		if s := strings.TrimSpace(buildMeta.commit); s != "" {
-			_, _ = fmt.Fprintf(out, "commit:      %s\n", s)
-		}
-		if s := strings.TrimSpace(buildMeta.buildDate); s != "" {
-			_, _ = fmt.Fprintf(out, "build date:  %s\n", s)
-		}
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), line)
+		return err
 	},
+}
+
+func init() {
+	versionCmd.Flags().Bool("json", false, "Print the build information as one JSON object")
 }
 
 var typeRunErrors sync.Once
