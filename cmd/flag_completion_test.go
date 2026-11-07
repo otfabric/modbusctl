@@ -3,7 +3,9 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"slices"
 	"strings"
@@ -109,4 +111,36 @@ func TestEveryValueFlagCompletes(t *testing.T) {
 		}
 	}
 	walk(rootCmd)
+}
+
+func TestCompleteInterfaceFlag(t *testing.T) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatalf("net.Interfaces: %v", err)
+	}
+	want := make([]string, 0, len(ifaces))
+	for _, i := range ifaces {
+		want = append(want, i.Name)
+	}
+	got, directive := complete(t, "discover", "--interface", "")
+	if !slices.Equal(got, want) {
+		t.Fatalf("--interface candidates %v, want %v", got, want)
+	}
+	if want := fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp); directive != want {
+		t.Fatalf("--interface directive %q, want %q", directive, want)
+	}
+}
+
+func TestCompleteInterfacesError(t *testing.T) {
+	saved := netInterfaces
+	t.Cleanup(func() { netInterfaces = saved })
+	netInterfaces = func() ([]net.Interface, error) { return nil, errors.New("no interfaces") }
+
+	got, directive := completeInterfaces(nil, nil, "")
+	if got != nil {
+		t.Fatalf("candidates %v on error, want none", got)
+	}
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("directive %v on error, want %v", directive, cobra.ShellCompDirectiveNoFileComp)
+	}
 }
