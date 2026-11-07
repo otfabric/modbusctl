@@ -26,6 +26,28 @@ irm https://get.otfabric.io/modbusctl.ps1 | iex
 
 Linux (amd64, arm64, armv7), macOS (Intel, Apple silicon) and Windows (amd64, arm64). The installer verifies the release's SHA-256 checksum, installs per user without `sudo` (`~/.local/bin`, Windows `%LOCALAPPDATA%\OTFabric\bin`), and upgrades in place when run again. Pin a version with `OTF_VERSION=x.y.z`; for CI, containers and device images use `OTF_UNMANAGED_INSTALL=<dir>`; all options: [otfabric/install](https://github.com/otfabric/install#options). For offline machines, the archives and checksums are on [Releases](https://github.com/otfabric/modbusctl/releases).
 
+### Shell completion
+
+Completion knows the subcommands and flags, and the values of enum flags such as **`--format`** (text/json/table), **`--algo`**, **`--function`**, **`--codec`**, **`--parity`**, **`--regtype`** and **`--sub-function`**.
+
+```bash
+# bash (needs the bash-completion package)
+mkdir -p ~/.local/share/bash-completion/completions
+modbusctl completion bash > ~/.local/share/bash-completion/completions/modbusctl
+
+# zsh: a directory on your fpath, then restart the shell
+mkdir -p ~/.zsh/completions && modbusctl completion zsh > ~/.zsh/completions/_modbusctl
+# and once in ~/.zshrc:  fpath=(~/.zsh/completions $fpath); autoload -U compinit && compinit
+
+# fish
+mkdir -p ~/.config/fish/completions && modbusctl completion fish > ~/.config/fish/completions/modbusctl.fish
+```
+
+```powershell
+# PowerShell: add this line to your profile ($PROFILE)
+modbusctl completion powershell | Out-String | Invoke-Expression
+```
+
 ---
 
 ## Why modbusctl?
@@ -280,8 +302,6 @@ modbusctl capture frequencies
 modbusctl discover
 modbusctl version
 ```
-
-**Shell completion:** Enum-style flags support tab completion, including **`--format`** (text/json/table), **`--algo`**, **`--function`**, **`--codec`**, **`--parity`**, **`--regtype`**, and **`--sub-function`**. To enable completion, generate and source the script (see [Cobra’s shell completion guide](https://github.com/spf13/cobra/blob/main/shell_completions.md)); for example, `modbusctl completion bash` (or `zsh` / `fish` / `powershell`).
 
 ### Transports and serial settings
 
@@ -925,21 +945,6 @@ modbusctl client sunspec probe --ip 192.168.1.10 --unit 1 --format json
 ```
 
 SunSpec subcommands use the same `--format` / `MODBUSCTL_FORMAT` as other client commands (`text` default, `json`, `table`). A hidden parent flag `--json` is deprecated and maps to `--format json`.
-
-#### Shell completion (install)
-
-Generate and source the completion script for your shell so subcommands and flags (including enum values like `--regtype`, `--algo`, `--function` and `--format`) are completed:
-
-```console
-# Bash
-source <(modbusctl completion bash)
-
-# Zsh
-source <(modbusctl completion zsh)
-
-# Fish
-modbusctl completion fish | source
-```
 
 ## Environment Variable Configuration
 
