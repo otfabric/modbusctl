@@ -1,4 +1,4 @@
-.PHONY: help all run test coverage cover compile lint lint-ci fmt fmt-check vet build build-nocheck build-all release-all install clean check-legacy vuln e2e fuzz coverage-pkg-check
+.PHONY: help all run test coverage cover compile lint lint-ci fmt fmt-check vet build build-nocheck build-all release-all install clean check-legacy vuln e2e fuzz coverage-pkg-check docs-check
 
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -34,6 +34,8 @@ RELEASE_DIR   := release
 COVERAGE_MIN ?= 85
 # Per-package floor (TEST-012): what the weakest package measures now, rounded down.
 COVER_PKG_MIN := 80
+# docsync release of docs-check (DOC-008).
+DOCSYNC_VERSION := v0.2.0
 
 all: test build build-all ## Test and build the application
 
@@ -46,7 +48,7 @@ coverage-pkg-check: coverage ## Fail when a package is below COVER_PKG_MIN
 	END { for (k in n) { p = k; sub(/\/[^\/]*$$/, "", p); s[p] += n[k]; if (k in h) c[p] += n[k] } \
 	for (p in s) { v = 100 * c[p] / s[p]; if (v < m) { printf "%s: %.1f%% < %s%%\n", p, v, m; bad = 1 } } exit bad }' coverage.out
 
-check: fmt fmt-check lint lint-ci vet vuln test coverage-pkg-check ## Run all checks (format, lint, vet, vulnerability scan, test, coverage)
+check: fmt fmt-check lint lint-ci vet vuln test coverage-pkg-check docs-check ## Run all checks (format, lint, vet, vulnerability scan, test, coverage, docs)
 
 test: ## Run unit tests with race detector
 	@echo "Running unit tests (race detector)"
@@ -176,3 +178,6 @@ clean: ## Clean the build artifacts
 	@rm -f $(BOOTSTRAP_NAME)
 	@rm -f $(RELEASE_DIR)/*
 	@rm -f *.{json,csv,log,mbcap} results/*.{json,csv,log,mbcap}
+# The documents against the code (DOC-008): docsync, as docs-check.yml runs it.
+docs-check: ## Check that the documents agree with the code (docsync)
+	@go run github.com/otfabric/docsync@$(DOCSYNC_VERSION) check .
