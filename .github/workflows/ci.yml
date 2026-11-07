@@ -4,8 +4,10 @@ run-name: "CI (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ githu
 on:
   push:
     branches: ["**"]
+    paths-ignore: ['**/*.md']
   pull_request:
     branches: ["**"]
+    paths-ignore: ['**/*.md']
 
 permissions:
   contents: read
@@ -24,6 +26,7 @@ jobs:
       # coverage across the whole module, matching `make coverage`.
       test-exclude-regex: "/example(s)?($|/)"
       coverpkg: ./...
+      policy-version: v1.4.1
     secrets: inherit
 
   # The per-package coverage floor (TEST-012). This job also holds the
