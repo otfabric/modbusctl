@@ -557,7 +557,7 @@ modbusctl client codecs --value-kind string --format json
 
 #### Poll registers continuously
 
-`client poll` reads the same block every `--interval` milliseconds and prints each sample as soon as it is read. It does not write a file; use [`client record`](#record-registers-over-time-interval-duration-based) to write a capture file.
+`client poll` reads the same block every `--interval` milliseconds and prints each sample as soon as it is read. It does not write a file; use [`client record`](#record-a-device-over-time-interval-duration-based) to write a capture file.
 
 It runs until `--polls` samples were taken, or until you press Ctrl-C when `--polls` is 0 (the default). `--function` selects coils (1), discrete inputs (2), holding registers (3, default) or input registers (4). With `--codec`, registers are decoded into typed values exactly as `client decode` does.
 
