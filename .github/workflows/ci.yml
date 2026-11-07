@@ -26,7 +26,7 @@ jobs:
       # coverage across the whole module, matching `make coverage`.
       test-exclude-regex: "/example(s)?($|/)"
       coverpkg: ./...
-      policy-version: v1.4.1
+      policy-version: v1.4.2
     secrets: inherit
 
   # The per-package coverage floor (TEST-012). This job also holds the

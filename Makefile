@@ -35,7 +35,7 @@ COVERAGE_MIN ?= 85
 # Per-package floor (TEST-012): what the weakest package measures now, rounded down.
 COVER_PKG_MIN := 80
 # docsync release of docs-check (DOC-008).
-DOCSYNC_VERSION := v0.3.0
+DOCSYNC_VERSION := v0.3.1
 
 all: test build build-all ## Test and build the application
 
