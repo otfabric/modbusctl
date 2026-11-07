@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/otfabric/modbusctl/internal/buildinfo"
 	"github.com/otfabric/modbusctl/internal/errs"
 	"github.com/otfabric/modbusctl/internal/mbtest"
 	"github.com/otfabric/modbusctl/internal/types"
@@ -151,7 +152,7 @@ func TestRootCommandTree(t *testing.T) {
 
 func TestVersion(t *testing.T) {
 	defer SetBuildMeta("", "", "", "")
-	tail := runtime.Version() + ", " + runtime.GOOS + "/" + runtime.GOARCH
+	tail := libsText("modbusctl") + runtime.Version() + ", " + runtime.GOOS + "/" + runtime.GOARCH
 
 	SetBuildMeta(" v9.8.7 ", "v9.8.7", "1802d0f9afe8642d1e278120b76fcdfac967cb9e", "2026-01-02T03:04:05Z")
 	code, stdout, stderr := execute(t, "version")
@@ -164,7 +165,7 @@ func TestVersion(t *testing.T) {
 	}
 
 	wantJSON := `{"name":"modbusctl","version":"9.8.7","tag":"v9.8.7","commit":"1802d0f9afe8642d1e278120b76fcdfac967cb9e",` +
-		`"built":"2026-01-02T03:04:05Z","go":"` + runtime.Version() + `","platform":"` + runtime.GOOS + "/" + runtime.GOARCH + `"}` + "\n"
+		`"built":"2026-01-02T03:04:05Z",` + libsJSON("modbusctl") + `"go":"` + runtime.Version() + `","platform":"` + runtime.GOOS + "/" + runtime.GOARCH + `"}` + "\n"
 	code, stdout, _ = execute(t, "version", "--json")
 	if code != errs.ExitOK || stdout != wantJSON {
 		t.Fatalf("version --json: exit %d, output %q, want %q", code, stdout, wantJSON)
@@ -519,4 +520,19 @@ func TestExecute_unknownSubcommandText(t *testing.T) {
 	if code != errs.ExitOK || !strings.Contains(stdout, "sunspec") {
 		t.Fatalf("exit %d, stdout %q", code, stdout)
 	}
+}
+
+// libsText and libsJSON are how the OT Fabric libraries of this test binary
+// appear in the version output (internal/buildinfo tests the formatting).
+func libsText(name string) string {
+	var s string
+	for _, l := range buildinfo.Get(name).Libraries {
+		s += l.Name + " " + l.Version + ", "
+	}
+	return s
+}
+
+func libsJSON(name string) string {
+	out, _ := json.Marshal(buildinfo.Get(name).Libraries)
+	return `"libraries":` + string(out) + `,`
 }

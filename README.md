@@ -306,10 +306,10 @@ modbusctl version
 `modbusctl version` prints one line; `--json` (or `MODBUSCTL_FORMAT=json`) prints the same as one JSON object ([json-output.md](docs/json-output.md)):
 
 ```text
-modbusctl 3.6.0 (tag v3.6.0, commit 1802d0f9afe8642d1e278120b76fcdfac967cb9e, built 2026-11-07T10:00:00Z, go1.26.10, linux/amd64)
+modbusctl 3.6.0 (tag v3.6.0, commit 1802d0f9afe8642d1e278120b76fcdfac967cb9e, built 2026-11-07T10:00:00Z, go-modbus 1.11.1, go-modbus-capture 0.1.0, go-serial 0.2.1, go1.26.10, linux/amd64)
 ```
 
-A development build (`go build`, `go run`) says `dev` and takes the commit from the Go VCS stamp, with `-dirty` for a modified tree; `go install …@vX.Y.Z` reports that version.
+After the build date come the OT Fabric libraries the binary is built with. A development build (`go build`, `go run`, `make build` off a tag) says `dev` and takes the commit from the Go VCS stamp, with `-dirty` for a modified tree; `go install …@vX.Y.Z` reports that version.
 
 ### Transports and serial settings
 

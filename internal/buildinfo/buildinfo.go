@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strings"
 )
 
@@ -27,13 +28,43 @@ var readBuildInfo = debug.ReadBuildInfo
 
 // Info is what `version` prints. The field order is the order of the JSON keys.
 type Info struct {
-	Name     string `json:"name"`
-	Version  string `json:"version"`
-	Tag      string `json:"tag"`
-	Commit   string `json:"commit"`
-	Built    string `json:"built"`
-	Go       string `json:"go"`
-	Platform string `json:"platform"`
+	Name      string    `json:"name"`
+	Version   string    `json:"version"`
+	Tag       string    `json:"tag"`
+	Commit    string    `json:"commit"`
+	Built     string    `json:"built"`
+	Libraries []Library `json:"libraries"`
+	Go        string    `json:"go"`
+	Platform  string    `json:"platform"`
+}
+
+// Library is an OT Fabric library (a github.com/otfabric/go-* module) the
+// binary is built with.
+type Library struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// libraryPrefix selects the OT Fabric libraries among the dependencies.
+const libraryPrefix = "github.com/otfabric/go-"
+
+// libraries returns the OT Fabric libraries of the build, sorted by name: the
+// replacement when a module is replaced, never the main module itself.
+func libraries(bi *debug.BuildInfo) []Library {
+	libs := []Library{}
+	for _, d := range bi.Deps {
+		m := d
+		if d.Replace != nil && d.Replace.Version != "" {
+			m = d.Replace // a replacement by a local directory has no version
+		}
+		if !strings.HasPrefix(d.Path, libraryPrefix) || d.Path == bi.Main.Path {
+			continue
+		}
+		name := d.Path[strings.LastIndex(d.Path, "/")+1:]
+		libs = append(libs, Library{Name: name, Version: strings.TrimPrefix(m.Version, "v")})
+	}
+	sort.Slice(libs, func(i, j int) bool { return libs[i].Name < libs[j].Name })
+	return libs
 }
 
 // pseudoVersion matches the timestamp and commit of a Go pseudo-version
@@ -59,6 +90,10 @@ func Get(name string) Info {
 		Platform: runtime.GOOS + "/" + runtime.GOARCH,
 	}
 	bi, ok := readBuildInfo()
+	info.Libraries = []Library{}
+	if ok {
+		info.Libraries = libraries(bi)
+	}
 	if info.Version == "" && ok {
 		if v := bi.Main.Version; isRelease(v) {
 			info.Version = strings.TrimPrefix(v, "v")
@@ -94,20 +129,24 @@ func Get(name string) Info {
 	return info
 }
 
-// String is the text line: name version (tag …, commit …, built …, go, os/arch). The tag
-// part is left out when no tag was set.
+// String is the text line: name version (tag …, commit …, built …, libraries…, go,
+// os/arch). The tag part is left out when no tag was set, the libraries when there are none.
 func (i Info) String() string {
 	var b strings.Builder
 	b.WriteString(i.Name + " " + i.Version + " (")
 	if i.Tag != "" {
 		b.WriteString("tag " + i.Tag + ", ")
 	}
-	b.WriteString("commit " + i.Commit + ", built " + i.Built + ", " + i.Go + ", " + i.Platform + ")")
+	b.WriteString("commit " + i.Commit + ", built " + i.Built + ", ")
+	for _, l := range i.Libraries {
+		b.WriteString(l.Name + " " + l.Version + ", ")
+	}
+	b.WriteString(i.Go + ", " + i.Platform + ")")
 	return b.String()
 }
 
 // JSON is the one-line JSON object, keys in the order name, version, tag, commit, built,
-// go, platform.
+// libraries, go, platform.
 func (i Info) JSON() string {
 	out, err := json.Marshal(i)
 	if err != nil { // cannot happen: every field is a string
