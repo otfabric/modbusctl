@@ -10,7 +10,7 @@ import (
 
 // Injected at link time (see Makefile): -X main.version=... etc.
 var (
-	version   = "dev"
+	version   = ""
 	tag       = ""
 	commit    = ""
 	buildDate = ""

@@ -1,5 +1,22 @@
 # modbusctl Releases
 
+## v3.6.0
+
+**Date:** 2026-11-07
+**Previous release:** v3.5.1
+
+### Added
+
+- `version --json` prints the build information as one JSON object (`name`, `version`, `tag`, `commit`, `built`, `go`, `platform`, always in this order); `MODBUSCTL_FORMAT=json` does the same.
+- Shell completion completes the value of every flag that takes one: the enum flags that had no completion (`--function` of the `capture` commands, `--missing`, `--before-first`, `--retry-timeout`, `--data-bits`, `--stop-bits`, `--baud`, `--family`, `--value-kind`), the URL schemes of `--url`, network interfaces for `--interface`, `.mbcap`/`.jsonl`/`.csv` files for `--input`, JSON files for `--profile` and `--blocks-file`, PEM files for `--tls-ca`, `--tls-cert` and `--tls-key`; numbers and addresses no longer complete file names.
+
+### Changed
+
+- `version` prints one line, `modbusctl 3.6.0 (tag v3.6.0, commit <sha>, built <date>, go1.26.10, linux/amd64)`, instead of a block of `version:`, `tag:`, `commit:` and `build date:` lines; the version has no leading `v`. A development build reports `dev` and the commit from the Go VCS stamp (`-dirty` for a modified tree); `go install …@vX.Y.Z` reports that version. Scripts that parsed the old lines should use `version --json`.
+- `make build` stamps the full commit SHA.
+
+---
+
 ## v3.5.1
 
 **Date:** 2026-11-05

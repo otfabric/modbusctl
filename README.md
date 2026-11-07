@@ -28,7 +28,7 @@ Linux (amd64, arm64, armv7), macOS (Intel, Apple silicon) and Windows (amd64, ar
 
 ### Shell completion
 
-Completion knows the subcommands and flags, and the values of enum flags such as **`--format`** (text/json/table), **`--algo`**, **`--function`**, **`--codec`**, **`--parity`**, **`--regtype`** and **`--sub-function`**.
+Completion knows the subcommands and flags, the values of enum flags such as **`--format`** (text/json/table), **`--algo`**, **`--function`**, **`--codec`**, **`--parity`**, **`--regtype`**, **`--sub-function`**, **`--missing`** and **`--family`**, the URL schemes of **`--url`**, and capture, profile and certificate files for **`--input`**, **`--profile`** and **`--tls-*`**.
 
 ```bash
 # bash (needs the bash-completion package)
@@ -237,7 +237,7 @@ modbusctl
 │   └── frequencies      Detect ~50 Hz frequency data in captured registers
 ├── discover             Discover Modbus devices on subnets
 ├── completion           Generate shell completion script (bash|zsh|fish|powershell)
-└── version              Print version
+└── version              Print version, tag, commit and build date (--json)
 ```
 
 ---
@@ -302,6 +302,14 @@ modbusctl capture frequencies
 modbusctl discover
 modbusctl version
 ```
+
+`modbusctl version` prints one line; `--json` (or `MODBUSCTL_FORMAT=json`) prints the same as one JSON object ([json-output.md](docs/json-output.md)):
+
+```text
+modbusctl 3.6.0 (tag v3.6.0, commit 1802d0f9afe8642d1e278120b76fcdfac967cb9e, built 2026-11-07T10:00:00Z, go1.26.10, linux/amd64)
+```
+
+A development build (`go build`, `go run`) says `dev` and takes the commit from the Go VCS stamp, with `-dirty` for a modified tree; `go install …@vX.Y.Z` reports that version.
 
 ### Transports and serial settings
 
