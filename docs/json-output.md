@@ -18,6 +18,53 @@ These conventions are a **stable contract** for scripting. Prefer **typed struct
 
 **Strings from devices and files** (FC43 identification objects, codec-decoded strings, device profile names): JSON carries the exact value (encoding/json escapes control characters). Text and table output, and the `error:` line on stderr, write control characters, Unicode bidirectional controls and bytes that are not UTF-8 as Go escapes (`\x1b`, `\n`, `\u202e`, `\xff`), so a device cannot drive the terminal or forge output lines.
 
+## Fields per command
+
+The JSON output types live in `internal/types`. Fields marked *optional* are left out when empty.
+
+| Command | Type | Fields |
+|---------|------|--------|
+| `client read` | `ReadResult` | `target`, `unit_id`, `function`, `start_address`, `register_count`, `raw_byte_count`, `raw_data_hex`, `capture_output_path` |
+| `client decode` | `DecodeResult` | `target`, `unit_id`, `function`, `start_address`, `register_count`, `codec`, `family`, `value_kind`, `raw_data_hex`, `values` |
+| `client codecs` | `CodecList` | `codecs`: an array of `id`, `name`, `family`, `value_kind`, `registers` (register width), `bytes` |
+| `client write` | `WriteResult` | see the table above |
+| `client poll` | `PollSample` | see the table above. The end-of-run `PollSummary` (`target`, `polls`, `succeeded`, `failed`, `duration`, `interrupted`) goes to stderr as text |
+| `client scan` | `ScanSummaryResult` | `target`, `summary` (per read request, optional), `algo`, `total_requests`, `success_count`, `fail_count`, `exception_count`, `timeout_count`, `transport_error_count`, `blocks_captured`, `registers_captured`, `avg_response_ms` (optional), `duration`, `capture_output_path` |
+| `client record` | `RecordSummaryResult` | see the table above |
+| `client identify` | `IdentifyResult` | `target`, `summary` (optional), `units`: per unit `unit_id`, `error` (optional), and, all optional, `category`, `conformity_level`, `more_follows`, `next_object_id`, `objects` (`id`, `value`, `description` (optional)) and `report_server_id` (`error`, `data_hex`, `run_indicator_on`, all optional) |
+| `client reportserverid` | `ReportServerIDResult` | `target`, `summary` (optional), `units`: per unit `unit_id`, and, all optional, `error`, `data_hex`, `run_indicator_on` |
+| `client fingerprint` | `FingerprintResult` | `target`, `summary` (optional), `units`: per unit `unit_id`, and, all optional, `error`, `supported_read_functions`, `probe_interrupted` |
+| `client diagnostic` | `DiagnosticResult` | `target`, `unit_id`, `sub_function` (name), `sub_function_hex` (the sub-function code), `data_hex` |
+| `client sunspec detect` | `SunSpecDetectOutput` | `target`, `unit_id`, `regtype`, `detected`, `base_address`, `attempts` (optional): per probed base `index` (1-based), `base_address`, `matched`, `result` (`matched SunS`, `no marker` or the error) |
+| `client sunspec models` | `SunSpecModelsOutput` | `target`, `base`, `models`, `not_detected` (optional) |
+| `client sunspec map` | `SunSpecMapOutput` | `target`, `base`, `marker_regs` (the two marker registers, `base-base+1`), `models`, `not_detected` (optional) |
+| `client sunspec probe` | `SunSpecProbeOutput` | `target`, `unit_id`, `modbus` (`fc03`, `fc04`, `fc43`: function supported; `fc03_error`, `fc04_error`, `fc43_error`: optional, when the probe itself failed), `sunspec` (`detected`, `base_address`, `models_found`, `end_model`, and the optional `detection_error` and `model_headers_error`) |
+| `discover` | `DiscoverOutput` | `port`, `interface` (optional), `subnets` (optional), `devices`: per device `ip`, `port`, `mac`, `interface`. With `--output`, the file holds the `devices` array alone |
+| `capture extract` | `AddressBlock` | the output file is an array of `start_address`, `register_count` |
+
+A SunSpec model header (in `models`) has `id`, `length`, `start_address`, `end_address`, `next_address` and `is_end_model`. A `summary` (`ResultSummary`) has `requested`, `succeeded` and `failed`.
+
+## Device profile (input of `capture decode --profile`)
+
+```json
+{
+  "protocolData": {
+    "registers": [
+      {"controlledPropertyId": "power", "valueScaleFactor": 0.1, "start": 100, "size": 2, "format": ">i"}
+    ]
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `protocolData` | holds `registers`, the register definitions |
+| `controlledPropertyId` | the name of the value in the output |
+| `start` | the first register address |
+| `size` | the number of registers |
+| `format` | the byte order and type, Python `struct` style: `>` big-endian or `<` little-endian, then `h`/`H` (16-bit signed/unsigned), `i`/`I` (32-bit), `q`/`Q` (64-bit), `f` (float32), `d` (float64); and `>B` (one byte) |
+| `valueScaleFactor` | the decoded value is multiplied by it |
+
 ## Error object
 
 Used for a fatal error (`{"error": {…}}`) and for a row that failed.
