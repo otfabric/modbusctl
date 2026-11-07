@@ -8,7 +8,6 @@
     }
   ],
   "ignore": [
-    {"rule": "DS-REF", "subject": "sunspec.DefaultBaseAddresses", "reason": "go-modbus/sunspec.DefaultBaseAddresses (exists, used in internal/modbus/sunspec.go); docsync resolves sunspec to the local cmd/client/sunspec package"},
     {"rule": "DS-JSON", "subject": "unit", "reason": "only in CaptureHeaderJson and Device (internal/types), which no command writes"},
     {"rule": "DS-JSON", "subject": "start_time", "reason": "only in CaptureHeaderJson (internal/types/capture.go), which no command writes"},
     {"rule": "DS-JSON", "subject": "iteration", "reason": "only in CaptureRecordJson (internal/types/capture.go), which no command writes"},
