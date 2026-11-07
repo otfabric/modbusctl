@@ -83,8 +83,11 @@ func registerFlagCompletion(c *cobra.Command, f *pflag.Flag) {
 	}
 }
 
+// netInterfaces lists the network interfaces; a variable so the tests can make it fail.
+var netInterfaces = net.Interfaces
+
 func completeInterfaces(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-	ifaces, err := net.Interfaces()
+	ifaces, err := netInterfaces()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
