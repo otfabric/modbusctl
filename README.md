@@ -10,9 +10,21 @@
 
 It is built for commissioning and site surveys, troubleshooting, reverse-engineering undocumented register maps, SunSpec inverter and meter discovery, and building hardware-free test setups. Output can be plain text, a table or JSON with stable exit codes, so it works in scripts and CI. It is written in Go on top of [go-modbus](https://github.com/otfabric/go-modbus).
 
-**Quick links:** [Quick start](#quick-start) · [Comparison](#modbusctl-vs-mbpoll-and-modpoll) · [Features](#features) · [Transports](#transports-and-serial-settings) · [Scan algorithms](#scan-algorithms-detailed) · [Capture files](#capture-files-mbcap) · [FAQ](#faq)
+**Quick links:** [Install](#install) · [Quick start](#quick-start) · [Comparison](#modbusctl-vs-mbpoll-and-modpoll) · [Features](#features) · [Transports](#transports-and-serial-settings) · [Scan algorithms](#scan-algorithms-detailed) · [Capture files](#capture-files-mbcap) · [FAQ](#faq)
 
 > **Responsible use:** modbusctl sends real Modbus requests. Only use it on devices and networks you own or are authorized to test. Some devices react badly to scanning, so start with `--algo safe` and a `--delay`. `client write` changes coils and registers, and FC08 diagnostic sub-functions can change device state (for example restart communications, clear counters or force listen-only mode): these need `--yes`, so know what an address controls before you confirm.
+
+## Install
+
+```bash
+curl -fsSL https://get.otfabric.io/modbusctl | sh
+```
+
+```powershell
+irm https://get.otfabric.io/modbusctl.ps1 | iex
+```
+
+Linux (amd64, arm64, armv7), macOS (Intel, Apple silicon) and Windows (amd64, arm64). The installer verifies the release's SHA-256 checksum, installs per user without `sudo` (`~/.local/bin`, Windows `%LOCALAPPDATA%\OTFabric\bin`), and upgrades in place when run again. Pin a version with `OTF_VERSION=x.y.z`; for CI, containers and device images use `OTF_UNMANAGED_INSTALL=<dir>`; all options: [otfabric/install](https://github.com/otfabric/install#options). For offline machines, the archives and checksums are on [Releases](https://github.com/otfabric/modbusctl/releases).
 
 ---
 
@@ -27,13 +39,13 @@ It is built for commissioning and site surveys, troubleshooting, reverse-enginee
 - **Find devices** — `discover` sweeps subnets for Modbus devices, with a safety cap on large ranges.
 - **Script-friendly** — `--format text|json|table`, a single JSON error object on failure, stable exit codes and `MODBUSCTL_*` environment variables.
 - **Offline analysis** — Decode, extract and string-search recorded register values with the `capture` commands; inspect, verify and convert capture files with [`mbcapctl`](https://github.com/otfabric/go-modbus-capture).
-- **Pre-built binaries** — Linux, macOS and Windows (x86-64 and ARM) from [GitHub Releases](https://github.com/otfabric/modbusctl/releases), with SHA-256 checksums; no runtime to install.
+- **One-line install** — Linux, macOS and Windows (x86-64 and ARM), see [Install](#install); a single binary, no runtime to install.
 
 ---
 
 ## Quick start
 
-Download a binary from [GitHub Releases](https://github.com/otfabric/modbusctl/releases) (see [Installation](#installation) for copy-paste commands for Linux, macOS and Windows, or build from source), then point it at a device:
+Install modbusctl (see [Install](#install)), then point it at a device:
 
 ```console
 # What is this device? (FC43 Device Identification + FC17 Report Server ID)
@@ -92,7 +104,7 @@ Addresses are **raw Modbus PDU addresses** (0–65535), not "4xxxx" register lab
 | MQTT publishing | — | — | ✅ |
 | Docker image | — | — | ✅ |
 | Shell completion | ✅ | — | — |
-| Install | release binaries | apt, brew, source | pip, pipx, Docker |
+| Install | one-line installer, release archives | apt, brew, source | pip, pipx, Docker |
 | Language / runtime | Go | C++ (libmodbus) | Python 3.10+ |
 | License | MIT | GPL-3.0 | MIT |
 
@@ -122,12 +134,12 @@ They combine well: use modbusctl to discover and document a device's register ma
 
 ## Table of Contents
 
+- [Install](#install)
 - [Why modbusctl?](#why-modbusctl)
 - [Quick start](#quick-start)
 - [modbusctl vs mbpoll and modpoll](#modbusctl-vs-mbpoll-and-modpoll)
 - [Use cases](#use-cases)
 - [Features](#features)
-- [Installation](#installation)
 - [Capture files](#capture-files-mbcap)
 - [Usage](#usage)
   - [Transports and serial settings](#transports-and-serial-settings)
@@ -205,142 +217,6 @@ modbusctl
 ├── completion           Generate shell completion script (bash|zsh|fish|powershell)
 └── version              Print version
 ```
-
-## Installation
-
-The easiest way to install modbusctl is to download a pre-built binary from the [GitHub Releases page](https://github.com/otfabric/modbusctl/releases). No Go toolchain is required.
-
-| Platform | CPU | Download |
-|---|---|---|
-| Linux | x86-64 | `modbusctl-<version>-linux-amd64.tar.gz` |
-| Linux | 64-bit ARM (Raspberry Pi 4/5 with a 64-bit OS, AWS Graviton) | `modbusctl-<version>-linux-arm64.tar.gz` |
-| Linux | 32-bit ARM (Raspberry Pi with a 32-bit OS) | `modbusctl-<version>-linux-armv7.tar.gz` |
-| macOS | Apple Silicon (M1 and later) | `modbusctl-<version>-darwin-arm64.tar.gz` |
-| macOS | Intel | `modbusctl-<version>-darwin-amd64.tar.gz` |
-| Windows | x86-64 | `modbusctl-<version>-windows-amd64.zip` |
-| Windows | ARM64 | `modbusctl-<version>-windows-arm64.zip` |
-
-Each release also contains `modbusctl-<version>-checksums.txt` (SHA-256) so you can verify your download. The commands below fetch the **latest** release, verify its checksum and install it. Afterwards, check that it works:
-
-```console
-modbusctl version
-```
-
-### Linux
-
-```bash
-# 1. Find the latest version and your CPU architecture
-VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/otfabric/modbusctl/releases/latest | sed 's|.*/v||')
-case "$(uname -m)" in
-  x86_64)         ARCH=amd64 ;;
-  aarch64|arm64)  ARCH=arm64 ;;
-  armv7l)         ARCH=armv7 ;;
-  *) echo "Unsupported architecture: $(uname -m)" ;;
-esac
-
-# 2. Download the archive and the checksum file
-FILE="modbusctl-${VERSION}-linux-${ARCH}.tar.gz"
-BASE="https://github.com/otfabric/modbusctl/releases/download/v${VERSION}"
-curl -fsSLO "${BASE}/${FILE}"
-curl -fsSLO "${BASE}/modbusctl-${VERSION}-checksums.txt"
-
-# 3. Verify the download (should print "OK")
-grep "${FILE}" "modbusctl-${VERSION}-checksums.txt" | sha256sum -c -
-
-# 4. Extract and install (the binary in the archive carries the version and platform in its name)
-mkdir -p modbusctl-dl && tar -xzf "${FILE}" -C modbusctl-dl
-sudo install -m 0755 "$(find modbusctl-dl -type f -name 'modbusctl*' | head -n1)" /usr/local/bin/modbusctl
-```
-
-No `sudo`? Install into your home directory instead (and make sure `~/.local/bin` is in your `PATH`):
-
-```bash
-mkdir -p ~/.local/bin
-install -m 0755 "$(find modbusctl-dl -type f -name 'modbusctl*' | head -n1)" ~/.local/bin/modbusctl
-```
-
-### macOS
-
-```bash
-# 1. Find the latest version and your CPU architecture (arm64 = Apple Silicon, x86_64 = Intel)
-VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/otfabric/modbusctl/releases/latest | sed 's|.*/v||')
-case "$(uname -m)" in
-  arm64)   ARCH=arm64 ;;
-  x86_64)  ARCH=amd64 ;;
-esac
-
-# 2. Download the archive and the checksum file
-FILE="modbusctl-${VERSION}-darwin-${ARCH}.tar.gz"
-BASE="https://github.com/otfabric/modbusctl/releases/download/v${VERSION}"
-curl -fsSLO "${BASE}/${FILE}"
-curl -fsSLO "${BASE}/modbusctl-${VERSION}-checksums.txt"
-
-# 3. Verify the download (should print "OK")
-grep "${FILE}" "modbusctl-${VERSION}-checksums.txt" | shasum -a 256 -c -
-
-# 4. Extract and install (the binary in the archive carries the version and platform in its name)
-mkdir -p modbusctl-dl && tar -xzf "${FILE}" -C modbusctl-dl
-sudo install -m 0755 "$(find modbusctl-dl -type f -name 'modbusctl*' | head -n1)" /usr/local/bin/modbusctl
-```
-
-If you downloaded the archive with a web browser instead of `curl` and macOS refuses to run the binary ("cannot be verified"), remove the quarantine flag: `xattr -d com.apple.quarantine /usr/local/bin/modbusctl`.
-
-### Windows (PowerShell)
-
-```powershell
-# 1. Find the latest version and your CPU architecture
-$version = (Invoke-RestMethod https://api.github.com/repos/otfabric/modbusctl/releases/latest).tag_name.TrimStart('v')
-$arch    = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
-
-# 2. Download the archive and the checksum file
-$file = "modbusctl-$version-windows-$arch.zip"
-$base = "https://github.com/otfabric/modbusctl/releases/download/v$version"
-Invoke-WebRequest "$base/$file" -OutFile "$env:TEMP\$file"
-Invoke-WebRequest "$base/modbusctl-$version-checksums.txt" -OutFile "$env:TEMP\modbusctl-checksums.txt"
-
-# 3. Verify the download (throws an error on mismatch)
-$expected = ((Select-String -Path "$env:TEMP\modbusctl-checksums.txt" -Pattern $file).Line -split '\s+')[0]
-$actual   = (Get-FileHash "$env:TEMP\$file" -Algorithm SHA256).Hash
-if ($expected -ne $actual) { throw "Checksum mismatch for $file" }
-
-# 4. Extract to a per-user folder and name the program modbusctl.exe
-#    (the .exe in the archive carries the version and platform in its name)
-$dir = "$env:LOCALAPPDATA\Programs\modbusctl"
-New-Item -ItemType Directory -Force -Path $dir | Out-Null
-Expand-Archive "$env:TEMP\$file" -DestinationPath "$env:TEMP\modbusctl-dl" -Force
-$exe = Get-ChildItem "$env:TEMP\modbusctl-dl" -Recurse -Filter 'modbusctl*.exe' | Select-Object -First 1
-Copy-Item $exe.FullName "$dir\modbusctl.exe" -Force
-
-# 5. Add modbusctl to your user PATH (then open a new terminal)
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($userPath -notlike "*$dir*") {
-  [Environment]::SetEnvironmentVariable('Path', "$userPath;$dir", 'User')
-}
-```
-
-If Windows SmartScreen warns about an unrecognised app, choose **More info → Run anyway**.
-
-### Manual download
-
-1. Open the [latest release](https://github.com/otfabric/modbusctl/releases/latest).
-2. Download the archive for your platform from the table above.
-3. Extract it, rename the binary to `modbusctl` (`modbusctl.exe` on Windows) and move it to a folder on your `PATH`.
-
-### Update
-
-Run the same commands again. They always fetch the latest release and overwrite the previous binary.
-
-### Build from source
-
-Requires Go 1.26 or later:
-
-```console
-git clone https://github.com/otfabric/modbusctl.git
-cd modbusctl
-make build
-```
-
-`make build` writes the binary to **`bin/modbusctl`** (see [Building](#building)).
 
 ---
 
@@ -970,10 +846,9 @@ The server certificate must name the address clients connect to (an IP address S
 
 #### Inspect, verify and convert a capture
 
-Use [`mbcapctl`](https://github.com/otfabric/go-modbus-capture/blob/main/docs/cli.md) from go-modbus-capture:
+Use [`mbcapctl`](https://github.com/otfabric/go-modbus-capture/blob/main/docs/cli.md) from go-modbus-capture (install it like modbusctl, with `mbcapctl` in place of `modbusctl`: `curl -fsSL https://get.otfabric.io/mbcapctl | sh`, on Windows `irm https://get.otfabric.io/mbcapctl.ps1 | iex`):
 
 ```console
-go install github.com/otfabric/go-modbus-capture/cmd/mbcapctl@latest
 mbcapctl info session.mbcap
 mbcapctl verify session.mbcap
 mbcapctl convert session.mbcap session.mbcap.jsonl
