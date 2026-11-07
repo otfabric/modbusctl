@@ -148,10 +148,7 @@ func (i Info) String() string {
 // JSON is the one-line JSON object, keys in the order name, version, tag, commit, built,
 // libraries, go, platform.
 func (i Info) JSON() string {
-	out, err := json.Marshal(i)
-	if err != nil { // cannot happen: every field is a string
-		return "{}"
-	}
+	out, _ := json.Marshal(i) // cannot fail: strings and a slice of strings
 	return string(out)
 }
 
