@@ -1,5 +1,17 @@
 # modbusctl Releases
 
+## v3.6.1
+
+**Date:** 2026-11-08
+**Previous release:** v3.6.0
+
+### Changed
+
+- Built on go-modbus v1.13.1 (was v1.11.1) and go-modbus-capture v0.2.0 (was v0.1.0). These releases change only the tools bundled with the libraries (`modbus-cli`: organisation exit codes, the one-line `version` and `version --json`, shell completion; `mbcapctl`: the one-line `version`, `version --json` and `completion`); the library code modbusctl uses is the same, so modbusctl behaves as before. `version` lists `go-modbus 1.13.1` and `go-modbus-capture 0.2.0`.
+- Release binaries are built with the latest Go 1.26 patch release (otfabric/.github release workflow v3.6.0); they were built with the exact Go version in `go.mod` (1.26.0).
+
+---
+
 ## v3.6.0
 
 **Date:** 2026-11-07
