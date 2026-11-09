@@ -46,6 +46,7 @@ func TestValidateModbusEndpoint(t *testing.T) {
 		port   uint16
 		serial config.SerialConfig
 		tls    config.TLSConfig
+		dial   config.DialConfig
 		want   string
 	}{
 		{name: "tcp", url: "tcp://192.168.1.10:502"},
@@ -89,10 +90,33 @@ func TestValidateModbusEndpoint(t *testing.T) {
 		{name: "stop bits too high", url: "rtu://COM1", serial: config.SerialConfig{StopBits: 3}, want: "invalid stop bits 3: use 1 or 2 (0 = default)"},
 		{name: "serial settings are checked for network urls too", url: "tcp://10.0.0.1:502", serial: config.SerialConfig{Parity: "x"}, want: `invalid parity "x"`},
 		{name: "endpoint is checked before serial settings", serial: config.SerialConfig{Parity: "x"}, want: "modbus endpoint required"},
+
+		{name: "proxy on tcp", url: "tcp://10.0.0.1:502", dial: config.DialConfig{Proxy: "socks5://127.0.0.1:1080"}},
+		{name: "proxy on rtuovertcp", url: "rtuovertcp://10.0.0.1:502", dial: config.DialConfig{Proxy: "socks5://127.0.0.1:1080"}},
+		{name: "proxy on asciiovertcp", url: "asciiovertcp://10.0.0.1:502", dial: config.DialConfig{Proxy: "socks5://127.0.0.1:1080"}},
+		{name: "socks5h proxy with a host name", url: "tcp://plc.local:502", dial: config.DialConfig{Proxy: "socks5h://127.0.0.1:1080"}},
+		{name: "proxy with --ip", ip: "10.0.0.1", port: 502, dial: config.DialConfig{Proxy: "socks5://127.0.0.1:1080"}},
+		{name: "proxy on udp", url: "udp://10.0.0.1:502", dial: config.DialConfig{Proxy: "socks5://127.0.0.1:1080"}, want: "--proxy does not apply to udp://: SOCKS5 carries TCP only"},
+		{name: "proxy on rtuoverudp", url: "rtuoverudp://10.0.0.1:502", dial: config.DialConfig{Proxy: "socks5://127.0.0.1:1080"}, want: "--proxy does not apply to rtuoverudp://: SOCKS5 carries TCP only"},
+		{name: "source address on tcp", url: "tcp://10.0.0.1:502", dial: config.DialConfig{SourceAddr: "127.0.0.1"}},
+		{name: "source address on udp", url: "udp://10.0.0.1:502", dial: config.DialConfig{SourceAddr: "127.0.0.1"}},
+		{name: "source address on rtuovertcp", url: "rtuovertcp://10.0.0.1:502", dial: config.DialConfig{SourceAddr: "127.0.0.1"}},
+		{name: "source address on rtuoverudp", url: "rtuoverudp://10.0.0.1:502", dial: config.DialConfig{SourceAddr: "127.0.0.1"}},
+		{name: "source address on asciiovertcp", url: "asciiovertcp://10.0.0.1:502", dial: config.DialConfig{SourceAddr: "127.0.0.1"}},
+		{name: "proxy and source address", url: "tcp://10.0.0.1:502", dial: config.DialConfig{Proxy: "socks5://127.0.0.1:1080", SourceAddr: "127.0.0.1"}},
+		{name: "proxy on rtu", url: "rtu:///dev/ttyUSB0", dial: config.DialConfig{Proxy: "socks5://127.0.0.1:1080"}, want: "--proxy and --source-addr do not apply to rtu:// (a serial line)"},
+		{name: "source address on rtu", url: "rtu:///dev/ttyUSB0", dial: config.DialConfig{SourceAddr: "127.0.0.1"}, want: "do not apply to rtu://"},
+		{name: "proxy on ascii", url: "ascii://COM3", dial: config.DialConfig{Proxy: "socks5://127.0.0.1:1080"}, want: "--proxy and --source-addr do not apply to ascii:// (a serial line)"},
+		{name: "source address on ascii", url: "ascii://COM3", dial: config.DialConfig{SourceAddr: "127.0.0.1"}, want: "do not apply to ascii://"},
+		{name: "invalid proxy scheme", url: "tcp://10.0.0.1:502", dial: config.DialConfig{Proxy: "http://127.0.0.1:8080"}, want: "the scheme must be socks5 or socks5h"},
+		{name: "proxy credentials", url: "tcp://10.0.0.1:502", dial: config.DialConfig{Proxy: "socks5://u:p@127.0.0.1:1080"}, want: "proxy credentials are not supported"},
+		{name: "proxy without port", url: "tcp://10.0.0.1:502", dial: config.DialConfig{Proxy: "socks5://127.0.0.1"}, want: "want socks5://host:port"},
+		{name: "invalid source address", url: "udp://10.0.0.1:502", dial: config.DialConfig{SourceAddr: "eth0"}, want: `invalid --source-addr "eth0": want an IP address`},
+		{name: "blank dial settings are unset", url: "rtu:///dev/ttyUSB0", dial: config.DialConfig{Proxy: " ", SourceAddr: " "}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			check(t, validateModbusEndpoint(tt.url, tt.ip, tt.port, tt.serial, tt.tls), tt.want)
+			check(t, validateModbusEndpoint(tt.url, tt.ip, tt.port, tt.serial, tt.tls, tt.dial), tt.want)
 		})
 	}
 }

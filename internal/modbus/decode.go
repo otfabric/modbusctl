@@ -43,7 +43,7 @@ func CollectDecode(ctx context.Context, cfg config.DecodeConfig, progress io.Wri
 	}
 
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig)
+	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig)
 	if err != nil {
 		return nil, err
 	}

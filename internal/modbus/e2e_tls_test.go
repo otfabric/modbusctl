@@ -411,7 +411,7 @@ func TestE2ETLS_ignoredForOtherURLs(t *testing.T) {
 		OutputFile: filepath.Join(t.TempDir(), "r.mbcap")}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "00 09", res.RawDataHex)
-	conf, err := buildDeviceClientConfig(d.URL, coreTimeoutMS, false, config.SerialConfig{}, bogus)
+	conf, err := buildDeviceClientConfig(d.URL, coreTimeoutMS, false, config.SerialConfig{}, bogus, config.DialConfig{})
 	require.NoError(t, err)
 	assert.Nil(t, conf.TLSClientCert)
 	assert.Nil(t, conf.TLSRootCAs)

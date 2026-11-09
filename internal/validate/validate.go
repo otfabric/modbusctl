@@ -37,9 +37,10 @@ func validateOptionalTimeoutMilliseconds(ms uint16) error {
 }
 
 // validateModbusEndpoint applies layered checks: [config.ValidateModbusAddress] (exactly one of URL or IP),
-// the serial-line settings, the TLS files of a tcp+tls:// URL, then when --ip is set literal IP
+// the serial-line settings, the TLS files of a tcp+tls:// URL, --proxy and --source-addr
+// against the URL's transport, then when --ip is set literal IP
 // syntax and a non-zero port.
-func validateModbusEndpoint(url, ip string, port uint16, serial config.SerialConfig, tlsCfg config.TLSConfig) error {
+func validateModbusEndpoint(url, ip string, port uint16, serial config.SerialConfig, tlsCfg config.TLSConfig, dial config.DialConfig) error {
 	if err := config.ValidateModbusAddress(url, ip); err != nil {
 		return err
 	}
@@ -47,6 +48,9 @@ func validateModbusEndpoint(url, ip string, port uint16, serial config.SerialCon
 		return err
 	}
 	if err := config.ValidateTLSConfig(url, tlsCfg); err != nil {
+		return err
+	}
+	if err := config.ValidateDialConfig(url, dial); err != nil {
 		return err
 	}
 	if strings.TrimSpace(ip) == "" {
@@ -70,7 +74,7 @@ func CheckIdentifyConfig(cfg config.IdentifyConfig) error {
 
 // validateUnitClientConfig validates URL-or-IP (mutually exclusive), and when IP is set also Port and UnitID ("all" or 1-255).
 func validateUnitClientConfig(cfg config.UnitClientConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig); err != nil {
 		return err
 	}
 	if cfg.UnitID == "" {
@@ -328,7 +332,7 @@ func checkSelection(sel config.CaptureSelection) error {
 }
 
 func CheckFingerprintConfig(cfg config.FingerprintConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig); err != nil {
 		return err
 	}
 	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
@@ -359,7 +363,7 @@ func CheckDiagnosticConfirmed(cfg config.DiagnosticConfig) error {
 }
 
 func CheckDiagnosticConfig(cfg config.DiagnosticConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig); err != nil {
 		return err
 	}
 	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {
@@ -425,6 +429,13 @@ func CheckDiscoverConfig(cfg config.DiscoverConfig) error {
 
 	if cfg.ResolveMAC && strings.TrimSpace(cfg.NetworkInterface) == "" {
 		return fmt.Errorf("network interface must be provided if ResolveMAC is enabled")
+	}
+
+	if err := config.ValidateDialConfig("", cfg.DialConfig); err != nil {
+		return err
+	}
+	if cfg.ResolveMAC && strings.TrimSpace(cfg.Proxy) != "" {
+		return fmt.Errorf("--resolve-mac asks the local network (ARP), which cannot see the hosts behind --proxy")
 	}
 
 	if !cfg.ForceLargeScan {
@@ -528,7 +539,7 @@ func isValidHostIP(s string) bool {
 }
 
 func validateDeviceConfig(cfg config.DeviceConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig); err != nil {
 		return err
 	}
 	// uint8 cannot exceed 255; reject 0 (broadcast / invalid for directed client requests).
@@ -612,7 +623,7 @@ func CheckSunSpecProbeConfig(cfg config.SunSpecProbeConfig) error {
 }
 
 func checkSunSpecBaseConfig(cfg *config.SunSpecBaseConfig) error {
-	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig); err != nil {
+	if err := validateModbusEndpoint(cfg.URL, cfg.IP, cfg.Port, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig); err != nil {
 		return err
 	}
 	if err := validateOptionalTimeoutMilliseconds(cfg.Timeout); err != nil {

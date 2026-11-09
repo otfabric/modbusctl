@@ -372,6 +372,34 @@ modbusctl client record --url tcp+tls://192.168.1.10:802 --blocks-file plan.json
 
 The device certificate must name the host of the URL (an IP address SAN for `tcp+tls://192.168.1.10:802`, a DNS name for `tcp+tls://plc.example:802`). A missing or unreadable certificate, key or CA file is invalid input (exit 3) and nothing is sent; a device the CA does not vouch for, or one that rejects the client certificate, is a transport error (exit 4). A capture made over TLS records the target's transport as `tls`; the certificate files are not stored in it. `server static` and `server replay` serve over TLS too: see [Serving over Modbus/TCP Security](#serving-over-modbustcp-security).
 
+#### Proxy and source address (`--proxy`, `--source-addr`)
+
+Every command that connects to a device (every `client` command, `client sunspec` included, and `discover`) takes two flags for how the network connection is opened:
+
+| Flag | Environment | Content |
+|---|---|---|
+| `--proxy` | `MODBUSCTL_PROXY` | `socks5://host:port`: connect through a SOCKS5 proxy (RFC 1928 CONNECT, no authentication), such as an SSH jump host (`ssh -D 1080 jumphost`); `socks5h://host:port` sends host names to the proxy to resolve |
+| `--source-addr` | `MODBUSCTL_SOURCE_ADDR` | Local IP address to connect from, on a host with several networks (an OT and an office interface, say) |
+
+```console
+# A device in the plant network, through an SSH jump host
+ssh -N -D 1080 engineer@jumphost &
+modbusctl client identify --url tcp://10.20.0.15:502 --proxy socks5://127.0.0.1:1080
+modbusctl client read --url tcp+tls://plc.plant.example:802 --proxy socks5h://127.0.0.1:1080 --tls-cert client.pem --tls-ca plant-ca.pem --start 100
+modbusctl discover --subnets 10.20.0.0/24 --proxy socks5://127.0.0.1:1080
+
+# From the OT interface of a multi-homed host
+modbusctl client poll --url udp://192.168.0.10:502 --source-addr 192.168.0.2 --start 0 --count 4
+```
+
+| Transport | `--proxy` | `--source-addr` |
+|---|---|---|
+| `tcp://`, `tcp+tls://`, `rtuovertcp://`, `asciiovertcp://` | yes | yes |
+| `udp://`, `rtuoverudp://` | no: SOCKS5 UDP ASSOCIATE is not implemented | yes |
+| `rtu://`, `ascii://` | no | no |
+
+With both flags, the connection to the proxy is made from the source address. `tcp+tls://` runs its TLS handshake end to end through the proxy and checks the device certificate against the host of the URL, not the proxy. Proxy credentials, a scheme other than `socks5`/`socks5h`, a missing port, an address that is not an IP literal for `--source-addr`, a flag on a transport it does not apply to, and `discover --resolve-mac` with `--proxy` (ARP cannot see hosts behind the proxy) are invalid input (exit 3), and nothing is sent. A proxy that cannot be reached or refuses the connection is a transport error (exit 4) whose message names the proxy and its reply, for example `socks5: connection not allowed by ruleset`.
+
 Good to know:
 
 - **Defaults differ between tools.** modbusctl defaults to 19200 8N2 (no parity, 2 stop bits, as go-modbus does); the Modbus specification default is 19200 8E1, and many devices ship as 9600 8N1. If a serial device does not answer, check `--baud`, `--parity` and `--stop-bits` against its manual first.
@@ -923,6 +951,8 @@ modbusctl discover --subnets 192.168.1.0/24 --output discovered.json
 sudo modbusctl discover --subnets 192.168.1.0/24,192.168.2.0/24 --resolve-mac --interface eth1 --output discovered.json
 ```
 
+`--proxy` and `--source-addr` apply to discovery too: each host is probed through the proxy, or from the source address (see [Proxy and source address](#proxy-and-source-address---proxy---source-addr)).
+
 #### SunSpec (client sunspec)
 
 Transport-level SunSpec discovery: detect the SunSpec "SunS" marker, enumerate model headers, print the address map, or run a combined probe. Use `--url` (e.g. `tcp://192.168.1.10:502`) or `--ip`/`--port`; `--unit` (0–255, full Modbus range); `--regtype` **holding** or **input** (tab-completed). No semantic decoding of points—only marker and model ID/length.
@@ -991,6 +1021,7 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_PARITY**      | string   | Serial parity: none, even or odd                         | `--parity`      | none       |
 | **MODBUSCTL_POLLS**       | uint32   | **`client poll`**: number of polls before exiting (0 = until interrupted) | `--polls`       | 0          |
 | **MODBUSCTL_PORT**        | uint16   | Modbus TCP port or server port                           | `--port`        | 502        |
+| **MODBUSCTL_PROXY**       | string   | Connect through a SOCKS5 proxy: `socks5://host:port` (`socks5h://` resolves names at the proxy); `tcp://`, `tcp+tls://`, `rtuovertcp://` and `asciiovertcp://` only; every client command and **`discover`** | `--proxy` |            |
 | **MODBUSCTL_PROFILE**     | string   | Device profile to decode                                 | `--profile`     |            |
 | **MODBUSCTL_RECORD_EXCEPTIONS** | bool | **`client record`/`scan`**: also record exception responses in the capture | `--record-exceptions` | false |
 | **MODBUSCTL_RESOLVE_MAC** | bool     | Resolve MAC addresses of discovered devices              | `--resolve-mac` | false      |
@@ -1003,6 +1034,7 @@ Modbusctl supports environment variables for easy automation. The global flag `-
 | **MODBUSCTL_RETRY_TIMEOUT**    | uint8  | Retry once on timeout/transport (0=no, 1=yes)           | `--retry-timeout`   | 0    |
 | **MODBUSCTL_SEED_START**  | uint16   | Boundary algo: seed start address (known-good read)       | `--seed-start`  | 0          |
 | **MODBUSCTL_SEED_COUNT**  | uint16   | Boundary algo: seed register count (1–125)                | `--seed-count`  | 0          |
+| **MODBUSCTL_SOURCE_ADDR** | string   | Local IP address to connect from (multi-homed hosts); network URLs only; every client command and **`discover`** | `--source-addr` |            |
 | **MODBUSCTL_SPEED**       | string   | **`server replay`**: speed factor (1 = original, 10 = ten times faster, 0.1 = ten times slower) | `--speed` | 1 |
 | **MODBUSCTL_SUBNETS**     | string   | Subnets to scan for Modbus devices (comma-separated)     | `--subnets`     |            |
 | **MODBUSCTL_TARGET**      | uint32   | Capture target to use: **`server static`/`replay`** (0 = every target), **`capture decode`/`extract`/`strings`/`frequencies`** (0 = the only one) | `--target` | 0 |

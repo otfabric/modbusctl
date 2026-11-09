@@ -23,7 +23,7 @@ func CollectReportServerID(ctx context.Context, cfg config.ReportServerIDConfig)
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	res := &types.ReportServerIDResult{Target: modbusURL}
 
-	conf, err := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig)
+	conf, err := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig)
 	if err != nil {
 		return nil, err
 	}
