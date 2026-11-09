@@ -17,6 +17,7 @@ type SerialConfig struct {
 type DeviceConfig struct {
 	SerialConfig
 	TLSConfig
+	DialConfig
 	URL  string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP   string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
@@ -27,6 +28,7 @@ type DeviceConfig struct {
 type UnitClientConfig struct {
 	SerialConfig
 	TLSConfig
+	DialConfig
 	URL      string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP       string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port     uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
@@ -213,6 +215,7 @@ type ReplayServerConfig struct {
 }
 
 type DiscoverConfig struct {
+	DialConfig
 	Subnets          []string `env:"MODBUSCTL_SUBNETS" desc:"List of subnets to scan for Modbus devices (e.g., 192.168.1.0/24,192.168.2.0/24)" flag:"subnets"`
 	Port             uint16   `env:"MODBUSCTL_PORT" desc:"Port to use for Modbus TCP discovery" flag:"port"`
 	Parallel         uint8    `env:"MODBUSCTL_PARALLEL" desc:"Parallel discovery workers (1-64)" flag:"parallel"`
@@ -228,6 +231,7 @@ type DiscoverConfig struct {
 type FingerprintConfig struct {
 	SerialConfig
 	TLSConfig
+	DialConfig
 	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
@@ -242,6 +246,7 @@ type FingerprintConfig struct {
 type DiagnosticConfig struct {
 	SerialConfig
 	TLSConfig
+	DialConfig
 	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`
@@ -272,6 +277,7 @@ type DeviceProfileDecodeConfig struct {
 type SunSpecBaseConfig struct {
 	SerialConfig
 	TLSConfig
+	DialConfig
 	URL          string `env:"MODBUSCTL_URL" desc:"Modbus URL: tcp://, tcp+tls://, udp://, rtu://, ascii://, rtuovertcp://, rtuoverudp:// or asciiovertcp:// (e.g. tcp://192.168.1.10:502, rtu:///dev/ttyUSB0); mutually exclusive with --ip/--port" flag:"url"`
 	IP           string `env:"MODBUSCTL_IP" desc:"Modbus TCP device IP (used when --url is not set)" flag:"ip"`
 	Port         uint16 `env:"MODBUSCTL_PORT" desc:"Modbus TCP port (used when --url is not set)" flag:"port"`

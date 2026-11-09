@@ -20,8 +20,8 @@ github.com/mdlayher/packet v1.1.2/go.mod h1:GEu1+n9sG5VtiRE4SydOmX5GTwyyYlteZiFU
 github.com/mdlayher/socket v0.2.1/go.mod h1:QLlNPkFR88mRUNQIzRBMfXxwKal8H7u1h3bL1CV+f0E=
 github.com/mdlayher/socket v0.5.1 h1:VZaqt6RkGkt2OE9l3GcC6nZkqD3xKeQLyfleW/uBcos=
 github.com/mdlayher/socket v0.5.1/go.mod h1:TjPLHI1UgwEv5J1B5q0zTZq12A/6H7nKmtTanQE37IQ=
-github.com/otfabric/go-modbus v1.13.1 h1:tdIsrO/p8b79ZfgejZJu4l30RKH0E9j30CnzR9ueCDs=
-github.com/otfabric/go-modbus v1.13.1/go.mod h1:FcVASTIAl1MNwPVW8nCMMubztiMueKHIFeVyHm0BDeY=
+github.com/otfabric/go-modbus v1.14.1 h1:bL7OAl78xxuXGEktHQj6MPzRjs/7JijHhZLwjMXCUiQ=
+github.com/otfabric/go-modbus v1.14.1/go.mod h1:FcVASTIAl1MNwPVW8nCMMubztiMueKHIFeVyHm0BDeY=
 github.com/otfabric/go-modbus-capture v0.2.0 h1:tU1qYslLrWehUyk5wBQWRGdF8YNaPPpog9k5k8Rz98c=
 github.com/otfabric/go-modbus-capture v0.2.0/go.mod h1:z+1rnvMln/8Ra4lSzbekw4pybZroJuBf8GPXqCHY8qs=
 github.com/otfabric/go-serial v0.2.1 h1:PCOdnCDAHIHFaxTBNmisC/4SlD+NVd74d+EJPnXrCOw=

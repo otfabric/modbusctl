@@ -26,7 +26,7 @@ func CollectDeviceIdentification(ctx context.Context, cfg config.IdentifyConfig)
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 	res := &types.IdentifyResult{Target: modbusURL}
 
-	conf, err := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig)
+	conf, err := buildDeviceClientConfig(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig)
 	if err != nil {
 		return nil, err
 	}

@@ -32,6 +32,10 @@ Modbus TCP, UDP, RTU and ASCII carry no authentication and no encryption: anyone
 - **Keep Modbus traffic on isolated, trusted networks**; never expose port 502 to the Internet
 - For access across untrusted networks, use a VPN or a secured gateway in front of the device
 
+### Proxies
+
+`--proxy` sends the connection through the SOCKS5 proxy you name, and with it the Modbus traffic, in clear text unless the URL is `tcp+tls://`. The proxy can read and change that traffic and connect anywhere it is allowed to: use only a proxy you control, such as an SSH jump host (`ssh -D`) listening on loopback. modbusctl sends no proxy credentials (it supports none). With `tcp+tls://` the TLS session runs end to end through the proxy and the device certificate is checked against the URL host, so the proxy cannot impersonate the device. `--source-addr` only picks the local address; it does not bypass routing or firewall rules.
+
 ### Commands That Change Device State
 
 `client write` and the state-changing sub-functions of `client diagnostic` refuse to run without `--yes` (exit 2, nothing sent).

@@ -26,9 +26,9 @@ func TestTLSConfigErrorsBeforeDial(t *testing.T) {
 		}
 	}
 
-	_, err := openDeviceLink(url, 100, false, config.SerialConfig{}, bad)
+	_, err := openDeviceLink(url, 100, false, config.SerialConfig{}, bad, config.DialConfig{})
 	wantInvalid("openDeviceLink", err)
-	_, err = openRecordingLink(url, 100, false, config.SerialConfig{}, bad, 1)
+	_, err = openRecordingLink(url, 100, false, config.SerialConfig{}, bad, config.DialConfig{}, 1)
 	wantInvalid("openRecordingLink", err)
 
 	var fp config.FingerprintConfig

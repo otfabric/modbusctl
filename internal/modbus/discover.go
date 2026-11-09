@@ -31,6 +31,10 @@ func CollectDiscover(ctx context.Context, cfg config.DiscoverConfig, stderr io.W
 	if cfg.Parallel < 1 {
 		cfg.Parallel = 1
 	}
+	dial, err := cfg.Dialer()
+	if err != nil {
+		return nil, errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
+	}
 
 	jobs := make(chan string, int(cfg.Parallel)*4)
 	go func() {
@@ -71,7 +75,7 @@ func CollectDiscover(ctx context.Context, cfg config.DiscoverConfig, stderr io.W
 				default:
 				}
 				modbusURL := config.ModbusURL("", ip, cfg.Port)
-				client, cleanup, err := connectDiscovery(modbusURL, cfg.Debug)
+				client, cleanup, err := connectDiscovery(modbusURL, cfg.Debug, dial)
 				if err != nil {
 					if cfg.Debug {
 						_, _ = fmt.Fprintf(stderr, "DEBUG [discover] %s: connect/setup: %v\n", ip, err)

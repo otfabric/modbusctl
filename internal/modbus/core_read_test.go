@@ -216,7 +216,7 @@ func TestCoreCollectRead_failures(t *testing.T) {
 // coreOpenLink opens a device link to dev with the given debug setting.
 func coreOpenLink(t *testing.T, url string, debug bool) *deviceLink {
 	t.Helper()
-	link, err := openDeviceLink(url, coreTimeoutMS, debug, config.SerialConfig{}, config.TLSConfig{})
+	link, err := openDeviceLink(url, coreTimeoutMS, debug, config.SerialConfig{}, config.TLSConfig{}, config.DialConfig{})
 	require.NoError(t, err)
 	t.Cleanup(link.Close)
 	return link
@@ -467,11 +467,11 @@ func TestCoreClientConfig(t *testing.T) {
 	assert.NotNil(t, debug.Logger)
 	assert.NotEqual(t, fmt.Sprintf("%T", quiet.Logger), fmt.Sprintf("%T", debug.Logger), "debug selects a real logger")
 
-	disc := discoveryClientConfig("tcp://h:1", false)
+	disc := discoveryClientConfig("tcp://h:1", false, nil)
 	assert.Equal(t, discoveryModbusTimeout, disc.Timeout)
 	assert.Equal(t, discoveryDialTimeout, disc.DialTimeout)
 
-	dev, err := buildDeviceClientConfig("rtu:///dev/null", 300, false, config.SerialConfig{Baud: 9600, DataBits: 7, StopBits: 2, Parity: "odd"}, config.TLSConfig{TLSCert: "ignored"})
+	dev, err := buildDeviceClientConfig("rtu:///dev/null", 300, false, config.SerialConfig{Baud: 9600, DataBits: 7, StopBits: 2, Parity: "odd"}, config.TLSConfig{TLSCert: "ignored"}, config.DialConfig{})
 	require.NoError(t, err)
 	assert.Equal(t, 300*time.Millisecond, dev.Timeout)
 	assert.Equal(t, 300*time.Millisecond, dev.DialTimeout)
@@ -525,7 +525,7 @@ func TestCoreValidateAndConnect(t *testing.T) {
 	})
 
 	t.Run("nothing listening", func(t *testing.T) {
-		conf, err := buildDeviceClientConfig(coreClosedURL(t), coreShortTimeoutMS, false, config.SerialConfig{}, config.TLSConfig{})
+		conf, err := buildDeviceClientConfig(coreClosedURL(t), coreShortTimeoutMS, false, config.SerialConfig{}, config.TLSConfig{}, config.DialConfig{})
 		require.NoError(t, err)
 		client, cleanup, err := validateAndConnect(conf)
 		require.Error(t, err)
@@ -534,14 +534,14 @@ func TestCoreValidateAndConnect(t *testing.T) {
 	})
 
 	t.Run("serial device missing", func(t *testing.T) {
-		_, err := openDeviceLink("rtu://"+filepath.Join(t.TempDir(), "no-such-tty"), coreShortTimeoutMS, false, config.SerialConfig{Baud: 9600}, config.TLSConfig{})
+		_, err := openDeviceLink("rtu://"+filepath.Join(t.TempDir(), "no-such-tty"), coreShortTimeoutMS, false, config.SerialConfig{Baud: 9600}, config.TLSConfig{}, config.DialConfig{})
 		require.ErrorIs(t, err, ErrTCPConnection)
 		require.ErrorIs(t, err, os.ErrNotExist)
 	})
 
 	t.Run("discovery connect", func(t *testing.T) {
 		dev := mbtest.NewDevice().SetHolding(0, 0x1111)
-		client, cleanup, err := connectDiscovery("tcp://"+dev.ServeTCP(t), false)
+		client, cleanup, err := connectDiscovery("tcp://"+dev.ServeTCP(t), false, nil)
 		require.NoError(t, err)
 		defer cleanup()
 		regs, err := client.ReadRegisters(context.Background(), 1, 0, 1, gomodbus.HoldingRegister)

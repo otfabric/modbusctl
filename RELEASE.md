@@ -1,5 +1,33 @@
 # modbusctl Releases
 
+## v3.7.0
+
+**Date:** 2026-11-09
+**Previous release:** v3.6.2
+
+### Summary
+
+Two flags on every command that connects to a device set how the connection is opened: `--proxy` reaches a plant network through a SOCKS5 proxy such as an SSH jump host, and `--source-addr` picks the local interface. Built on go-modbus v1.14.1, whose `Config.Dialer` every network transport uses.
+
+### Added
+
+- `--proxy socks5://host:port` (`MODBUSCTL_PROXY`): connect through a SOCKS5 proxy (RFC 1928 CONNECT, no authentication); `socks5h://` sends host names to the proxy. For `tcp://`, `tcp+tls://`, `rtuovertcp://` and `asciiovertcp://`; `tcp+tls://` handshakes end to end through the proxy and checks the certificate against the URL host.
+- `--source-addr <ip>` (`MODBUSCTL_SOURCE_ADDR`): connect from that local IP address, over TCP and UDP transports; with `--proxy`, the connection to the proxy.
+- Both on every `client` command (`read`, `decode`, `write`, `poll`, `record`, `scan`, `identify`, `reportserverid`, `fingerprint`, `diagnostic`, `sunspec detect`/`models`/`map`/`probe`) and on `discover`, which probes every host through the dialer.
+- Invalid input (exit 3), nothing sent: proxy credentials, another scheme, a missing port or a path; a `--source-addr` that is not an IP address; `--proxy` with `udp://` or `rtuoverudp://` (SOCKS5 UDP ASSOCIATE is not implemented); either flag with `rtu://` or `ascii://`; `discover --resolve-mac` with `--proxy`. A proxy that is down or refuses is a transport error (exit 4) naming the proxy and its reply.
+
+### Changed
+
+- go-modbus v1.14.1 (was v1.13.1): `Config.Dialer`. `version` lists `go-modbus 1.14.1`.
+
+### Tests
+
+- `internal/netdial`: flag validation, TCP and UDP source binding, SOCKS5 CONNECT for IPv4, IPv6 and host names (`socks5` and `socks5h`), every reply and handshake failure, a silent proxy against the deadline, cancel. `internal/socks5test` is the scripted test proxy. Both at 100 % coverage.
+- `cmd/client`: every connecting command through the test proxy to the fake device at an address only the proxy reaches; `rtuovertcp://`, `asciiovertcp://` and `tcp+tls://` (certificate checked against the URL host) through `socks5h://`; a refusing proxy; `--source-addr` on TCP, UDP and with the proxy, and an address the host does not have; every invalid value and transport rejection on every command, with nothing sent.
+- `cmd/discover`: a TEST-NET range discovered through the proxy, `--source-addr`, invalid values and `--resolve-mac` with `--proxy`.
+
+---
+
 ## v3.6.1
 
 **Date:** 2026-11-08

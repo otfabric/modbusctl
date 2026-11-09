@@ -22,7 +22,7 @@ func CollectDiagnostics(ctx context.Context, cfg config.DiagnosticConfig) (*type
 	}
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
 
-	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig)
+	link, err := openDeviceLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig)
 	if err != nil {
 		return nil, err
 	}

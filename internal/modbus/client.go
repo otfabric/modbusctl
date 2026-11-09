@@ -117,7 +117,7 @@ func applyTLSConfig(conf *modbus.Config, tlsCfg config.TLSConfig) error {
 	return nil
 }
 
-func buildDeviceClientConfig(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, tlsCfg config.TLSConfig) (modbus.Config, error) {
+func buildDeviceClientConfig(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, tlsCfg config.TLSConfig, dial config.DialConfig) (modbus.Config, error) {
 	req := clientRequestTimeout(timeoutMS)
 	c := buildClientConfig(modbusURL, req, debug)
 	c.DialTimeout = dialTimeoutForRequest(req)
@@ -125,7 +125,26 @@ func buildDeviceClientConfig(modbusURL string, timeoutMS uint16, debug bool, ser
 	if err := applyTLSConfig(&c, tlsCfg); err != nil {
 		return modbus.Config{}, err
 	}
+	if err := applyDialConfig(&c, dial); err != nil {
+		return modbus.Config{}, err
+	}
 	return c, nil
+}
+
+// applyDialConfig sets conf.Dialer from --proxy and --source-addr; with neither, go-modbus
+// keeps its own dialer. go-modbus passes the dialer the unresolved host:port of the URL and
+// runs the TLS handshake of tcp+tls:// on the returned connection, so the server certificate
+// is still checked against the URL host. [config.ValidateDialConfig] reports invalid values
+// and transports before a command gets this far.
+func applyDialConfig(conf *modbus.Config, dial config.DialConfig) error {
+	d, err := dial.Dialer()
+	if err != nil {
+		return errs.InvalidInput(errs.CodeInvalidInput, err.Error(), err)
+	}
+	if d != nil {
+		conf.Dialer = d
+	}
+	return nil
 }
 
 // validateAndConnect validates conf, creates a client, and opens the connection.
@@ -160,8 +179,8 @@ type deviceLink struct {
 }
 
 // openDeviceLink connects to modbusURL. The caller must Close the returned link.
-func openDeviceLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, tlsCfg config.TLSConfig) (*deviceLink, error) {
-	conf, err := buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial, tlsCfg)
+func openDeviceLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, tlsCfg config.TLSConfig, dial config.DialConfig) (*deviceLink, error) {
+	conf, err := buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial, tlsCfg, dial)
 	if err != nil {
 		return nil, err
 	}
@@ -179,8 +198,8 @@ func openDeviceLink(modbusURL string, timeoutMS uint16, debug bool, serial confi
 // openRecordingLink is openDeviceLink for a link whose successful reads are recorded as samples
 // of stream, once [deviceLink.record] attaches a recorder. Connecting first means that a device
 // that cannot be reached leaves no capture file behind.
-func openRecordingLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, tlsCfg config.TLSConfig, stream uint32) (*deviceLink, error) {
-	conf, err := buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial, tlsCfg)
+func openRecordingLink(modbusURL string, timeoutMS uint16, debug bool, serial config.SerialConfig, tlsCfg config.TLSConfig, dial config.DialConfig, stream uint32) (*deviceLink, error) {
+	conf, err := buildDeviceClientConfig(modbusURL, timeoutMS, debug, serial, tlsCfg, dial)
 	if err != nil {
 		return nil, err
 	}
@@ -244,15 +263,17 @@ func (l *deviceLink) Close() {
 	}
 }
 
-func discoveryClientConfig(modbusURL string, debug bool) modbus.Config {
+func discoveryClientConfig(modbusURL string, debug bool, dial modbus.Dialer) modbus.Config {
 	c := buildClientConfig(modbusURL, discoveryModbusTimeout, debug)
 	c.DialTimeout = discoveryDialTimeout
+	c.Dialer = dial
 	return c
 }
 
-// connectDiscovery opens one Modbus TCP client (dial + Open) with short timeouts for subnet discovery.
-func connectDiscovery(modbusURL string, debug bool) (*modbus.Client, func(), error) {
-	return validateAndConnect(discoveryClientConfig(modbusURL, debug))
+// connectDiscovery opens one Modbus TCP client (dial + Open) with short timeouts for subnet
+// discovery; dial is the dialer of --proxy and --source-addr, or nil.
+func connectDiscovery(modbusURL string, debug bool, dial modbus.Dialer) (*modbus.Client, func(), error) {
+	return validateAndConnect(discoveryClientConfig(modbusURL, debug, dial))
 }
 
 // classifyOutcome returns outcome type and Modbus exception code (0 when not an exception).
@@ -504,7 +525,7 @@ func CollectRead(ctx context.Context, cfg config.ReadConfig, progress io.Writer)
 		progress = io.Discard
 	}
 	modbusURL := config.ModbusURL(cfg.URL, cfg.IP, cfg.Port)
-	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, 1)
+	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -567,7 +588,7 @@ func ScanAndRecord(ctx context.Context, cfg config.ScanConfig, progress io.Write
 		}
 		out = AutoCapturePath(dir, "scan")
 	}
-	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, 1)
+	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -729,7 +750,7 @@ func RecordToCapture(ctx context.Context, cfg config.RecordConfig, progress io.W
 	if fsutil.SameFile(out, cfg.BlocksFile) {
 		return nil, errs.InvalidInput(errs.CodeInvalidFlagCombination, fsutil.ErrSameFile.Error(), fsutil.ErrSameFile)
 	}
-	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, 1)
+	link, err := openRecordingLink(modbusURL, cfg.Timeout, cfg.Debug, cfg.SerialConfig, cfg.TLSConfig, cfg.DialConfig, 1)
 	if err != nil {
 		return nil, err
 	}
