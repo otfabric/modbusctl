@@ -1,5 +1,16 @@
 # modbusctl Releases
 
+## v3.7.1
+
+**Date:** 2026-11-13
+**Previous release:** v3.7.0
+
+### Changed
+
+- Built on go-modbus v1.14.5 and go-serial v0.3.0 (was go-modbus v1.14.2, go-serial v0.2.1): go-serial rejects out-of-range serial parameters instead of truncating them. No other change.
+
+---
+
 ## v3.7.0
 
 **Date:** 2026-11-09
