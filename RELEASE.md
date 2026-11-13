@@ -1,5 +1,16 @@
 # modbusctl Releases
 
+## v3.7.2
+
+**Date:** 2026-11-13
+**Previous release:** v3.7.1
+
+### Changed
+
+- Built on go-modbus v1.15.0 (was v1.14.5). Clients on `rtuovertcp://`, `asciiovertcp://` and `rtuoverudp://` close and redial the socket after a failed or mismatched exchange, and on `rtu://` and `ascii://` resynchronise the line (one late answer can still be read once, see go-modbus LIMITATIONS.md); expect more reconnects behind gateways where units often time out. `server static` and `server replay` with TLS: a new connection at `--max-clients` replaces the oldest connection still in its TLS handshake instead of being closed, and a handshake times out after 10 s (was 30 s).
+
+---
+
 ## v3.7.1
 
 **Date:** 2026-11-13

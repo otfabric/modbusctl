@@ -871,7 +871,7 @@ Both servers:
 
 - listen on every interface, or on the address given with `--listen` (for example `127.0.0.1`);
 - serve plain Modbus TCP, or Modbus/TCP Security with `--tls-cert`, `--tls-key` and `--tls-ca` (see below);
-- accept up to `--max-clients` concurrent connections (default 10) and close further ones;
+- accept up to `--max-clients` concurrent connections (default 10) and close further ones; with TLS, a new connection at the limit replaces the oldest one still in its TLS handshake, and a handshake times out after 10 seconds;
 - print a summary when stopped (`📊 Served N requests: …`), counting the answers, exceptions, silences and requests for data the capture does not hold; with `--debug` they also name each such request and log the Modbus frames;
 - answer **FC01–04** from the values recorded per address (any range whose addresses were all recorded, even one never requested as such), **FC43** device identification from the recorded objects, and **FC07**, **FC08** (sub-functions that return data: 0x00, 0x02, 0x0B–0x12), **FC11**, **FC12**, **FC17**, **FC20** and **FC24** with the data of the response recorded for exactly that request;
 - answer any other function code, vendor and unknown ones included, with Illegal Function; a capture file holding a sample of such a function is refused when loaded (`capture_unsupported_function`, exit 3);
