@@ -1,5 +1,19 @@
 # modbusctl Releases
 
+## v3.7.3
+
+**Date:** 2026-11-14
+**Previous release:** v3.7.2
+
+No change to commands or output.
+
+### Changed
+
+- Built on go-modbus v1.15.1 (was v1.15.0) and go-modbus-capture v0.2.1 (was v0.2.0). The library code of both is the same as in the previous versions.
+- CI: otfabric/engineering policy 1.6, the shared workflows v3.8.0, and one pull request workflow with a single required check.
+
+---
+
 ## v3.7.2
 
 **Date:** 2026-11-13
