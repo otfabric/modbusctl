@@ -19,7 +19,7 @@ require (
 	github.com/mdlayher/ethernet v0.0.0-20220221185849-529eae5b6118 // indirect
 	github.com/mdlayher/packet v1.1.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
-	github.com/otfabric/go-serial v0.3.0 // indirect
+	github.com/otfabric/go-serial v0.4.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
