@@ -1,5 +1,22 @@
 # modbusctl Releases
 
+## v3.7.6
+
+**Date:** 2026-11-14
+**Previous release:** v3.7.5
+
+No command or flag is added or changed.
+
+### Changed
+
+- Built on go-modbus v1.16.0 (was v1.15.3) and go-modbus-capture v0.2.2 (was v0.2.1) (go-modbus RELEASE.md, v1.16.0; go-modbus-capture RELEASE.md, v0.2.2). For the tool this means:
+  - The commands that read a capture file (`capture`, `server replay`): a binary file with more than 65,536 samples in one data block is refused; in a JSON Lines file a field in another case than the specification's is ignored and a line with a defined field twice is refused; a long CSV file with more than 4,096 columns is refused. No file written by `client record` is affected.
+  - `client record`: a data block ends after 65,536 samples at the latest, and a recording stops with an error before the index of the file grows past what a reader accepts, where the file was closed without one and could not be read back.
+  - `client diagnostic` with more than 250 bytes of data fails before anything is sent, with the same error as before, and keeps the connection.
+  - Application code the library calls that does not return normally is recovered and reported as an error of that request.
+
+---
+
 ## v3.7.5
 
 **Date:** 2026-11-14
