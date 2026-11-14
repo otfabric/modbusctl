@@ -1,5 +1,18 @@
 # modbusctl Releases
 
+## v3.7.4
+
+**Date:** 2026-11-14
+**Previous release:** v3.7.3
+
+No change to the command.
+
+### Changed
+
+- Built on go-modbus v1.15.2 (was v1.15.1): after a failed `Accept` the server waits before it tries again, a metrics hook that does not return normally is contained, an RTU request longer than a frame is refused before it is sent, and a request whose context ends while the deadline is set is not sent (go-modbus RELEASE.md, v1.15.2).
+
+---
+
 ## v3.7.3
 
 **Date:** 2026-11-14
