@@ -1,5 +1,22 @@
 # modbusctl Releases
 
+## v3.7.9
+
+**Date:** 2026-11-15
+**Previous release:** v3.7.8
+
+No command or flag is added or changed.
+
+### Fixed
+
+- `client scan --algo safe` over the whole address range (`--start 0 --end 65535`) scans it. It sent no request and exited `0`, because the length of the range (65536 addresses) was computed in 16 bits. Every other range and algorithm was unaffected.
+
+### Tests
+
+- The safe strategy's block sizes at the top of the address space (0–65534, 0–65535, 1–65535, 65535–65535), and its first request for the range 0–65535.
+
+---
+
 ## v3.7.8
 
 **Date:** 2026-11-15

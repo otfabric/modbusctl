@@ -23,6 +23,11 @@ func TestCandidateCountsSafe(t *testing.T) {
 		{0, 124, 1, 125},
 		{0, 125, 1, 125},
 		{100, 200, 1, 64},
+		// The top of the address space: 65536 addresses do not fit in 16 bits.
+		{0, 65534, 8, 125},
+		{0, 65535, 8, 125},
+		{1, 65535, 8, 125},
+		{65535, 65535, 1, 1},
 	}
 	for _, tt := range tests {
 		got := candidateCountsSafe(tt.start, tt.end)
@@ -73,6 +78,20 @@ func TestSafeStrategy_InitNextOnResultDone(t *testing.T) {
 	// Not done yet (16 <= 20)
 	if s.Done() {
 		t.Error("expected Done() false when current (16) <= end (20)")
+	}
+}
+
+func TestSafeStrategy_FullRange(t *testing.T) {
+	cfg := config.ScanConfig{StartAddress: 0, EndAddress: 65535}
+	s := newSafeStrategy(ss(cfg))
+	s.Init(ss(cfg))
+
+	task, ok := s.Next()
+	if !ok || s.Done() {
+		t.Fatalf("Next() = %+v, %v (done %v), want a first task for the range 0..65535", task, ok, s.Done())
+	}
+	if task.Start != 0 || task.Count != 125 {
+		t.Errorf("first task = %+v, want start 0, count 125", task)
 	}
 }
 
