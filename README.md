@@ -953,6 +953,8 @@ sudo modbusctl discover --subnets 192.168.1.0/24,192.168.2.0/24 --resolve-mac --
 
 `--proxy` and `--source-addr` apply to discovery too: each host is probed through the proxy, or from the source address (see [Proxy and source address](#proxy-and-source-address---proxy---source-addr)).
 
+With `--resolve-mac`, `discover` asks for the MAC address of each device it found with ARP on `--interface`, and waits at most 800 ms for the reply: a device that has not answered by then, such as one behind a router, is listed with an empty `mac`. Ctrl-C (SIGINT) or SIGTERM ends the sweep at once, also while a reply is awaited; `discover` then writes the devices found until then and exits `0` (see [docs/exitcodes.md](docs/exitcodes.md)).
+
 #### SunSpec (client sunspec)
 
 Transport-level SunSpec discovery: detect the SunSpec "SunS" marker, enumerate model headers, print the address map, or run a combined probe. Use `--url` (e.g. `tcp://192.168.1.10:502`) or `--ip`/`--port`; `--unit` (0–255, full Modbus range); `--regtype` **holding** or **input** (tab-completed). No semantic decoding of points—only marker and model ID/length.

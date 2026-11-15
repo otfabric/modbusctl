@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"t\":\"header\",\"version\":\"0.1\",\"tick_ns\":1000,\"wall_start\":\"2026-10-14T12:00:00Z\"}\n{\"t\":\"target\",\"id\":1,\"transport\":\"unknown\",\"unit\":5}\n{\"t\":\"stream\",\"id\":1,\"target\":1}\n{\"t\":\"s\",\"s\":1,\"at\":0,\"req\":\"0b\",\"resp\":\"0b0000\"}\n{\"t\":\"end\",\"at\":10}\n")

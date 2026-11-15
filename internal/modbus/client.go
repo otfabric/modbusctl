@@ -38,6 +38,10 @@ const defaultDialTimeout = 5 * time.Second
 const discoveryModbusTimeout = 800 * time.Millisecond
 const discoveryDialTimeout = 500 * time.Millisecond
 
+// discoveryMACTimeout bounds the ARP request for the MAC address of one discovered host
+// (--resolve-mac): a host that has not answered by then is listed without a MAC.
+const discoveryMACTimeout = 800 * time.Millisecond
+
 var (
 	// ErrTCPConnection marks a failure to open the transport: TCP/UDP dial or serial port open.
 	ErrTCPConnection    = errors.New("connection error")
@@ -623,6 +627,10 @@ func ScanAndRecord(ctx context.Context, cfg config.ScanConfig, progress io.Write
 	startTime := time.Now()
 
 	for !strategy.Done() {
+		// An interrupt ends the scan before the next request, also without a delay to wait in.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		task, ok := strategy.Next()
 		if !ok {
 			break
@@ -647,6 +655,11 @@ func ScanAndRecord(ctx context.Context, cfg config.ScanConfig, progress io.Write
 				retryAppliedDelay = true
 			}
 			result = executeReadTask(ctx, link, cfg, task, progress)
+		}
+		// A request that the interrupt cut short is not counted as a failed request of the
+		// device: the scan ends without a result.
+		if !result.Success && ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 		if cfg.Debug {
 			outcome := "success"

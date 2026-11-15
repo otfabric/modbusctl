@@ -41,15 +41,11 @@ func init() {
 		if err := validate.CheckStringsConfig(cfg); err != nil {
 			return errs.WrapValidation(err)
 		}
-		w, cleanup, err := cli.OpenStdoutOrFile(cfg.OutputFile, cfg.InputFile)
+		w, finish, err := cli.OpenStdoutOrFile(cfg.OutputFile, cfg.InputFile)
 		if err != nil {
 			return cli.OutputOpenError(err)
 		}
-		defer cleanup()
-
-		if err := format.ExportHeuristicFrequency(w, cfg.InputFile, cfg.CaptureSelection); err != nil {
-			return capfile.WrapError(err)
-		}
-		return nil
+		// A write to --output that failed is an output error (exit 10), whatever the export says.
+		return finish(capfile.WrapError(format.ExportHeuristicFrequency(w, cfg.InputFile, cfg.CaptureSelection)))
 	}
 }

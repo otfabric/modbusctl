@@ -56,7 +56,7 @@ Modbus TCP, UDP, RTU and ASCII carry no authentication and no encryption: anyone
 
 ### Privileges
 
-- `discover --resolve-mac` uses raw sockets for ARP and may need elevated privileges. Prefer granting the specific capability (for example `CAP_NET_RAW` on Linux) over running `modbusctl` as root
+- `discover --resolve-mac` uses raw sockets for ARP and may need elevated privileges. Prefer granting the specific capability (for example `CAP_NET_RAW` on Linux) over running `modbusctl` as root. It waits at most 800 ms for the ARP reply of each device, and Ctrl-C ends the wait
 - Serial devices only need read/write access to the port (for example membership of the `dialout` group on Linux)
 
 ### Verifying Downloads

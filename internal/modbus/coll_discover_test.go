@@ -113,7 +113,7 @@ func TestCollDiscover_unresolvableMACKeepsDevice(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []types.DiscoverJson{{IP: "127.0.0.1", Port: port, Mac: "", Interface: "coll-no-such-if0"}}, out.Devices)
 
-	_, err = resolveMACAddress("127.0.0.1", "coll-no-such-if0")
+	_, err = resolveMACAddress(context.Background(), "127.0.0.1", "coll-no-such-if0")
 	require.Error(t, err)
 }
 

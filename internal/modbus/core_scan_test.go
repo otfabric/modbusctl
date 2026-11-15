@@ -651,6 +651,49 @@ func TestCoreScan_cancellation(t *testing.T) {
 		assert.Less(t, time.Since(start), time.Second)
 	})
 
+	// Without a delay (the default) there is no wait in which to notice the interrupt: the
+	// scan checks before every request, and exits 130 with no summary of unsent requests.
+	t.Run("between requests without a delay", func(t *testing.T) {
+		dev := coreScanDevice(coreRange{0, 9})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var n atomic.Int32
+		dev.OnRequest = func(mbtest.Request) mbtest.Action {
+			if n.Add(1) == 3 {
+				cancel()
+			}
+			return mbtest.Action{}
+		}
+		sum, err := ScanAndRecord(ctx, config.ScanConfig{
+			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 2000,
+			Algo: "safe", Delay: 0, OutputFile: coreCapturePath(t),
+		}, nil)
+		assert.Nil(t, sum)
+		require.ErrorIs(t, err, context.Canceled)
+		assert.LessOrEqual(t, dev.RequestCount(0), 4, "the scan stops at once")
+		e, ok := errs.As(WrapCollectError(err))
+		require.True(t, ok)
+		assert.Equal(t, errs.ExitInterrupted, errs.ExitCodeForKind(e.Kind))
+	})
+
+	// The interrupt cuts the last request short: that is no failed request of the device.
+	t.Run("while the last request waits for its answer", func(t *testing.T) {
+		dev := coreScanDevice(coreRange{0, 9})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		dev.OnRequest = func(mbtest.Request) mbtest.Action {
+			cancel()
+			return mbtest.Action{Drop: true}
+		}
+		sum, err := ScanAndRecord(ctx, config.ScanConfig{
+			DeviceConfig: coreTCP(t, dev), Timeout: coreTimeoutMS, Function: 3, StartAddress: 0, EndAddress: 9,
+			Algo: "linear", RetryOnTimeoutTransport: 1, Delay: 0, OutputFile: coreCapturePath(t),
+		}, nil)
+		assert.Nil(t, sum)
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, 1, dev.RequestCount(0), "the request is not retried")
+	})
+
 	// The timeout is retried after the configured delay; cancellation ends that wait.
 	t.Run("while waiting to retry", func(t *testing.T) {
 		dev := coreScanDevice(coreRange{0, 9})
