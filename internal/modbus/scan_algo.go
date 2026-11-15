@@ -126,10 +126,11 @@ func candidateCountsSafe(start, end uint16) []uint16 {
 	if start > end {
 		return nil
 	}
-	remaining := end - start + 1
+	// 32-bit arithmetic: the full range 0..65535 holds 65536 addresses, which wraps to 0 in 16 bits.
+	remaining := uint32(end) - uint32(start) + 1
 	var out []uint16
 	for _, size := range safeCandidateSizes {
-		if size <= remaining {
+		if uint32(size) <= remaining {
 			out = append(out, size)
 		}
 	}
