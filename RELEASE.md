@@ -1,5 +1,18 @@
 # modbusctl Releases
 
+## v3.7.7
+
+**Date:** 2026-11-15
+**Previous release:** v3.7.6
+
+No command or flag is added or changed.
+
+### Changed
+
+- Built on go-modbus v1.16.1 (was v1.16.0) and go-serial v0.4.1 (was v0.4.0): on Windows a serial write that times out returns an error together with the bytes written, where it returned a short count without one; on Linux, macOS and the BSDs a port path that is not a character device is refused when it is opened; reads wait correctly on OpenBSD (go-serial RELEASE.md, v0.4.1). This reaches the commands that use a serial line.
+
+---
+
 ## v3.7.6
 
 **Date:** 2026-11-14
