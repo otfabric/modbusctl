@@ -1,5 +1,28 @@
 # modbusctl Releases
 
+## v3.7.8
+
+**Date:** 2026-11-15
+**Previous release:** v3.7.7
+
+No command or flag is added or changed.
+
+### Fixed
+
+- `discover --resolve-mac` waits at most 800 ms for the ARP reply of each device it found. A device that has not answered by then is listed with an empty `mac`, as one whose MAC cannot be resolved is. Ctrl-C (SIGINT) or SIGTERM ends that wait at once, and `discover` writes the devices found until then.
+- `client scan` stops at Ctrl-C (SIGINT) or SIGTERM before it sends another request also at the default `--delay 0`, and exits `130` (`context_canceled`), as docs/exitcodes.md says. It no longer exits `7` with a summary that counts the requests it did not send as failed. A request that the interrupt cuts short is not retried and not counted.
+- `capture decode`, `extract`, `strings` and `frequencies` exit `10` (`output_file_write_failed`) when writing or closing the `--output` file fails, for example on a full disk: the file is incomplete. They exited `0` (`extract`: `3`, `capture_load_failed`). The file is written through a buffer.
+- docs/exitcodes.md says what an interrupted `discover` does, as before: it writes the devices found until then and exits `0`.
+
+### Tests
+
+- The ARP lookup of `discover` against a stand-in for the raw socket on every system: the time bound and cancellation under `testing/synctest`, and `discover` against a loopback device. On Linux also on a raw socket, when `MODBUSCTL_ARP_TEST_INTERFACE` names an interface where no host answers (CONTRIBUTING.md).
+- `client scan` interrupted at `--delay 0` between requests and while the last request waits for its answer.
+- The `--output` buffer with a write, flush or close that fails, and on Linux every capture command with `--output /dev/full`.
+- `FuzzReplayHandlers`: capture files through every handler of the replay server; an answer is the recorded response, with byte counts that match its length. Seeds in `internal/modbus/testdata/fuzz`.
+
+---
+
 ## v3.7.7
 
 **Date:** 2026-11-15

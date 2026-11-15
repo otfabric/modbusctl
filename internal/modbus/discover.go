@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/mdlayher/arp"
 	mb "github.com/otfabric/go-modbus"
@@ -93,7 +94,7 @@ func CollectDiscover(ctx context.Context, cfg config.DiscoverConfig, stderr io.W
 					}
 					mac := ""
 					if cfg.ResolveMAC {
-						mac, _ = resolveMACAddress(ip, cfg.NetworkInterface)
+						mac, _ = resolveMACAddress(ctx, ip, cfg.NetworkInterface)
 					}
 					mutex.Lock()
 					raw = append(raw, struct {
@@ -228,18 +229,32 @@ func incIP(ip net.IP) {
 	}
 }
 
-// resolveMACAddress tries to resolve the MAC address for the given IP using ARP.
-func resolveMACAddress(ip string, ifaceName string) (string, error) {
+// dialARP opens the ARP client of an interface on a raw socket. Tests replace it with a
+// client on a connection of their own.
+var dialARP = arp.Dial
+
+// resolveMACAddress tries to resolve the MAC address for the given IP using ARP. It waits at
+// most discoveryMACTimeout for the reply, and returns ctx's error as soon as ctx ends.
+func resolveMACAddress(ctx context.Context, ip string, ifaceName string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return "", err
 	}
 
-	client, err := arp.Dial(iface)
+	client, err := dialARP(iface)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = client.Close() }()
+	// Closing the socket ends a read that waits for the reply.
+	stop := context.AfterFunc(ctx, func() { _ = client.Close() })
+	defer stop()
+	if err := client.SetDeadline(time.Now().Add(discoveryMACTimeout)); err != nil {
+		return "", err
+	}
 
 	dstIP, err := netip.ParseAddr(ip)
 	if err != nil {
@@ -247,6 +262,9 @@ func resolveMACAddress(ip string, ifaceName string) (string, error) {
 	}
 	mac, err := client.Resolve(dstIP)
 	if err != nil {
+		if cerr := ctx.Err(); cerr != nil {
+			return "", cerr
+		}
 		return "", err
 	}
 
