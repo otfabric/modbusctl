@@ -1,5 +1,18 @@
 # modbusctl Releases
 
+## v3.7.10
+
+**Date:** 2026-11-16
+**Previous release:** v3.7.9
+
+No command or flag is added or changed.
+
+### Changed
+
+- Built on go-modbus v1.16.2 (was v1.16.1) and go-serial v0.5.0 (was v0.4.1) (go-modbus RELEASE.md, v1.16.2; go-serial RELEASE.md, v0.5.0).
+
+---
+
 ## v3.7.9
 
 **Date:** 2026-11-15
