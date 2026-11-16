@@ -1,5 +1,18 @@
 # modbusctl Releases
 
+## v3.7.11
+
+**Date:** 2026-11-16
+**Previous release:** v3.7.10
+
+No command or flag is added or changed.
+
+### Changed
+
+- Built on go-modbus v1.17.0 (was v1.16.2) (go-modbus RELEASE.md, v1.17.0).
+
+---
+
 ## v3.7.10
 
 **Date:** 2026-11-16
