@@ -1,5 +1,22 @@
 # modbusctl Releases
 
+## v3.7.12
+
+**Date:** 2026-11-23
+**Previous release:** v3.7.11
+
+No command or flag is added or changed.
+
+### Changed
+
+- Built on go-modbus v1.22.0 (was v1.17.0) (go-modbus RELEASE.md, v1.18.0..v1.22.0). For the tool this means:
+  - `client diagnostic` with `--data` of an odd number of bytes fails before anything is sent, with the same error and exit code as a failed FC08 request; it was sent. The same holds for an FC08 request of a `client record` plan.
+  - `client identify`: an FC43 response whose Read Device ID code is above the requested category, or is not 1 to 3, is a protocol error. A lower code, sent by a device that answers at its own level, is still accepted.
+  - `client record`: an FC12 response with a byte count above 70 is a protocol error; FC20 file records that ask for more than 245 response bytes (more than 121 registers in one record, or 2 + 2 x length summed over the records above 245) fail before anything is sent, where the plan allows up to 251; an FC43 request for one object needs a response with code 04 that carries exactly that object.
+  - `server static` and `server replay`: a request whose length does not match its function code is answered with exception 3 and the connection then closed, where it was closed without an answer; a request whose function code has the exception bit set (`0x80`..`0xFF`) is not answered and the connection kept, where it was answered with exception 1; FC08 with data of odd length is answered with exception 3. A recorded FC17 response with no data, a recorded FC12 response with more than 64 event bytes, and a recorded FC43 conformity level other than 0 (derive), 0x01..0x03 and 0x81..0x83 are answered with exception 4; FC43 objects above the recorded conformity level are not served.
+
+---
+
 ## v3.7.11
 
 **Date:** 2026-11-16
