@@ -3,6 +3,7 @@
 package plan
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,7 +73,7 @@ func TestParse_refused(t *testing.T) {
 		{`[{"function": 20}]`, "needs 1-35 file_records, got 0"},
 		{`[{"function": 20, "file_records": [{"file": 0, "record": 0, "length": 1}]}]`, "invalid file record"},
 		{`[{"function": 20, "file_records": [{"file": 1, "record": 10000, "length": 1}]}]`, "invalid file record"},
-		{`[{"function": 20, "file_records": [{"file": 1, "record": 0, "length": 125}]}]`, "at most 251 fit"},
+		{`[{"function": 20, "file_records": [{"file": 1, "record": 0, "length": 125}]}]`, "ask for 252 response bytes, at most 245 fit"},
 		{`[{"function": 43, "device_id_code": 5}]`, "device_id_code 5"},
 		{`[{"function": 3, "start_address": 1, "register_count": 126}]`, "invalid address block: start=1, count=126"},
 		{`[{"function": 1, "start_address": 1, "register_count": 2001}]`, "invalid address block: start=1, count=2001"},
@@ -87,6 +88,50 @@ func TestParse_refused(t *testing.T) {
 	}
 	_, err := Parse([]byte(`[{"start_address": 1, "register_count": 1}]`), 0)
 	require.ErrorContains(t, err, "function code 0 is not", "a block needs a default function")
+}
+
+// TestParse_fileRecordLimits checks the FC20 limits of the Modbus Application
+// Protocol Specification V1.1b3 section 6.14: request Byte Count and response
+// Resp. data Length 0x07 to 0xF5 (245). Every sub-response is 2 + 2*length
+// bytes, so a response has an even length: 244 is the largest one accepted
+// and 246 the smallest one refused.
+func TestParse_fileRecordLimits(t *testing.T) {
+	records := func(lengths ...int) string {
+		parts := make([]string, len(lengths))
+		for i, n := range lengths {
+			parts[i] = fmt.Sprintf(`{"file": 1, "record": %d, "length": %d}`, i, n)
+		}
+		return `[{"function": 20, "file_records": [` + strings.Join(parts, ", ") + `]}]`
+	}
+	ones := func(n int) []int {
+		l := make([]int, n)
+		for i := range l {
+			l[i] = 1
+		}
+		return l
+	}
+	for _, tc := range []struct {
+		name, plan, want string // want "" means accepted
+	}{
+		{"one record of 121 registers, 244 bytes", records(121), ""},
+		{"one record of 122 registers, 246 bytes", records(122), "blocks file entry 0: file records ask for 246 response bytes, at most 245 fit"},
+		{"two records, 244 bytes", records(60, 60), ""},
+		{"two records, 246 bytes", records(60, 61), "blocks file entry 0: file records ask for 246 response bytes, at most 245 fit"},
+		{"35 records, request byte count 245", records(ones(35)...), ""},
+		{"36 records, request byte count 252", records(ones(36)...), "blocks file entry 0: read file record needs 1-35 file_records, got 36"},
+		{"35 records, 244 bytes", records(append(ones(34), 53)...), ""},
+		{"35 records, 246 bytes", records(append(ones(34), 54)...), "blocks file entry 0: file records ask for 246 response bytes, at most 245 fit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reqs, err := Parse([]byte(tc.plan), 3)
+			if tc.want == "" {
+				require.NoError(t, err)
+				require.Len(t, reqs, 1)
+				return
+			}
+			require.EqualError(t, err, tc.want)
+		})
+	}
 }
 
 func TestRead(t *testing.T) {

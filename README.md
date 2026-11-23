@@ -843,7 +843,7 @@ The blocks file is a JSON array. An entry with only `start_address` and `registe
 | 1, 2, 3, 4 | `start_address`, `register_count` (1–2000 bits, 1–125 registers) |
 | 7, 11, 12, 17 | none |
 | 8 | `sub_function` (0x00, 0x02 or 0x0B–0x12: the ones that return data), `data` in hex (default `0000`) |
-| 20 | `file_records`: 1–35 of `{file, record, length}` |
+| 20 | `file_records`: 1–35 of `{file, record, length}` (file 1–65535, record 0–9999, length at least 1); the response, 2 + 2 x length summed over the records, must fit in 245 bytes (Modbus specification V1.1b3, 6.14: at most 121 registers in one record) |
 | 24 | `fifo_address` |
 | 43 | `device_id_code` (1 basic, default; 2 regular; 3 extended; 4 one object), `object_id` |
 

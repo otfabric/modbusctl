@@ -58,10 +58,15 @@ const Supported = "1, 2, 3, 4 (coils, discrete inputs, holding and input registe
 
 // Limits of the Modbus specification.
 const (
-	maxBits          = 2000
-	maxRegisters     = 125
-	maxFileRequests  = 35  // 7 bytes each in a 253-byte PDU
-	maxFileResponse  = 251 // sub-response bytes after FC and length
+	maxBits      = 2000
+	maxRegisters = 125
+	// FC20 Read File Record, Modbus Application Protocol Specification
+	// V1.1b3 section 6.14: the request Byte Count and the response Resp.
+	// data Length are one byte each, 0x07 to 0xF5. go-modbus enforces the
+	// same limit (its internal protocol.MaxFileByteCount, not exported).
+	maxFileByteCount = 0xF5                 // 245
+	maxFileRequests  = maxFileByteCount / 7 // 35 sub-requests of 7 bytes
+	maxFileResponse  = maxFileByteCount     // sum of 2 + 2*length over the sub-requests
 	maxFileRecordNum = 0x270F
 	maxDiagEcho      = 250
 )
