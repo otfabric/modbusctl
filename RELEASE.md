@@ -9,7 +9,8 @@ No command or flag is added or changed.
 
 ### Changed
 
-- Built on go-modbus v1.22.0 (was v1.17.0) (go-modbus RELEASE.md, v1.18.0..v1.22.0). For the tool this means:
+- Built on go-modbus v1.23.0 (was v1.17.0) (go-modbus RELEASE.md, v1.18.0..v1.23.0). For the tool this means:
+  - Over `rtu://`, `rtuovertcp://` and `rtuoverudp://`, an FC43 response (`client identify`, an FC43 request of a `client record` plan) is read by its structure and no longer cut short, with a `bad crc` error, when the tool runs late on a loaded host. An FC08 response over these framings (`client diagnostic`, FC08 plan requests) can take up to one t3.5 longer to complete.
   - `client diagnostic` with `--data` of an odd number of bytes fails before anything is sent, with the same error and exit code as a failed FC08 request; it was sent. The same holds for an FC08 request of a `client record` plan.
   - `client identify`: an FC43 response whose Read Device ID code is above the requested category, or is not 1 to 3, is a protocol error. A lower code, sent by a device that answers at its own level, is still accepted.
   - `client record`: an FC12 response with a byte count above 70 is a protocol error; FC20 file records that ask for more than 245 response bytes (more than 121 registers in one record, or 2 + 2 x length summed over the records above 245) fail before anything is sent, where the plan allows up to 251; an FC43 request for one object needs a response with code 04 that carries exactly that object.
